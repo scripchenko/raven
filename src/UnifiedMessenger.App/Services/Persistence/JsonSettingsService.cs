@@ -50,8 +50,8 @@ public sealed class JsonSettingsService : ISettingsService
                 throw new InvalidDataException("The settings document is empty or has an invalid schema version.");
             }
 
-            Normalize(settings);
-            return new SettingsLoadResult(settings);
+            bool wasMigrated = Normalize(settings);
+            return new SettingsLoadResult(settings, WasMigrated: wasMigrated);
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or NotSupportedException)
         {
@@ -67,7 +67,7 @@ public sealed class JsonSettingsService : ISettingsService
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        Normalize(settings);
+        _ = Normalize(settings);
 
         string directory = Path.GetDirectoryName(_settingsFilePath)
             ?? throw new InvalidOperationException("The settings path must include a directory.");
@@ -113,20 +113,59 @@ public sealed class JsonSettingsService : ISettingsService
         return options;
     }
 
-    private static void Normalize(AppSettings settings)
+    private static bool Normalize(AppSettings settings)
     {
+        bool changed = settings.SchemaVersion != AppSettings.CurrentSchemaVersion;
         settings.SchemaVersion = AppSettings.CurrentSchemaVersion;
-        settings.Language = string.IsNullOrWhiteSpace(settings.Language) ? "ru-RU" : settings.Language.Trim();
-        settings.SuspendAfterMinutes = Math.Clamp(settings.SuspendAfterMinutes, 1, 1440);
-        settings.Services ??= [];
-        settings.Notifications ??= new NotificationSettings();
-        settings.Window ??= new WindowSettings();
+
+        string normalizedLanguage = string.IsNullOrWhiteSpace(settings.Language) ? "ru-RU" : settings.Language.Trim();
+        changed |= !string.Equals(settings.Language, normalizedLanguage, StringComparison.Ordinal);
+        settings.Language = normalizedLanguage;
+
+        int normalizedSuspendDelay = Math.Clamp(settings.SuspendAfterMinutes, 1, 1440);
+        changed |= settings.SuspendAfterMinutes != normalizedSuspendDelay;
+        settings.SuspendAfterMinutes = normalizedSuspendDelay;
+
+        if (settings.Services is null)
+        {
+            settings.Services = [];
+            changed = true;
+        }
+
+        if (settings.PendingProfileDeletions is null)
+        {
+            settings.PendingProfileDeletions = [];
+            changed = true;
+        }
+
+        if (settings.Notifications is null)
+        {
+            settings.Notifications = new NotificationSettings();
+            changed = true;
+        }
+
+        if (settings.Window is null)
+        {
+            settings.Window = new WindowSettings();
+            changed = true;
+        }
 
         foreach (ServiceInstance service in settings.Services)
         {
-            service.DisplayName ??= string.Empty;
-            service.ProfileName ??= string.Empty;
+            if (service.DisplayName is null)
+            {
+                service.DisplayName = string.Empty;
+                changed = true;
+            }
+
+            if (service.ProfileName is null)
+            {
+                service.ProfileName = string.Empty;
+                changed = true;
+            }
         }
+
+        return changed;
     }
 
     private string? MoveCorruptedFileAside()

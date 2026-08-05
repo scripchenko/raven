@@ -19,7 +19,7 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="72" />
+            <ColumnDefinition Width="84" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -40,7 +40,8 @@
                                Text="U" />
                 </Border>
 
-                <ListBox Grid.Row="1"
+                <ListBox x:Name="AccountsList"
+                         Grid.Row="1"
                          Margin="0,14"
                          ItemsSource="{Binding Services}"
                          SelectedItem="{Binding SelectedService}"
@@ -72,27 +73,29 @@
                                     Background="{DynamicResource SidebarHoverBrush}"
                                     CornerRadius="14"
                                     ToolTip="{Binding DisplayName}">
-                                <Grid>
-                                    <TextBlock HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"
-                                               FontWeight="SemiBold"
-                                               Foreground="White"
-                                               Text="{Binding ServiceType, Converter={StaticResource ServiceGlyphConverter}}" />
-                                    <Border Width="10"
-                                            Height="10"
-                                            Margin="0,0,-2,-2"
-                                            HorizontalAlignment="Right"
-                                            VerticalAlignment="Bottom"
-                                            Background="#FFFF5D68"
-                                            BorderBrush="{DynamicResource SidebarBrush}"
-                                            BorderThickness="2"
-                                            CornerRadius="5"
-                                            Visibility="{Binding HasUnreadActivity, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                </Grid>
+                                <Border.ContextMenu>
+                                    <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                        <MenuItem Header="Переименовать" CommandParameter="{Binding}" Click="RenameAccount_Click" />
+                                        <MenuItem Header="Включить / отключить" CommandParameter="{Binding}" Click="ToggleAccount_Click" />
+                                        <Separator />
+                                        <MenuItem Header="Переместить выше" CommandParameter="{Binding}" Click="MoveAccountUp_Click" />
+                                        <MenuItem Header="Переместить ниже" CommandParameter="{Binding}" Click="MoveAccountDown_Click" />
+                                        <Separator />
+                                        <MenuItem Header="Удалить…" CommandParameter="{Binding}" Click="DeleteAccount_Click" />
+                                    </ContextMenu>
+                                </Border.ContextMenu>
+                                <TextBlock HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontWeight="SemiBold"
+                                           Foreground="White"
+                                           Text="{Binding ServiceType, Converter={StaticResource ServiceGlyphConverter}}" />
                             </Border>
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                                     <Setter TargetName="ServiceTile" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                    <Setter TargetName="ServiceTile" Property="Opacity" Value="0.42" />
                                 </DataTrigger>
                             </DataTemplate.Triggers>
                         </DataTemplate>
@@ -100,9 +103,9 @@
                 </ListBox>
 
                 <StackPanel Grid.Row="2">
-                    <Button IsEnabled="False"
-                            Style="{StaticResource SidebarActionButtonStyle}"
-                            ToolTip="Добавление сервисов появится на этапе 3"
+                    <Button Style="{StaticResource SidebarActionButtonStyle}"
+                            ToolTip="Добавить сервис"
+                            Click="AddService_Click"
                             Content="+" />
                     <Button IsEnabled="False"
                             Style="{StaticResource SidebarActionButtonStyle}"
@@ -165,7 +168,7 @@
                             Background="{DynamicResource AccentSoftBrush}"
                             CornerRadius="10"
                             ToolTip="{Binding WebViewRuntimeVersion, StringFormat=WebView2 Runtime {0}}">
-                        <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="Telegram · WebView2" />
+                        <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="{Binding SelectedServiceLabel}" />
                     </Border>
                 </Grid>
             </Border>
@@ -186,7 +189,7 @@
 
                 <Grid x:Name="WebViewContainer"
                       Background="White"
-                      Visibility="{Binding HasSelectedService, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                      Visibility="{Binding HasActiveWebView, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                 <Border Background="#EFFFFFFF"
                         Visibility="{Binding IsWebViewInitializing, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -194,7 +197,34 @@
                         <ProgressBar Width="220" Height="4" IsIndeterminate="True" />
                         <TextBlock Margin="0,18,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Подготовка защищённого профиля Telegram…" />
+                                   Text="Подготовка отдельного защищённого профиля WebView2…" />
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="36"
+                        Padding="38"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="1"
+                        CornerRadius="20"
+                        Visibility="{Binding IsSelectedServiceDisabled, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel MaxWidth="560">
+                        <TextBlock HorizontalAlignment="Center"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Text="Аккаунт отключён" />
+                        <TextBlock Margin="0,12,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Профиль и авторизация сохранены. Включите аккаунт, чтобы продолжить с тем же профилем."
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                        <Button Margin="0,24,0,0"
+                                HorizontalAlignment="Center"
+                                Click="EnableSelectedAccount_Click"
+                                Content="Включить"
+                                Style="{StaticResource PrimaryButtonStyle}" />
                     </StackPanel>
                 </Border>
 

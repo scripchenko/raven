@@ -1,8 +1,13 @@
+using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
+using WpfMenuItem = System.Windows.Controls.MenuItem;
+using WpfMessageBox = System.Windows.MessageBox;
+using WpfPanel = System.Windows.Controls.Panel;
 using WpfWebView2 = Microsoft.Web.WebView2.Wpf.WebView2;
 
 namespace UnifiedMessenger.App.Views;
@@ -14,8 +19,8 @@ public partial class MainWindow : Window
     private readonly IWebViewRuntimeService _webViewRuntimeService;
     private readonly IExternalBrowserService _externalBrowserService;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
-    private WpfWebView2? _telegramWebView;
-    private bool _isRecreatingSession;
+    private CancellationTokenSource? _selectionCancellation;
+    private bool _isRuntimeAvailable;
 
     public MainWindow(
         MainWindowViewModel viewModel,
@@ -32,18 +37,22 @@ public partial class MainWindow : Window
         InitializeComponent();
         ApplySavedWindowSettings(viewModel.WindowSettings);
         Loaded += OnLoaded;
+        _viewModel.SelectedServiceChanged += OnSelectedServiceChanged;
         _webViewSessionManager.SessionRecreationRequested += OnSessionRecreationRequested;
     }
 
-    protected override void OnClosed(EventArgs e)
+    protected override void OnClosed(EventArgs eventArgs)
     {
         Loaded -= OnLoaded;
+        _viewModel.SelectedServiceChanged -= OnSelectedServiceChanged;
         _webViewSessionManager.SessionRecreationRequested -= OnSessionRecreationRequested;
+        _selectionCancellation?.Cancel();
+        _selectionCancellation?.Dispose();
+        _selectionCancellation = null;
         _lifetimeCancellation.Cancel();
 
         WebViewContainer.Children.Clear();
-        _webViewSessionManager.ReleaseSession();
-        _telegramWebView = null;
+        _webViewSessionManager.ReleaseAllSessions();
         _lifetimeCancellation.Dispose();
 
         Rect bounds = WindowState == WindowState.Maximized ? RestoreBounds : new Rect(Left, Top, ActualWidth, ActualHeight);
@@ -53,10 +62,10 @@ public partial class MainWindow : Window
             bounds.Left,
             bounds.Top,
             WindowState == WindowState.Maximized);
-        base.OnClosed(e);
+        base.OnClosed(eventArgs);
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs eventArgs)
     {
         Loaded -= OnLoaded;
 
@@ -68,49 +77,261 @@ public partial class MainWindow : Window
             return;
         }
 
-        await CreateTelegramSessionAsync();
+        _isRuntimeAvailable = true;
+        await ShowSelectedServiceAsync();
     }
 
-    private async void OnSessionRecreationRequested(object? sender, EventArgs e)
+    private async void OnSelectedServiceChanged(object? sender, EventArgs eventArgs)
     {
-        await Task.Yield();
-        await CreateTelegramSessionAsync();
+        try
+        {
+            await _viewModel.PersistSelectionAsync();
+            await ShowSelectedServiceAsync();
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось переключить аккаунт", exception);
+        }
     }
 
-    private async Task CreateTelegramSessionAsync()
+    private async void OnSessionRecreationRequested(
+        object? sender,
+        WebViewSessionRecreationRequestedEventArgs eventArgs)
     {
-        if (_isRecreatingSession
-            || _lifetimeCancellation.IsCancellationRequested
-            || _viewModel.SelectedService is not ServiceInstance telegram)
+        if (_viewModel.SelectedService?.Id != eventArgs.ServiceInstanceId)
         {
             return;
         }
 
-        _isRecreatingSession = true;
+        await ShowSelectedServiceAsync(recreate: true);
+    }
+
+    private async Task ShowSelectedServiceAsync(bool recreate = false)
+    {
+        if (!_isRuntimeAvailable || _lifetimeCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _selectionCancellation?.Cancel();
+        _selectionCancellation?.Dispose();
+        CancellationTokenSource selectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token);
+        _selectionCancellation = selectionCancellation;
+        CancellationToken cancellationToken = selectionCancellation.Token;
+
+        ServiceInstance? service = _viewModel.SelectedService;
+        WebViewContainer.Children.Clear();
+        _webViewSessionManager.DeactivateSession();
+
+        if (service is null || !service.IsEnabled)
+        {
+            CompleteSelectionOperation(selectionCancellation);
+            return;
+        }
+
         try
         {
-            WebViewContainer.Children.Clear();
-            _webViewSessionManager.ReleaseSession();
-            _telegramWebView = _webViewSessionManager.CreateWebView(telegram);
-            WebViewContainer.Children.Add(_telegramWebView);
+            if (recreate)
+            {
+                _webViewSessionManager.ReleaseSession(service.Id);
+            }
 
-            await _webViewSessionManager.InitializeAsync(
-                _telegramWebView,
-                telegram,
-                _lifetimeCancellation.Token);
+            WpfWebView2 webView = _webViewSessionManager.CreateWebView(service);
+            if (webView.Parent is WpfPanel previousParent)
+            {
+                previousParent.Children.Remove(webView);
+            }
+
+            WebViewContainer.Children.Add(webView);
+            await _webViewSessionManager.InitializeAsync(webView, service, cancellationToken);
         }
         catch (WebView2RuntimeNotFoundException)
         {
             ShowMissingRuntimeDialog();
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // The window is closing while WebView2 is initializing.
+            // Another account was selected or the window is closing.
         }
         finally
         {
-            _isRecreatingSession = false;
+            CompleteSelectionOperation(selectionCancellation);
         }
+    }
+
+    private async void AddService_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        AddServiceWindow dialog = new(_viewModel.AvailableServices) { Owner = this };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await _viewModel.AddServiceAsync(dialog.SelectedServiceType, dialog.AccountName);
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось добавить сервис", exception);
+        }
+    }
+
+    private async void RenameAccount_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        if (!TryGetMenuService(sender, out ServiceInstance service))
+        {
+            return;
+        }
+
+        RenameAccountWindow dialog = new(service.DisplayName) { Owner = this };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await _viewModel.RenameServiceAsync(service, dialog.AccountName);
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось переименовать аккаунт", exception);
+        }
+    }
+
+    private async void ToggleAccount_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        if (TryGetMenuService(sender, out ServiceInstance service))
+        {
+            await SetAccountEnabledAsync(service, !service.IsEnabled);
+        }
+    }
+
+    private async void EnableSelectedAccount_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        if (_viewModel.SelectedService is ServiceInstance service)
+        {
+            await SetAccountEnabledAsync(service, isEnabled: true);
+        }
+    }
+
+    private async Task SetAccountEnabledAsync(ServiceInstance service, bool isEnabled)
+    {
+        try
+        {
+            if (!isEnabled)
+            {
+                if (_viewModel.SelectedService?.Id == service.Id)
+                {
+                    WebViewContainer.Children.Clear();
+                }
+
+                _webViewSessionManager.ReleaseSession(service.Id);
+            }
+
+            await _viewModel.SetServiceEnabledAsync(service, isEnabled);
+            if (_viewModel.SelectedService?.Id == service.Id)
+            {
+                await ShowSelectedServiceAsync();
+            }
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError(isEnabled ? "Не удалось включить аккаунт" : "Не удалось отключить аккаунт", exception);
+        }
+    }
+
+    private async void DeleteAccount_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        if (!TryGetMenuService(sender, out ServiceInstance service))
+        {
+            return;
+        }
+
+        MessageBoxResult confirmation = WpfMessageBox.Show(
+            this,
+            $"Удалить аккаунт «{service.DisplayName}»?\n\nДанные только этого профиля будут очищены. При повторном добавлении потребуется новая авторизация.",
+            "Удаление аккаунта",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_viewModel.SelectedService?.Id == service.Id)
+            {
+                WebViewContainer.Children.Clear();
+            }
+
+            bool profileWasDeleted = await _webViewSessionManager.ClearProfileAsync(
+                service,
+                _lifetimeCancellation.Token);
+            await _viewModel.RemoveServiceAsync(service, profileWasDeleted);
+
+            if (!profileWasDeleted)
+            {
+                WpfMessageBox.Show(
+                    this,
+                    "Профиль занят процессом WebView2 и будет безопасно удалён при следующем запуске.",
+                    "Удаление отложено",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            // The application is closing.
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось удалить аккаунт", exception);
+        }
+    }
+
+    private async void MoveAccountUp_Click(object sender, RoutedEventArgs eventArgs) =>
+        await MoveAccountAsync(sender, -1);
+
+    private async void MoveAccountDown_Click(object sender, RoutedEventArgs eventArgs) =>
+        await MoveAccountAsync(sender, 1);
+
+    private async Task MoveAccountAsync(object sender, int offset)
+    {
+        if (!TryGetMenuService(sender, out ServiceInstance service))
+        {
+            return;
+        }
+
+        try
+        {
+            await _viewModel.MoveServiceAsync(service, offset);
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось изменить порядок аккаунтов", exception);
+        }
+    }
+
+    private static bool TryGetMenuService(object sender, out ServiceInstance service)
+    {
+        service = (sender as WpfMenuItem)?.CommandParameter as ServiceInstance ?? null!;
+        return service is not null;
+    }
+
+    private void CompleteSelectionOperation(CancellationTokenSource selectionCancellation)
+    {
+        if (!ReferenceEquals(_selectionCancellation, selectionCancellation))
+        {
+            return;
+        }
+
+        _selectionCancellation = null;
+        selectionCancellation.Dispose();
     }
 
     private void ShowMissingRuntimeDialog()
@@ -120,7 +341,7 @@ public partial class MainWindow : Window
 
         if (openInstallerPage && !_externalBrowserService.TryOpen(_webViewRuntimeService.InstallerPageUri))
         {
-            System.Windows.MessageBox.Show(
+            WpfMessageBox.Show(
                 this,
                 "Не удалось открыть официальную страницу WebView2 Runtime в системном браузере.",
                 "Не удалось открыть браузер",
@@ -130,6 +351,21 @@ public partial class MainWindow : Window
 
         System.Windows.Application.Current.Shutdown();
     }
+
+    private void ShowOperationError(string title, Exception exception) =>
+        WpfMessageBox.Show(
+            this,
+            $"{exception.Message}",
+            title,
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+
+    private static bool IsRecoverableOperationException(Exception exception) =>
+        exception is IOException
+            or UnauthorizedAccessException
+            or InvalidOperationException
+            or ArgumentException
+            or System.Runtime.InteropServices.COMException;
 
     private void ApplySavedWindowSettings(WindowSettings settings)
     {

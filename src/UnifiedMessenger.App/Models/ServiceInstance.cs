@@ -1,15 +1,36 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+
 namespace UnifiedMessenger.App.Models;
 
-public sealed class ServiceInstance
+public sealed partial class ServiceInstance : ObservableObject
 {
-    public Guid Id { get; set; }
-    public ServiceType ServiceType { get; set; }
-    public string DisplayName { get; set; } = string.Empty;
-    public string? StartUrl { get; set; }
-    public string ProfileName { get; set; } = string.Empty;
-    public bool IsEnabled { get; set; } = true;
-    public int SortOrder { get; set; }
-    public int? UnreadCount { get; set; }
-    public bool HasUnreadActivity { get; set; }
-    public DateTimeOffset? LastOpenedAt { get; set; }
+    [ObservableProperty]
+    private Guid _id;
+
+    [ObservableProperty]
+    private ServiceType _serviceType;
+
+    [ObservableProperty]
+    private string _displayName = string.Empty;
+
+    [ObservableProperty]
+    private string? _startUrl;
+
+    [ObservableProperty]
+    private string _profileName = string.Empty;
+
+    [ObservableProperty]
+    private bool _isEnabled = true;
+
+    [ObservableProperty]
+    private int _sortOrder;
+
+    [ObservableProperty]
+    private int? _unreadCount;
+
+    [ObservableProperty]
+    private bool _hasUnreadActivity;
+
+    [ObservableProperty]
+    private DateTimeOffset? _lastOpenedAt;
 }

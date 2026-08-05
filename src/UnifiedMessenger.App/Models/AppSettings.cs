@@ -2,7 +2,7 @@ namespace UnifiedMessenger.App.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public AppTheme Theme { get; set; } = AppTheme.System;
@@ -17,6 +17,7 @@ public sealed class AppSettings
     public NotificationSettings Notifications { get; set; } = new();
     public WindowSettings Window { get; set; } = new();
     public List<ServiceInstance> Services { get; set; } = [];
+    public List<string> PendingProfileDeletions { get; set; } = [];
 
     public static AppSettings CreateDefault() => new();
 }
