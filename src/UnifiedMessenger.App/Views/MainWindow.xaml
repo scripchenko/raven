@@ -119,26 +119,58 @@
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0"
-                    Padding="28,0"
+                    Padding="20,0"
                     Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource DividerBrush}"
                     BorderThickness="0,0,0,1">
-                <DockPanel LastChildFill="True">
-                    <Border DockPanel.Dock="Right"
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Orientation="Horizontal">
+                        <Button Command="{Binding GoBackCommand}"
+                                Content="←"
+                                Style="{StaticResource ToolbarButtonStyle}"
+                                ToolTip="Назад" />
+                        <Button Command="{Binding GoForwardCommand}"
+                                Content="→"
+                                Style="{StaticResource ToolbarButtonStyle}"
+                                ToolTip="Вперёд" />
+                        <Button Command="{Binding ReloadCommand}"
+                                Content="↻"
+                                Style="{StaticResource ToolbarButtonStyle}"
+                                ToolTip="Обновить" />
+                        <Button Command="{Binding NavigateHomeCommand}"
+                                Content="⌂"
+                                Style="{StaticResource ToolbarButtonStyle}"
+                                ToolTip="Домой" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Margin="18,0" VerticalAlignment="Center">
+                        <TextBlock FontSize="17"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding SelectedService.DisplayName, TargetNullValue=UnifiedMessenger}" />
+                        <ProgressBar Height="2"
+                                     Margin="0,6,0,0"
+                                     IsIndeterminate="True"
+                                     Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
+
+                    <Border Grid.Column="2"
                             Padding="10,5"
                             VerticalAlignment="Center"
                             Background="{DynamicResource AccentSoftBrush}"
-                            CornerRadius="10">
-                        <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="Каркас" />
+                            CornerRadius="10"
+                            ToolTip="{Binding WebViewRuntimeVersion, StringFormat=WebView2 Runtime {0}}">
+                        <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="Telegram · WebView2" />
                     </Border>
-                    <TextBlock VerticalAlignment="Center"
-                               FontSize="18"
-                               FontWeight="SemiBold"
-                               Text="{Binding SelectedService.DisplayName, TargetNullValue=UnifiedMessenger}" />
-                </DockPanel>
+                </Grid>
             </Border>
 
-            <Grid Grid.Row="1">
+            <Grid Grid.Row="1" Background="White">
                 <views:WelcomeView>
                     <views:WelcomeView.Style>
                         <Style TargetType="views:WelcomeView">
@@ -152,29 +184,50 @@
                     </views:WelcomeView.Style>
                 </views:WelcomeView>
 
-                <Border Margin="36"
-                        Padding="36"
-                        Background="{DynamicResource SurfaceBrush}"
-                        CornerRadius="20">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Visibility" Value="Visible" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedService}" Value="{x:Null}">
-                                    <Setter Property="Visibility" Value="Collapsed" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
+                <Grid x:Name="WebViewContainer"
+                      Background="White"
+                      Visibility="{Binding HasSelectedService, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                <Border Background="#EFFFFFFF"
+                        Visibility="{Binding IsWebViewInitializing, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <ProgressBar Width="220" Height="4" IsIndeterminate="True" />
+                        <TextBlock Margin="0,18,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Подготовка защищённого профиля Telegram…" />
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="36"
+                        Padding="38"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="1"
+                        CornerRadius="20"
+                        Visibility="{Binding HasWebViewError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel MaxWidth="560">
                         <TextBlock HorizontalAlignment="Center"
                                    FontSize="24"
                                    FontWeight="SemiBold"
-                                   Text="{Binding SelectedService.DisplayName}" />
-                        <TextBlock Margin="0,10,0,0"
+                                   Text="{Binding WebViewErrorTitle}" />
+                        <TextBlock Margin="0,12,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="WebView2 не создаётся на этапе 1."
-                                   TextAlignment="Center" />
+                                   Text="{Binding WebViewErrorMessage}"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0"
+                                   HorizontalAlignment="Center"
+                                   FontFamily="Consolas"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="{Binding WebViewErrorCode}" />
+                        <Button Margin="0,24,0,0"
+                                HorizontalAlignment="Center"
+                                Command="{Binding RetryCommand}"
+                                Content="Повторить"
+                                Style="{StaticResource PrimaryButtonStyle}" />
                     </StackPanel>
                 </Border>
             </Grid>

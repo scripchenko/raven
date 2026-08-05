@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using UnifiedMessenger.App.Services;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
+using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
 using UnifiedMessenger.App.Views;
 
@@ -26,6 +27,12 @@ public partial class App : System.Windows.Application
             _mainWindowViewModel = _serviceProvider.GetRequiredService<MainWindowViewModel>();
 
             SettingsLoadResult loadResult = await _settingsService.LoadAsync();
+            TelegramServiceProvisioner provisioner = _serviceProvider.GetRequiredService<TelegramServiceProvisioner>();
+            if (provisioner.EnsureTelegramInstance(loadResult.Settings))
+            {
+                await _settingsService.SaveAsync(loadResult.Settings);
+            }
+
             _mainWindowViewModel.Initialize(loadResult.Settings);
 
             MainWindow window = _serviceProvider.GetRequiredService<MainWindow>();
@@ -80,6 +87,10 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ISettingsService, JsonSettingsService>();
         services.AddSingleton<IBuiltInServiceCatalog, BuiltInServiceCatalog>();
         services.AddSingleton<NavigationPolicy>();
+        services.AddSingleton<TelegramServiceProvisioner>();
+        services.AddSingleton<IWebViewRuntimeService, WebViewRuntimeService>();
+        services.AddSingleton<IExternalBrowserService, ExternalBrowserService>();
+        services.AddSingleton<IWebViewSessionManager, WebViewSessionManager>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MainWindow>();
 

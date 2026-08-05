@@ -38,7 +38,7 @@
                     <TextBlock MaxWidth="620"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="Лёгкое единое окно для мессенджеров и почты. Каркас приложения готов; подключение первого веб-сервиса будет выполнено на следующем этапе."
+                               Text="Лёгкое единое окно для мессенджеров и почты. На этапе 2 подключён один официальный Telegram WebView2 с отдельным сохраняемым профилем."
                                TextAlignment="Center"
                                TextWrapping="Wrap" />
 
@@ -83,7 +83,7 @@
                             Background="{DynamicResource AccentSoftBrush}"
                             CornerRadius="12">
                         <TextBlock Foreground="{DynamicResource TextPrimaryBrush}"
-                                   Text="Этап 1 · интерфейс, модели, настройки и тесты"
+                                   Text="Этап 2 · Telegram, навигация и обработка ошибок"
                                    TextAlignment="Center" />
                     </Border>
                 </StackPanel>
