@@ -1,0 +1,47 @@
+# Build output and IDE state
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+**/TestResults/
+**/artifacts/
+**/publish/
+.tools/
+.dotnet/
+dotnet-sdk*/
+temp-sdk/
+*.dmp
+
+# Credentials, private keys, OAuth data and local environment files
+credentials.json
+credentials.*.json
+!credentials.example.json
+client_secret*.json
+**/tokens/
+*.token
+*.tokens
+.env
+.env.*
+!.env.example
+secrets.json
+appsettings.*.local.json
+*.key
+*.pem
+*.pfx
+*.p12
+*.snk
+*.jks
+
+# Local application data, browser state, cookies and logs
+**/settings.json
+**/settings.local.json
+*.user.config
+**/Logs/
+*.log
+**/WebView2/
+**/User Data/
+**/Cookies
+**/Cookies-*
+**/Network/Cookies
