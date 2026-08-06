@@ -91,6 +91,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IWebViewRuntimeService, WebViewRuntimeService>();
         services.AddSingleton<IExternalBrowserService, ExternalBrowserService>();
         services.AddSingleton<WebNavigationService>();
+        services.AddSingleton<WebNewWindowNavigationService>();
         services.AddSingleton<IWebViewProfileCleaner, WebViewProfileCleaner>();
         services.AddSingleton<IWebViewSessionManager, WebViewSessionManager>();
         services.AddSingleton<MainWindowViewModel>();

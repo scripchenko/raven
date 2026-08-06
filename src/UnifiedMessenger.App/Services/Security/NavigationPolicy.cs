@@ -15,10 +15,11 @@ public sealed class NavigationPolicy(IBuiltInServiceCatalog serviceCatalog)
         }
 
         return serviceCatalog.Get(serviceType).AllowedHosts.Any(
-            allowedHost => IsHostOrSubdomain(target.IdnHost, allowedHost));
+            allowedHost => IsAllowedHost(target.IdnHost, allowedHost));
     }
 
-    private static bool IsHostOrSubdomain(string host, string allowedHost) =>
-        host.Equals(allowedHost, StringComparison.OrdinalIgnoreCase)
-        || host.EndsWith($".{allowedHost}", StringComparison.OrdinalIgnoreCase);
+    private static bool IsAllowedHost(string host, AllowedHostRule allowedHost) =>
+        host.Equals(allowedHost.Host, StringComparison.OrdinalIgnoreCase)
+        || allowedHost.MatchMode is HostMatchMode.ExactOrSubdomain
+            && host.EndsWith($".{allowedHost.Host}", StringComparison.OrdinalIgnoreCase);
 }

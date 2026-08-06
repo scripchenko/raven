@@ -6,4 +6,12 @@ public sealed record ServiceDefinition(
     string Glyph,
     Uri? StartUri,
     bool IsWebViewService,
-    IReadOnlySet<string> AllowedHosts);
+    IReadOnlyList<AllowedHostRule> AllowedHosts);
+
+public sealed record AllowedHostRule(string Host, HostMatchMode MatchMode);
+
+public enum HostMatchMode
+{
+    ExactOrSubdomain,
+    ExactOnly
+}

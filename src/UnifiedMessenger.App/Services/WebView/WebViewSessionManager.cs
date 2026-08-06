@@ -13,6 +13,7 @@ public sealed class WebViewSessionManager(
     IBuiltInServiceCatalog serviceCatalog,
     NavigationPolicy navigationPolicy,
     WebNavigationService webNavigationService,
+    WebNewWindowNavigationService newWindowNavigationService,
     IWebViewProfileCleaner profileCleaner) : IWebViewSessionManager
 {
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
@@ -383,12 +384,10 @@ public sealed class WebViewSessionManager(
             return;
         }
 
-        WebNavigationDisposition disposition = webNavigationService.Route(session.ServiceInstance.ServiceType, target);
-        if (disposition is WebNavigationDisposition.Internal)
-        {
-            session.WebView.CoreWebView2.Navigate(target.AbsoluteUri);
-            return;
-        }
+        WebNavigationDisposition disposition = newWindowNavigationService.Route(
+            session.ServiceInstance,
+            target,
+            internalTarget => session.WebView.CoreWebView2.Navigate(internalTarget.AbsoluteUri));
 
         if (disposition is WebNavigationDisposition.Blocked)
         {
