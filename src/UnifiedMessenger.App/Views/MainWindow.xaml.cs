@@ -17,6 +17,7 @@ namespace UnifiedMessenger.App.Views;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
+    private readonly SettingsViewModel _settingsViewModel;
     private readonly IWebViewSessionManager _webViewSessionManager;
     private readonly IWebViewRuntimeService _webViewRuntimeService;
     private readonly IExternalBrowserService _externalBrowserService;
@@ -30,6 +31,7 @@ public partial class MainWindow : Window
 
     public MainWindow(
         MainWindowViewModel viewModel,
+        SettingsViewModel settingsViewModel,
         IWebViewSessionManager webViewSessionManager,
         IWebViewRuntimeService webViewRuntimeService,
         IExternalBrowserService externalBrowserService,
@@ -39,6 +41,7 @@ public partial class MainWindow : Window
         ITaskbarActivityIndicator taskbarActivityIndicator)
     {
         _viewModel = viewModel;
+        _settingsViewModel = settingsViewModel;
         _webViewSessionManager = webViewSessionManager;
         _webViewRuntimeService = webViewRuntimeService;
         _externalBrowserService = externalBrowserService;
@@ -49,15 +52,20 @@ public partial class MainWindow : Window
         DataContext = viewModel;
 
         InitializeComponent();
+        SettingsContent.DataContext = settingsViewModel;
         _windowActivationService.Attach(
             this,
-            () => _viewModel.SelectedService?.Id,
+            () => _viewModel.IsSettingsOpen ? null : _viewModel.SelectedService?.Id,
             _viewModel.SelectService);
         _taskbarActivityIndicator.Attach(this);
         ApplySavedWindowSettings(viewModel.WindowSettings);
         Loaded += OnLoaded;
         Activated += OnActivated;
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.SelectedServiceChanged += OnSelectedServiceChanged;
+        _settingsViewModel.RenameAccountRequested += OnSettingsRenameAccountRequested;
+        _settingsViewModel.AccountEnabledChangeRequested += OnSettingsAccountEnabledChangeRequested;
+        _settingsViewModel.DeleteAccountRequested += OnSettingsDeleteAccountRequested;
         _webViewSessionManager.SessionRecreationRequested += OnSessionRecreationRequested;
     }
 
@@ -65,7 +73,11 @@ public partial class MainWindow : Window
     {
         Loaded -= OnLoaded;
         Activated -= OnActivated;
+        _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.SelectedServiceChanged -= OnSelectedServiceChanged;
+        _settingsViewModel.RenameAccountRequested -= OnSettingsRenameAccountRequested;
+        _settingsViewModel.AccountEnabledChangeRequested -= OnSettingsAccountEnabledChangeRequested;
+        _settingsViewModel.DeleteAccountRequested -= OnSettingsDeleteAccountRequested;
         _webViewSessionManager.SessionRecreationRequested -= OnSessionRecreationRequested;
         _selectionCancellation?.Cancel();
         _selectionCancellation?.Dispose();
@@ -96,6 +108,11 @@ public partial class MainWindow : Window
             eventArgs.Cancel = true;
             Hide();
             _ = ShowTrayHintOnceAsync();
+        }
+        else if (_exitCoordinator.ShouldRequestExitFromWindowClose(_viewModel.CloseToTray, shutdownStarted))
+        {
+            eventArgs.Cancel = true;
+            _exitCoordinator.RequestExit();
         }
 
         base.OnClosing(eventArgs);
@@ -148,6 +165,15 @@ public partial class MainWindow : Window
 
     private void OnActivated(object? sender, EventArgs eventArgs) =>
         _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen)
+            && !_viewModel.IsSettingsOpen)
+        {
+            _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
+        }
+    }
 
     private async void OnSessionRecreationRequested(
         object? sender,
@@ -240,6 +266,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        await RenameAccountAsync(service);
+    }
+
+    private async void OnSettingsRenameAccountRequested(object? sender, SettingsAccountEventArgs eventArgs) =>
+        await RenameAccountAsync(eventArgs.Service);
+
+    private async Task RenameAccountAsync(ServiceInstance service)
+    {
         RenameAccountWindow dialog = new(service.DisplayName) { Owner = this };
         if (dialog.ShowDialog() != true)
         {
@@ -263,6 +297,11 @@ public partial class MainWindow : Window
             await SetAccountEnabledAsync(service, !service.IsEnabled);
         }
     }
+
+    private async void OnSettingsAccountEnabledChangeRequested(
+        object? sender,
+        SettingsAccountEnabledEventArgs eventArgs) =>
+        await SetAccountEnabledAsync(eventArgs.Service, eventArgs.IsEnabled);
 
     private async void EnableSelectedAccount_Click(object sender, RoutedEventArgs eventArgs)
     {
@@ -305,6 +344,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        await DeleteAccountAsync(service);
+    }
+
+    private async void OnSettingsDeleteAccountRequested(object? sender, SettingsAccountEventArgs eventArgs) =>
+        await DeleteAccountAsync(eventArgs.Service);
+
+    private async Task DeleteAccountAsync(ServiceInstance service)
+    {
         MessageBoxResult confirmation = WpfMessageBox.Show(
             this,
             $"Удалить аккаунт «{service.DisplayName}»?\n\nДанные только этого профиля будут очищены. При повторном добавлении потребуется новая авторизация.",

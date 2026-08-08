@@ -1,0 +1,228 @@
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services;
+
+namespace UnifiedMessenger.App.ViewModels;
+
+public sealed partial class SettingsViewModel : ObservableObject, IDisposable
+{
+    private readonly MainWindowViewModel _mainWindowViewModel;
+    private readonly IBuiltInServiceCatalog _serviceCatalog;
+    private bool _disposed;
+
+    public SettingsViewModel(
+        MainWindowViewModel mainWindowViewModel,
+        IBuiltInServiceCatalog serviceCatalog)
+    {
+        _mainWindowViewModel = mainWindowViewModel;
+        _serviceCatalog = serviceCatalog;
+        Sections =
+        [
+            new(SettingsSection.General, "Общие", "⚙"),
+            new(SettingsSection.Notifications, "Уведомления", "●"),
+            new(SettingsSection.Accounts, "Аккаунты", "☰"),
+            new(SettingsSection.About, "О программе", "i")
+        ];
+        _selectedSection = Sections[0];
+        SynchronizeAccounts();
+        _mainWindowViewModel.Services.CollectionChanged += OnServicesCollectionChanged;
+        _mainWindowViewModel.PropertyChanged += OnMainWindowPropertyChanged;
+    }
+
+    public event EventHandler<SettingsAccountEventArgs>? RenameAccountRequested;
+    public event EventHandler<SettingsAccountEnabledEventArgs>? AccountEnabledChangeRequested;
+    public event EventHandler<SettingsAccountEventArgs>? DeleteAccountRequested;
+
+    public IReadOnlyList<SettingsSectionItem> Sections { get; }
+    public ObservableCollection<SettingsAccountViewModel> Accounts { get; } = [];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsGeneralSelected))]
+    [NotifyPropertyChangedFor(nameof(IsNotificationsSelected))]
+    [NotifyPropertyChangedFor(nameof(IsAccountsSelected))]
+    [NotifyPropertyChangedFor(nameof(IsAboutSelected))]
+    private SettingsSectionItem _selectedSection;
+
+    public bool IsGeneralSelected => SelectedSection.Section is SettingsSection.General;
+    public bool IsNotificationsSelected => SelectedSection.Section is SettingsSection.Notifications;
+    public bool IsAccountsSelected => SelectedSection.Section is SettingsSection.Accounts;
+    public bool IsAboutSelected => SelectedSection.Section is SettingsSection.About;
+
+    public bool CloseToTray => _mainWindowViewModel.CloseToTray;
+    public bool HasShownTrayHint => _mainWindowViewModel.HasShownTrayHint;
+    public bool NotificationsEnabled => _mainWindowViewModel.NotificationsEnabled;
+    public bool DoNotDisturb => _mainWindowViewModel.DoNotDisturb;
+    public bool ShowNotificationPreview => _mainWindowViewModel.ShowNotificationPreview;
+    public bool NotificationSoundEnabled => _mainWindowViewModel.NotificationSoundEnabled;
+    public string ApplicationVersion => CreateApplicationVersion();
+
+    [RelayCommand]
+    private void Close() => _mainWindowViewModel.CloseSettingsCommand.Execute(null);
+
+    [RelayCommand]
+    private async Task SetCloseToTray(bool? value)
+    {
+        if (value is bool enabled)
+        {
+            await _mainWindowViewModel.SetCloseToTrayAsync(enabled);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ResetTrayHint()
+    {
+        await _mainWindowViewModel.ResetTrayHintAsync();
+    }
+
+    [RelayCommand]
+    private async Task SetNotificationsEnabled(bool? value)
+    {
+        if (value is bool enabled)
+        {
+            await _mainWindowViewModel.SetNotificationsEnabledAsync(enabled);
+        }
+    }
+
+    [RelayCommand]
+    private async Task SetDoNotDisturb(bool? value)
+    {
+        if (value is bool enabled)
+        {
+            await _mainWindowViewModel.SetDoNotDisturbAsync(enabled);
+        }
+    }
+
+    [RelayCommand]
+    private async Task SetShowNotificationPreview(bool? value)
+    {
+        if (value is bool enabled)
+        {
+            await _mainWindowViewModel.SetShowNotificationPreviewAsync(enabled);
+        }
+    }
+
+    [RelayCommand]
+    private async Task SetNotificationSoundEnabled(bool? value)
+    {
+        if (value is bool enabled)
+        {
+            await _mainWindowViewModel.SetNotificationSoundEnabledAsync(enabled);
+        }
+    }
+
+    internal void OpenAccount(ServiceInstance service) => _mainWindowViewModel.SelectService(service.Id);
+
+    internal void RequestRename(ServiceInstance service) =>
+        RenameAccountRequested?.Invoke(this, new SettingsAccountEventArgs(service));
+
+    internal void RequestSetEnabled(ServiceInstance service, bool isEnabled) =>
+        AccountEnabledChangeRequested?.Invoke(this, new SettingsAccountEnabledEventArgs(service, isEnabled));
+
+    internal void RequestDelete(ServiceInstance service) =>
+        DeleteAccountRequested?.Invoke(this, new SettingsAccountEventArgs(service));
+
+    internal async Task SetMutedAsync(ServiceInstance service, bool isMuted) =>
+        await _mainWindowViewModel.SetServiceMutedAsync(service, isMuted);
+
+    internal async Task MoveAsync(ServiceInstance service, int offset)
+    {
+        await _mainWindowViewModel.MoveServiceAsync(service, offset);
+        NotifyAccountOrderChanged();
+    }
+
+    internal bool CanMove(ServiceInstance service, int offset)
+    {
+        int index = _mainWindowViewModel.Services.IndexOf(service);
+        int target = index + offset;
+        return index >= 0 && target >= 0 && target < _mainWindowViewModel.Services.Count;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _mainWindowViewModel.Services.CollectionChanged -= OnServicesCollectionChanged;
+        _mainWindowViewModel.PropertyChanged -= OnMainWindowPropertyChanged;
+        foreach (SettingsAccountViewModel account in Accounts)
+        {
+            account.Dispose();
+        }
+
+        Accounts.Clear();
+    }
+
+    private void OnServicesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs eventArgs) =>
+        SynchronizeAccounts();
+
+    private void OnMainWindowPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName is nameof(MainWindowViewModel.CloseToTray))
+        {
+            OnPropertyChanged(nameof(CloseToTray));
+        }
+        else if (eventArgs.PropertyName is nameof(MainWindowViewModel.HasShownTrayHint))
+        {
+            OnPropertyChanged(nameof(HasShownTrayHint));
+        }
+        else if (eventArgs.PropertyName is nameof(MainWindowViewModel.NotificationsEnabled))
+        {
+            OnPropertyChanged(nameof(NotificationsEnabled));
+        }
+        else if (eventArgs.PropertyName is nameof(MainWindowViewModel.DoNotDisturb))
+        {
+            OnPropertyChanged(nameof(DoNotDisturb));
+        }
+        else if (eventArgs.PropertyName is nameof(MainWindowViewModel.ShowNotificationPreview))
+        {
+            OnPropertyChanged(nameof(ShowNotificationPreview));
+        }
+        else if (eventArgs.PropertyName is nameof(MainWindowViewModel.NotificationSoundEnabled))
+        {
+            OnPropertyChanged(nameof(NotificationSoundEnabled));
+        }
+    }
+
+    private void SynchronizeAccounts()
+    {
+        foreach (SettingsAccountViewModel account in Accounts)
+        {
+            account.Dispose();
+        }
+
+        Accounts.Clear();
+        foreach (ServiceInstance service in _mainWindowViewModel.Services)
+        {
+            Accounts.Add(
+                new SettingsAccountViewModel(
+                    this,
+                    service,
+                    _serviceCatalog.Get(service.ServiceType).DisplayName));
+        }
+
+        NotifyAccountOrderChanged();
+    }
+
+    private void NotifyAccountOrderChanged()
+    {
+        foreach (SettingsAccountViewModel account in Accounts)
+        {
+            account.NotifyOrderChanged();
+        }
+    }
+
+    private static string CreateApplicationVersion()
+    {
+        Version? version = typeof(SettingsViewModel).Assembly.GetName().Version;
+        return version is null
+            ? "1.0.0"
+            : $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
+    }
+}

@@ -8,6 +8,7 @@ public sealed class WinFormsTrayIconService : ITrayIconService
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Forms.ContextMenuStrip _contextMenu;
     private readonly Forms.ToolStripMenuItem _openItem;
+    private readonly Forms.ToolStripMenuItem _settingsItem;
     private readonly Forms.ToolStripMenuItem _doNotDisturbItem;
     private readonly Forms.ToolStripMenuItem _exitItem;
     private bool _disposed;
@@ -15,10 +16,12 @@ public sealed class WinFormsTrayIconService : ITrayIconService
     public WinFormsTrayIconService()
     {
         _openItem = new Forms.ToolStripMenuItem("Открыть");
+        _settingsItem = new Forms.ToolStripMenuItem("Настройки");
         _doNotDisturbItem = new Forms.ToolStripMenuItem("Не беспокоить") { CheckOnClick = false };
         _exitItem = new Forms.ToolStripMenuItem("Выход");
         _contextMenu = new Forms.ContextMenuStrip();
-        _contextMenu.Items.AddRange([_openItem, _doNotDisturbItem, new Forms.ToolStripSeparator(), _exitItem]);
+        _contextMenu.Items.AddRange(
+            [_openItem, _settingsItem, _doNotDisturbItem, new Forms.ToolStripSeparator(), _exitItem]);
 
         _notifyIcon = new Forms.NotifyIcon
         {
@@ -29,6 +32,7 @@ public sealed class WinFormsTrayIconService : ITrayIconService
         };
 
         _openItem.Click += OnOpenClicked;
+        _settingsItem.Click += OnSettingsClicked;
         _doNotDisturbItem.Click += OnDoNotDisturbClicked;
         _exitItem.Click += OnExitClicked;
         _notifyIcon.DoubleClick += OnOpenClicked;
@@ -37,6 +41,7 @@ public sealed class WinFormsTrayIconService : ITrayIconService
     }
 
     public event EventHandler? OpenRequested;
+    public event EventHandler? SettingsRequested;
     public event EventHandler? DoNotDisturbToggleRequested;
     public event EventHandler? ExitRequested;
     public event EventHandler? BalloonClicked;
@@ -91,6 +96,7 @@ public sealed class WinFormsTrayIconService : ITrayIconService
         _contextMenu.Close(Forms.ToolStripDropDownCloseReason.CloseCalled);
         _notifyIcon.Visible = false;
         _openItem.Click -= OnOpenClicked;
+        _settingsItem.Click -= OnSettingsClicked;
         _doNotDisturbItem.Click -= OnDoNotDisturbClicked;
         _exitItem.Click -= OnExitClicked;
         _notifyIcon.DoubleClick -= OnOpenClicked;
@@ -103,6 +109,7 @@ public sealed class WinFormsTrayIconService : ITrayIconService
     public void Dispose() => BeginShutdown();
 
     private void OnOpenClicked(object? sender, EventArgs eventArgs) => OpenRequested?.Invoke(this, EventArgs.Empty);
+    private void OnSettingsClicked(object? sender, EventArgs eventArgs) => SettingsRequested?.Invoke(this, EventArgs.Empty);
     private void OnDoNotDisturbClicked(object? sender, EventArgs eventArgs) => DoNotDisturbToggleRequested?.Invoke(this, EventArgs.Empty);
     private void OnExitClicked(object? sender, EventArgs eventArgs)
     {

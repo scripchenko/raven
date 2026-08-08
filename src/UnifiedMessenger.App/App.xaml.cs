@@ -180,6 +180,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IWindowActivationService, WpfWindowActivationService>();
         services.AddSingleton<IWebNotificationCoordinator, WebNotificationCoordinator>();
         services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<IWebViewEventCoordinator, WebViewEventCoordinator>();
         services.AddSingleton<IApplicationTrayCoordinator, ApplicationTrayCoordinator>();
         services.AddSingleton<MainWindow>();

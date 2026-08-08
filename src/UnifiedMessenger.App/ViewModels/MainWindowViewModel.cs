@@ -85,6 +85,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string? _webViewRuntimeVersion;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WindowTitle))]
+    private bool _isSettingsOpen;
+
     public bool HasSelectedService => SelectedService is not null;
     public bool HasActiveWebView => SelectedService?.IsEnabled == true;
     public bool IsSelectedServiceDisabled => SelectedService is { IsEnabled: false };
@@ -94,16 +98,21 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         && WebViewStatus is WebViewSessionStatus.Uninitialized or WebViewSessionStatus.Initializing;
     public bool CloseToTray => _settings.CloseToTray;
     public bool HasShownTrayHint => _settings.HasShownTrayHint;
+    public bool NotificationsEnabled => _settings.Notifications.IsEnabled;
     public bool DoNotDisturb => _settings.Notifications.DoNotDisturb;
+    public bool ShowNotificationPreview => _settings.Notifications.ShowNotificationPreview;
+    public bool NotificationSoundEnabled => _settings.Notifications.PlaySound;
     public bool IsSelectedServiceMuted => SelectedService?.IsMuted == true;
     public string MuteButtonText => IsSelectedServiceMuted ? "🔕" : "🔔";
     public string MuteButtonToolTip => IsSelectedServiceMuted
         ? "Включить уведомления аккаунта"
         : "Отключить уведомления аккаунта";
 
-    public string WindowTitle => SelectedService is null
-        ? "UnifiedMessenger"
-        : $"{SelectedService.DisplayName} — UnifiedMessenger";
+    public string WindowTitle => IsSettingsOpen
+        ? "Настройки — UnifiedMessenger"
+        : SelectedService is null
+            ? "UnifiedMessenger"
+            : $"{SelectedService.DisplayName} — UnifiedMessenger";
 
     public string SelectedServiceLabel => SelectedService is null
         ? "WebView2"
@@ -167,6 +176,31 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         await SaveSettingsAsync();
     }
 
+    public async Task SetServiceMutedAsync(ServiceInstance service, bool isMuted)
+    {
+        ThrowIfDisposed();
+        ServiceInstance target = GetExistingService(service);
+        if (target.IsMuted == isMuted)
+        {
+            return;
+        }
+
+        target.IsMuted = isMuted;
+        if (isMuted)
+        {
+            _notificationCoordinator.DiscardPending(target.Id);
+        }
+
+        if (SelectedService?.Id == target.Id)
+        {
+            OnPropertyChanged(nameof(IsSelectedServiceMuted));
+            OnPropertyChanged(nameof(MuteButtonText));
+            OnPropertyChanged(nameof(MuteButtonToolTip));
+        }
+
+        await SaveSettingsAsync();
+    }
+
     public async Task<bool> MoveServiceAsync(ServiceInstance service, int offset)
     {
         ThrowIfDisposed();
@@ -220,12 +254,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         if (service is not null)
         {
             SelectedService = service;
+            IsSettingsOpen = false;
         }
     }
 
     public void MarkSelectedServiceViewed(bool isMainWindowVisible, bool isMainWindowActive)
     {
-        if (isMainWindowVisible && isMainWindowActive && SelectedService is ServiceInstance service)
+        if (!IsSettingsOpen
+            && isMainWindowVisible
+            && isMainWindowActive
+            && SelectedService is ServiceInstance service)
         {
             _activityCoordinator.Clear(service);
         }
@@ -242,6 +280,84 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasShownTrayHint));
         await SaveSettingsAsync();
         return true;
+    }
+
+    public async Task ResetTrayHintAsync()
+    {
+        ThrowIfDisposed();
+        if (!_settings.HasShownTrayHint)
+        {
+            return;
+        }
+
+        _settings.HasShownTrayHint = false;
+        OnPropertyChanged(nameof(HasShownTrayHint));
+        await SaveSettingsAsync();
+    }
+
+    public async Task SetCloseToTrayAsync(bool value)
+    {
+        ThrowIfDisposed();
+        if (_settings.CloseToTray == value)
+        {
+            return;
+        }
+
+        _settings.CloseToTray = value;
+        OnPropertyChanged(nameof(CloseToTray));
+        await SaveSettingsAsync();
+    }
+
+    public async Task SetNotificationsEnabledAsync(bool value)
+    {
+        ThrowIfDisposed();
+        if (_settings.Notifications.IsEnabled == value)
+        {
+            return;
+        }
+
+        _settings.Notifications.IsEnabled = value;
+        OnPropertyChanged(nameof(NotificationsEnabled));
+        await SaveSettingsAsync();
+    }
+
+    public async Task SetDoNotDisturbAsync(bool value)
+    {
+        ThrowIfDisposed();
+        if (_settings.Notifications.DoNotDisturb == value)
+        {
+            return;
+        }
+
+        _settings.Notifications.DoNotDisturb = value;
+        OnPropertyChanged(nameof(DoNotDisturb));
+        await SaveSettingsAsync();
+    }
+
+    public async Task SetShowNotificationPreviewAsync(bool value)
+    {
+        ThrowIfDisposed();
+        if (_settings.Notifications.ShowNotificationPreview == value)
+        {
+            return;
+        }
+
+        _settings.Notifications.ShowNotificationPreview = value;
+        OnPropertyChanged(nameof(ShowNotificationPreview));
+        await SaveSettingsAsync();
+    }
+
+    public async Task SetNotificationSoundEnabledAsync(bool value)
+    {
+        ThrowIfDisposed();
+        if (_settings.Notifications.PlaySound == value)
+        {
+            return;
+        }
+
+        _settings.Notifications.PlaySound = value;
+        OnPropertyChanged(nameof(NotificationSoundEnabled));
+        await SaveSettingsAsync();
     }
 
     public void SetRuntimeInfo(WebViewRuntimeInfo runtimeInfo)
@@ -317,9 +433,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ToggleDoNotDisturb()
     {
-        _settings.Notifications.DoNotDisturb = !_settings.Notifications.DoNotDisturb;
-        OnPropertyChanged(nameof(DoNotDisturb));
-        await SaveSettingsAsync();
+        await SetDoNotDisturbAsync(!_settings.Notifications.DoNotDisturb);
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedService))]
@@ -330,16 +444,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        service.IsMuted = !service.IsMuted;
-        if (service.IsMuted)
-        {
-            _notificationCoordinator.DiscardPending(service.Id);
-        }
-        OnPropertyChanged(nameof(IsSelectedServiceMuted));
-        OnPropertyChanged(nameof(MuteButtonText));
-        OnPropertyChanged(nameof(MuteButtonToolTip));
-        await SaveSettingsAsync();
+        await SetServiceMutedAsync(service, !service.IsMuted);
     }
+
+    [RelayCommand]
+    private void OpenSettings() => IsSettingsOpen = true;
+
+    [RelayCommand]
+    private void CloseSettings() => IsSettingsOpen = false;
 
     private bool CanUseSelectedWebView() => HasActiveWebView;
 

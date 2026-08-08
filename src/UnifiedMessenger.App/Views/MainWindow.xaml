@@ -138,19 +138,30 @@
                             ToolTip="Добавить сервис"
                             Click="AddService_Click"
                             Content="+" />
-                    <Button IsEnabled="False"
+                    <Button Command="{Binding OpenSettingsCommand}"
                             Style="{StaticResource SidebarActionButtonStyle}"
-                            ToolTip="Настройки появятся на этапе 6"
+                            ToolTip="Настройки"
                             Content="⚙" />
                 </StackPanel>
             </Grid>
         </Border>
 
         <Grid Grid.Column="1">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="64" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+            <Grid x:Name="ServiceWorkspace">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSettingsOpen}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="64" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
             <Border Grid.Row="0"
                     Padding="20,0"
@@ -211,7 +222,7 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="1" Background="White">
+                <Grid Grid.Row="1" Background="White">
                 <views:WelcomeView>
                     <views:WelcomeView.Style>
                         <Style TargetType="views:WelcomeView">
@@ -298,7 +309,22 @@
                                 Style="{StaticResource PrimaryButtonStyle}" />
                     </StackPanel>
                 </Border>
+                </Grid>
             </Grid>
+
+            <Border>
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSettingsOpen}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <views:SettingsView x:Name="SettingsContent" />
+            </Border>
         </Grid>
     </Grid>
 </Window>

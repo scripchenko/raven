@@ -1,6 +1,8 @@
+using UnifiedMessenger.App.Models;
+
 namespace UnifiedMessenger.App.Services.Notifications;
 
 public interface INotificationSoundPlayer
 {
-    void Play();
+    bool TryPlay(ServiceType serviceType, NotificationSoundMode mode);
 }

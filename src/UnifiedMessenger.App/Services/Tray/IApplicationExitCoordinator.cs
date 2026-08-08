@@ -12,6 +12,7 @@ public interface IApplicationExitCoordinator
     void CompleteShutdown();
     void BeginSessionEnding();
     bool ShouldHideToTray(bool closeToTray, bool applicationShutdownStarted);
+    bool ShouldRequestExitFromWindowClose(bool closeToTray, bool applicationShutdownStarted);
 }
 
 public enum ApplicationShutdownState

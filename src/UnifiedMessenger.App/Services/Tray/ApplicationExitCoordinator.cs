@@ -71,4 +71,10 @@ public sealed class ApplicationExitCoordinator : IApplicationExitCoordinator
         && !IsExiting
         && !IsSessionEnding
         && !applicationShutdownStarted;
+
+    public bool ShouldRequestExitFromWindowClose(bool closeToTray, bool applicationShutdownStarted) =>
+        !closeToTray
+        && !IsExiting
+        && !IsSessionEnding
+        && !applicationShutdownStarted;
 }

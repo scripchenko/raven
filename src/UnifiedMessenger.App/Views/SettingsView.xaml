@@ -1,0 +1,327 @@
+<UserControl x:Class="UnifiedMessenger.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:UnifiedMessenger.App.Converters"
+             Background="{DynamicResource WindowBackgroundBrush}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <converters:ServiceGlyphConverter x:Key="ServiceGlyphConverter" />
+
+        <Style x:Key="SettingsCardStyle" TargetType="Border">
+            <Setter Property="Margin" Value="0,0,0,14" />
+            <Setter Property="Padding" Value="22" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="14" />
+        </Style>
+
+        <Style x:Key="SettingsNavigationItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CompactButtonStyle" TargetType="Button">
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Margin" Value="0,4,8,0" />
+            <Setter Property="Padding" Value="12,4" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="64" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Padding="18,0"
+                Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource DividerBrush}"
+                BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="True">
+                <Button Width="40"
+                        Height="40"
+                        Margin="0,0,14,0"
+                        Command="{Binding CloseCommand}"
+                        Content="←"
+                        DockPanel.Dock="Left"
+                        Style="{StaticResource ToolbarButtonStyle}"
+                        ToolTip="Вернуться к мессенджеру" />
+                <TextBlock VerticalAlignment="Center"
+                           FontSize="20"
+                           FontWeight="SemiBold"
+                           Text="Настройки" />
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="190" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Padding="12,18"
+                    Background="{DynamicResource SurfaceBrush}"
+                    BorderBrush="{DynamicResource DividerBrush}"
+                    BorderThickness="0,0,1,0">
+                <ListBox ItemsSource="{Binding Sections}"
+                         SelectedItem="{Binding SelectedSection}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         ItemContainerStyle="{StaticResource SettingsNavigationItemStyle}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="28" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           Text="{Binding Glyph}" />
+                                <TextBlock Grid.Column="1"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding Title}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+
+            <ScrollViewer Grid.Column="1"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <Grid Margin="28,24,32,32">
+                    <StackPanel Visibility="{Binding IsGeneralSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Margin="0,0,0,18"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Text="Общие" />
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,24,0">
+                                    <TextBlock FontWeight="SemiBold" Text="Закрывать окно в трей" />
+                                    <TextBlock Margin="0,6,0,0"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="Если выключено, крестик полностью завершает UnifiedMessenger."
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                                <CheckBox Grid.Column="1"
+                                          VerticalAlignment="Center"
+                                          Command="{Binding SetCloseToTrayCommand}"
+                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                          IsChecked="{Binding CloseToTray, Mode=OneWay}" />
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold" Text="Подсказка при первом закрытии в трей" />
+                                <TextBlock Margin="0,6,0,12"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="Сбросьте состояние подсказки, чтобы увидеть её при следующем закрытии окна в трей."
+                                           TextWrapping="Wrap" />
+                                <Button HorizontalAlignment="Left"
+                                        Command="{Binding ResetTrayHintCommand}"
+                                        Content="Показать подсказку снова"
+                                        IsEnabled="{Binding HasShownTrayHint}"
+                                        Style="{StaticResource CompactButtonStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Visibility="{Binding IsNotificationsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Margin="0,0,0,18"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Text="Уведомления" />
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Уведомления" />
+                                    <CheckBox Grid.Column="1"
+                                              Command="{Binding SetNotificationsEnabledCommand}"
+                                              CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                              IsChecked="{Binding NotificationsEnabled, Mode=OneWay}" />
+                                </Grid>
+                                <Grid Margin="0,0,0,18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Не беспокоить" />
+                                    <CheckBox Grid.Column="1"
+                                              Command="{Binding SetDoNotDisturbCommand}"
+                                              CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                              IsChecked="{Binding DoNotDisturb, Mode=OneWay}" />
+                                </Grid>
+                                <Grid Margin="0,0,0,18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Показывать текст сообщения" />
+                                    <CheckBox Grid.Column="1"
+                                              Command="{Binding SetShowNotificationPreviewCommand}"
+                                              CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                              IsChecked="{Binding ShowNotificationPreview, Mode=OneWay}" />
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,24,0">
+                                        <TextBlock FontWeight="SemiBold" Text="Звук уведомлений" />
+                                        <TextBlock Margin="0,6,0,0"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Text="Чтобы избежать двойного сигнала, встроенный звук уведомлений Telegram Web рекомендуется отключить."
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <CheckBox Grid.Column="1"
+                                              VerticalAlignment="Center"
+                                              Command="{Binding SetNotificationSoundEnabledCommand}"
+                                              CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                              IsChecked="{Binding NotificationSoundEnabled, Mode=OneWay}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Visibility="{Binding IsAccountsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Margin="0,0,0,6"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Text="Аккаунты" />
+                        <TextBlock Margin="0,0,0,18"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Профили и авторизации сохраняются отдельно для каждого аккаунта."
+                                   TextWrapping="Wrap" />
+
+                        <ItemsControl ItemsSource="{Binding Accounts}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource SettingsCardStyle}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="46" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="38"
+                                                        Height="38"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AccentBrush}"
+                                                        CornerRadius="10">
+                                                    <TextBlock HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="White"
+                                                               Text="{Binding ServiceType, Converter={StaticResource ServiceGlyphConverter}}" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="{Binding DisplayName}" />
+                                                    <TextBlock Margin="0,3,0,0"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               Text="{Binding ServiceTypeLabel}" />
+                                                </StackPanel>
+                                                <Button Grid.Column="2"
+                                                        Command="{Binding OpenCommand}"
+                                                        Content="Открыть"
+                                                        Style="{StaticResource CompactButtonStyle}" />
+                                            </Grid>
+
+                                            <WrapPanel Margin="46,12,0,0">
+                                                <CheckBox Margin="0,8,18,4"
+                                                          VerticalAlignment="Center"
+                                                          Command="{Binding SetEnabledCommand}"
+                                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                                          Content="Включён"
+                                                          IsChecked="{Binding IsEnabled, Mode=OneWay}" />
+                                                <CheckBox Margin="0,8,18,4"
+                                                          VerticalAlignment="Center"
+                                                          Command="{Binding SetMutedCommand}"
+                                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                                          Content="Без звука"
+                                                          IsChecked="{Binding IsMuted, Mode=OneWay}" />
+                                                <Button Command="{Binding RenameCommand}"
+                                                        Content="Переименовать"
+                                                        Style="{StaticResource CompactButtonStyle}" />
+                                                <Button Command="{Binding MoveUpCommand}"
+                                                        Content="Выше"
+                                                        IsEnabled="{Binding CanMoveUp}"
+                                                        Style="{StaticResource CompactButtonStyle}" />
+                                                <Button Command="{Binding MoveDownCommand}"
+                                                        Content="Ниже"
+                                                        IsEnabled="{Binding CanMoveDown}"
+                                                        Style="{StaticResource CompactButtonStyle}" />
+                                                <Button Command="{Binding DeleteCommand}"
+                                                        Content="Удалить…"
+                                                        Foreground="#C62828"
+                                                        Style="{StaticResource CompactButtonStyle}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <StackPanel Visibility="{Binding IsAboutSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Margin="0,0,0,18"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Text="О программе" />
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel>
+                                <TextBlock FontSize="25" FontWeight="SemiBold" Text="UnifiedMessenger" />
+                                <TextBlock Margin="0,6,0,0"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding ApplicationVersion, StringFormat=Версия {0}}" />
+                                <TextBlock Margin="0,18,0,0" FontWeight="SemiBold" Text=".NET / WPF / WebView2" />
+                                <TextBlock Margin="0,8,0,0"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="Telegram, WhatsApp, MAX и VK работают через официальные веб-клиенты."
+                                           TextWrapping="Wrap" />
+                                <Button Margin="0,22,0,0"
+                                        HorizontalAlignment="Left"
+                                        Content="Проверить обновления"
+                                        IsEnabled="False"
+                                        Style="{StaticResource CompactButtonStyle}"
+                                        ToolTip="Обновления будут добавлены на отдельном этапе" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</UserControl>

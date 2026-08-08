@@ -52,6 +52,7 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
 
         _initialized = true;
         _trayIcon.OpenRequested += OnOpenRequested;
+        _trayIcon.SettingsRequested += OnSettingsRequested;
         _trayIcon.DoNotDisturbToggleRequested += OnDoNotDisturbToggleRequested;
         _trayIcon.ExitRequested += OnExitRequested;
         _activityCoordinator.ActivityChanged += OnActivityChanged;
@@ -106,6 +107,19 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         if (!_shutdownStarted)
         {
             _uiDispatcher.Post(() => _windowActivation.ShowAndActivate());
+        }
+    }
+
+    private void OnSettingsRequested(object? sender, EventArgs eventArgs)
+    {
+        if (!_shutdownStarted)
+        {
+            _uiDispatcher.Post(
+                () =>
+                {
+                    _viewModel.OpenSettingsCommand.Execute(null);
+                    _windowActivation.ShowAndActivate();
+                });
         }
     }
 
@@ -173,6 +187,7 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
 
         _initialized = false;
         _trayIcon.OpenRequested -= OnOpenRequested;
+        _trayIcon.SettingsRequested -= OnSettingsRequested;
         _trayIcon.DoNotDisturbToggleRequested -= OnDoNotDisturbToggleRequested;
         _trayIcon.ExitRequested -= OnExitRequested;
         _activityCoordinator.ActivityChanged -= OnActivityChanged;

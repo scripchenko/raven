@@ -108,7 +108,7 @@ public sealed class TelegramNotificationSoundCoordinator : ITelegramNotification
             }
 
             _lastSoundAt = _timeProvider.GetUtcNow();
-            _soundPlayer.Play();
+            _ = _soundPlayer.TryPlay(ServiceType.Telegram, NotificationSoundMode.System);
         }
     }
 

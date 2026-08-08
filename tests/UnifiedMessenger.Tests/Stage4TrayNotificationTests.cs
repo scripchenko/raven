@@ -1239,6 +1239,7 @@ public sealed class Stage4TrayNotificationTests
     private sealed class FakeTrayIconService : ITrayIconService
     {
         public event EventHandler? OpenRequested;
+        public event EventHandler? SettingsRequested;
         public event EventHandler? DoNotDisturbToggleRequested;
         public event EventHandler? ExitRequested;
         public event EventHandler? BalloonClicked;
@@ -1278,6 +1279,7 @@ public sealed class Stage4TrayNotificationTests
         }
 
         public void RaiseOpen() => OpenRequested?.Invoke(this, EventArgs.Empty);
+        public void RaiseSettings() => SettingsRequested?.Invoke(this, EventArgs.Empty);
         public void RaiseDoNotDisturbToggle() => DoNotDisturbToggleRequested?.Invoke(this, EventArgs.Empty);
         public void RaiseExit() => ExitRequested?.Invoke(this, EventArgs.Empty);
         public void RaiseBalloonClicked() => BalloonClicked?.Invoke(this, EventArgs.Empty);
@@ -1451,7 +1453,11 @@ public sealed class Stage4TrayNotificationTests
     private sealed class FakeNotificationSoundPlayer : INotificationSoundPlayer
     {
         public int PlayCount { get; private set; }
-        public void Play() => PlayCount++;
+        public bool TryPlay(ServiceType serviceType, NotificationSoundMode mode)
+        {
+            PlayCount++;
+            return true;
+        }
     }
 
 
