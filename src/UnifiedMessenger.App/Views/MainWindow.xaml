@@ -12,6 +12,11 @@
         MinWidth="880"
         MinHeight="560"
         WindowStartupLocation="CenterScreen">
+    <Window.InputBindings>
+        <KeyBinding Key="M"
+                    Modifiers="Control+Shift"
+                    Command="{Binding ToggleDoNotDisturbCommand}" />
+    </Window.InputBindings>
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <converters:ServiceGlyphConverter x:Key="ServiceGlyphConverter" />
@@ -84,11 +89,37 @@
                                         <MenuItem Header="Удалить…" CommandParameter="{Binding}" Click="DeleteAccount_Click" />
                                     </ContextMenu>
                                 </Border.ContextMenu>
-                                <TextBlock HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"
-                                           FontWeight="SemiBold"
-                                           Foreground="White"
-                                           Text="{Binding ServiceType, Converter={StaticResource ServiceGlyphConverter}}" />
+                                <Grid>
+                                    <TextBlock HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               FontWeight="SemiBold"
+                                               Foreground="White"
+                                               Text="{Binding ServiceType, Converter={StaticResource ServiceGlyphConverter}}" />
+                                    <Border MinWidth="20"
+                                            Height="18"
+                                            Padding="4,0"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Top"
+                                            Background="#E53935"
+                                            CornerRadius="9"
+                                            Visibility="{Binding ShowUnreadBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <TextBlock HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   FontSize="10"
+                                                   FontWeight="Bold"
+                                                   Foreground="White"
+                                                   Text="{Binding UnreadBadgeText}" />
+                                    </Border>
+                                    <Ellipse Width="10"
+                                             Height="10"
+                                             Margin="0,0,1,1"
+                                             HorizontalAlignment="Right"
+                                             VerticalAlignment="Bottom"
+                                             Fill="#E53935"
+                                             Stroke="White"
+                                             StrokeThickness="2"
+                                             Visibility="{Binding ShowUnreadDot, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                </Grid>
                             </Border>
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
@@ -162,14 +193,21 @@
                                      Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
 
-                    <Border Grid.Column="2"
-                            Padding="10,5"
-                            VerticalAlignment="Center"
-                            Background="{DynamicResource AccentSoftBrush}"
-                            CornerRadius="10"
-                            ToolTip="{Binding WebViewRuntimeVersion, StringFormat=WebView2 Runtime {0}}">
-                        <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="{Binding SelectedServiceLabel}" />
-                    </Border>
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Orientation="Horizontal">
+                        <Button Margin="0,0,10,0"
+                                Command="{Binding ToggleSelectedMuteCommand}"
+                                Content="{Binding MuteButtonText}"
+                                IsEnabled="{Binding HasSelectedService}"
+                                Style="{StaticResource ToolbarButtonStyle}"
+                                ToolTip="{Binding MuteButtonToolTip}" />
+                        <Border Padding="10,5"
+                                VerticalAlignment="Center"
+                                Background="{DynamicResource AccentSoftBrush}"
+                                CornerRadius="10"
+                                ToolTip="{Binding WebViewRuntimeVersion, StringFormat=WebView2 Runtime {0}}">
+                            <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="{Binding SelectedServiceLabel}" />
+                        </Border>
+                    </StackPanel>
                 </Grid>
             </Border>
 

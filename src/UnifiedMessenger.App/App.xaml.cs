@@ -2,8 +2,10 @@ using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using UnifiedMessenger.App.Services;
+using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
+using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
 using UnifiedMessenger.App.Views;
@@ -13,8 +15,12 @@ namespace UnifiedMessenger.App;
 public partial class App : System.Windows.Application
 {
     private ServiceProvider? _serviceProvider;
-    private ISettingsService? _settingsService;
+    private IApplicationSettingsStore? _settingsStore;
     private MainWindowViewModel? _mainWindowViewModel;
+    private IApplicationExitCoordinator? _exitCoordinator;
+    private IApplicationTrayCoordinator? _trayCoordinator;
+    private IWebViewEventCoordinator? _webViewEventCoordinator;
+    private IWebViewSessionManager? _webViewSessionManager;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -23,22 +29,30 @@ public partial class App : System.Windows.Application
         try
         {
             _serviceProvider = ConfigureServices();
-            _settingsService = _serviceProvider.GetRequiredService<ISettingsService>();
+            ISettingsService settingsService = _serviceProvider.GetRequiredService<ISettingsService>();
+            _settingsStore = _serviceProvider.GetRequiredService<IApplicationSettingsStore>();
             _mainWindowViewModel = _serviceProvider.GetRequiredService<MainWindowViewModel>();
+            _exitCoordinator = _serviceProvider.GetRequiredService<IApplicationExitCoordinator>();
+            _exitCoordinator.ExitRequested += OnExplicitExitRequested;
 
-            SettingsLoadResult loadResult = await _settingsService.LoadAsync();
+            SettingsLoadResult loadResult = await settingsService.LoadAsync();
+            _settingsStore.Initialize(loadResult.Settings);
             IWebViewProfileCleaner profileCleaner = _serviceProvider.GetRequiredService<IWebViewProfileCleaner>();
             bool pendingProfilesChanged = await profileCleaner.ProcessPendingDeletionsAsync(loadResult.Settings);
             if (loadResult.WasMigrated || pendingProfilesChanged)
             {
-                await _settingsService.SaveAsync(loadResult.Settings);
+                await _settingsStore.SaveAsync();
             }
 
             _mainWindowViewModel.Initialize(loadResult.Settings);
+            _webViewSessionManager = _serviceProvider.GetRequiredService<IWebViewSessionManager>();
+            _webViewEventCoordinator = _serviceProvider.GetRequiredService<IWebViewEventCoordinator>();
 
             MainWindow window = _serviceProvider.GetRequiredService<MainWindow>();
             MainWindow = window;
             window.Show();
+            _trayCoordinator = _serviceProvider.GetRequiredService<IApplicationTrayCoordinator>();
+            _trayCoordinator.Initialize();
 
             if (!string.IsNullOrWhiteSpace(loadResult.WarningMessage))
             {
@@ -63,22 +77,77 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        if (_settingsService is not null && _mainWindowViewModel is not null)
+        if (_exitCoordinator is not null)
         {
-            try
-            {
-                _settingsService.SaveAsync(_mainWindowViewModel.CreateSettingsSnapshot())
-                    .GetAwaiter()
-                    .GetResult();
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // The application is already exiting. Startup recovery will keep it usable next time.
-            }
+            _exitCoordinator.ExitRequested -= OnExplicitExitRequested;
         }
 
+        _webViewEventCoordinator = null;
+        _webViewSessionManager = null;
+        _trayCoordinator = null;
         _serviceProvider?.Dispose();
         base.OnExit(e);
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        _exitCoordinator?.BeginSessionEnding();
+        _trayCoordinator?.BeginShutdown();
+        _webViewEventCoordinator?.Dispose();
+        _webViewEventCoordinator = null;
+        _webViewSessionManager?.BeginShutdown();
+        base.OnSessionEnding(e);
+    }
+
+    private async void OnExplicitExitRequested(object? sender, EventArgs eventArgs)
+    {
+        if (_exitCoordinator is null || !_exitCoordinator.TryBeginShutdown())
+        {
+            return;
+        }
+
+        await ShutdownApplicationAsync();
+    }
+
+    private async Task ShutdownApplicationAsync()
+    {
+        try
+        {
+            _trayCoordinator?.BeginShutdown();
+
+            if (MainWindow is MainWindow mainWindow)
+            {
+                mainWindow.Hide();
+            }
+
+            _webViewEventCoordinator?.Dispose();
+            _webViewEventCoordinator = null;
+            _webViewSessionManager?.BeginShutdown();
+
+            if (MainWindow is MainWindow loadedWindow && loadedWindow.IsLoaded)
+            {
+                loadedWindow.Close();
+            }
+
+            if (_settingsStore is not null && _mainWindowViewModel is not null)
+            {
+                _ = _mainWindowViewModel.CreateSettingsSnapshot();
+                await _settingsStore.SaveAsync();
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or System.Runtime.InteropServices.COMException)
+        {
+            // The UI is already gone. Startup recovery keeps the next launch usable.
+        }
+        finally
+        {
+            _exitCoordinator?.CompleteShutdown();
+            Shutdown();
+        }
     }
 
     private static ServiceProvider ConfigureServices()
@@ -86,15 +155,33 @@ public partial class App : System.Windows.Application
         ServiceCollection services = new();
         services.AddSingleton<IAppPaths, AppPaths>();
         services.AddSingleton<ISettingsService, JsonSettingsService>();
+        services.AddSingleton<IApplicationSettingsStore, ApplicationSettingsStore>();
         services.AddSingleton<IBuiltInServiceCatalog, BuiltInServiceCatalog>();
         services.AddSingleton<NavigationPolicy>();
+        services.AddSingleton<IServiceActivityCoordinator, ServiceActivityCoordinator>();
+        services.AddSingleton<IUiDispatcher, WpfUiDispatcher>();
+        services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<INotificationSoundPlayer, WindowsNotificationSoundPlayer>();
+        services.AddSingleton<INotificationPermissionPrompt, WpfNotificationPermissionPrompt>();
+        services.AddSingleton<INotificationPermissionCoordinator, NotificationPermissionCoordinator>();
+        services.AddSingleton<INotificationPopupService, WpfNotificationPopupService>();
+        services.AddSingleton<ITrayIconService, WinFormsTrayIconService>();
+        services.AddSingleton<ITaskbarActivityIndicator, WpfTaskbarActivityIndicator>();
+        services.AddSingleton<IApplicationExitCoordinator, ApplicationExitCoordinator>();
         services.AddSingleton<IWebViewRuntimeService, WebViewRuntimeService>();
         services.AddSingleton<IExternalBrowserService, ExternalBrowserService>();
         services.AddSingleton<WebNavigationService>();
         services.AddSingleton<WebNewWindowNavigationService>();
         services.AddSingleton<IWebViewProfileCleaner, WebViewProfileCleaner>();
-        services.AddSingleton<IWebViewSessionManager, WebViewSessionManager>();
+        services.AddSingleton<WebViewSessionManager>();
+        services.AddSingleton<IWebViewSessionManager>(provider =>
+            provider.GetRequiredService<WebViewSessionManager>());
+        services.AddSingleton<ITelegramNotificationSoundCoordinator, TelegramNotificationSoundCoordinator>();
+        services.AddSingleton<IWindowActivationService, WpfWindowActivationService>();
+        services.AddSingleton<IWebNotificationCoordinator, WebNotificationCoordinator>();
         services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton<IWebViewEventCoordinator, WebViewEventCoordinator>();
+        services.AddSingleton<IApplicationTrayCoordinator, ApplicationTrayCoordinator>();
         services.AddSingleton<MainWindow>();
 
         return services.BuildServiceProvider(

@@ -5,6 +5,8 @@ namespace UnifiedMessenger.App.Services.Notifications;
 
 public static partial class PageTitleUnreadCountParser
 {
+    public const int MaximumUnreadCount = 9999;
+
     public static int? TryParse(string? documentTitle)
     {
         if (string.IsNullOrWhiteSpace(documentTitle))
@@ -13,10 +15,14 @@ public static partial class PageTitleUnreadCountParser
         }
 
         Match match = LeadingUnreadCount().Match(documentTitle);
-        return match.Success
-            && int.TryParse(match.Groups["count"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int count)
-                ? count
-                : null;
+        if (!match.Success
+            || !int.TryParse(match.Groups["count"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int count)
+            || count > MaximumUnreadCount)
+        {
+            return null;
+        }
+
+        return count;
     }
 
     [GeneratedRegex(@"^\s*\((?<count>\d{1,10})\)", RegexOptions.CultureInvariant)]

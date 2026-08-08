@@ -163,6 +163,15 @@ public sealed class JsonSettingsService : ISettingsService
                 service.ProfileName = string.Empty;
                 changed = true;
             }
+
+            if (!Enum.IsDefined(service.NotificationPermissionState))
+            {
+                service.NotificationPermissionState = NotificationPermissionState.Unknown;
+                changed = true;
+            }
+
+            service.UnreadCount = null;
+            service.HasUnreadActivity = false;
         }
 
         return changed;

@@ -2,13 +2,14 @@ namespace UnifiedMessenger.App.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public AppTheme Theme { get; set; } = AppTheme.System;
     public MemoryMode MemoryMode { get; set; } = MemoryMode.Economy;
     public int SuspendAfterMinutes { get; set; } = 10;
     public bool CloseToTray { get; set; } = true;
+    public bool HasShownTrayHint { get; set; }
     public bool CloseCompletelyOnWindowClose { get; set; }
     public bool RestoreLastService { get; set; } = true;
     public bool StartWithWindows { get; set; }
@@ -39,6 +40,7 @@ public enum MemoryMode
 public sealed class NotificationSettings
 {
     public bool IsEnabled { get; set; } = true;
+    public bool ShowNotificationPreview { get; set; } = true;
     public bool ShowServiceName { get; set; } = true;
     public bool PlaySound { get; set; } = true;
     public bool DoNotDisturb { get; set; }

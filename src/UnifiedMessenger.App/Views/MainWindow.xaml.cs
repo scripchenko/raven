@@ -1,8 +1,10 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
 using WpfMenuItem = System.Windows.Controls.MenuItem;
@@ -18,6 +20,10 @@ public partial class MainWindow : Window
     private readonly IWebViewSessionManager _webViewSessionManager;
     private readonly IWebViewRuntimeService _webViewRuntimeService;
     private readonly IExternalBrowserService _externalBrowserService;
+    private readonly IApplicationExitCoordinator _exitCoordinator;
+    private readonly IApplicationTrayCoordinator _trayCoordinator;
+    private readonly IWindowActivationService _windowActivationService;
+    private readonly ITaskbarActivityIndicator _taskbarActivityIndicator;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private CancellationTokenSource? _selectionCancellation;
     private bool _isRuntimeAvailable;
@@ -26,17 +32,31 @@ public partial class MainWindow : Window
         MainWindowViewModel viewModel,
         IWebViewSessionManager webViewSessionManager,
         IWebViewRuntimeService webViewRuntimeService,
-        IExternalBrowserService externalBrowserService)
+        IExternalBrowserService externalBrowserService,
+        IApplicationExitCoordinator exitCoordinator,
+        IApplicationTrayCoordinator trayCoordinator,
+        IWindowActivationService windowActivationService,
+        ITaskbarActivityIndicator taskbarActivityIndicator)
     {
         _viewModel = viewModel;
         _webViewSessionManager = webViewSessionManager;
         _webViewRuntimeService = webViewRuntimeService;
         _externalBrowserService = externalBrowserService;
+        _exitCoordinator = exitCoordinator;
+        _trayCoordinator = trayCoordinator;
+        _windowActivationService = windowActivationService;
+        _taskbarActivityIndicator = taskbarActivityIndicator;
         DataContext = viewModel;
 
         InitializeComponent();
+        _windowActivationService.Attach(
+            this,
+            () => _viewModel.SelectedService?.Id,
+            _viewModel.SelectService);
+        _taskbarActivityIndicator.Attach(this);
         ApplySavedWindowSettings(viewModel.WindowSettings);
         Loaded += OnLoaded;
+        Activated += OnActivated;
         _viewModel.SelectedServiceChanged += OnSelectedServiceChanged;
         _webViewSessionManager.SessionRecreationRequested += OnSessionRecreationRequested;
     }
@@ -44,6 +64,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs eventArgs)
     {
         Loaded -= OnLoaded;
+        Activated -= OnActivated;
         _viewModel.SelectedServiceChanged -= OnSelectedServiceChanged;
         _webViewSessionManager.SessionRecreationRequested -= OnSessionRecreationRequested;
         _selectionCancellation?.Cancel();
@@ -54,6 +75,8 @@ public partial class MainWindow : Window
         WebViewContainer.Children.Clear();
         _webViewSessionManager.ReleaseAllSessions();
         _lifetimeCancellation.Dispose();
+        _windowActivationService.Detach(this);
+        _taskbarActivityIndicator.Detach(this);
 
         Rect bounds = WindowState == WindowState.Maximized ? RestoreBounds : new Rect(Left, Top, ActualWidth, ActualHeight);
         _viewModel.UpdateWindowSettings(
@@ -63,6 +86,34 @@ public partial class MainWindow : Window
             bounds.Top,
             WindowState == WindowState.Maximized);
         base.OnClosed(eventArgs);
+    }
+
+    protected override void OnClosing(CancelEventArgs eventArgs)
+    {
+        bool shutdownStarted = Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished;
+        if (_exitCoordinator.ShouldHideToTray(_viewModel.CloseToTray, shutdownStarted))
+        {
+            eventArgs.Cancel = true;
+            Hide();
+            _ = ShowTrayHintOnceAsync();
+        }
+
+        base.OnClosing(eventArgs);
+    }
+
+    private async Task ShowTrayHintOnceAsync()
+    {
+        try
+        {
+            if (!_viewModel.HasShownTrayHint && _trayCoordinator.TryShowCloseToTrayHint())
+            {
+                await _viewModel.MarkTrayHintShownAsync();
+            }
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            // Closing to tray must remain available even if the hint state could not be saved.
+        }
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs eventArgs)
@@ -85,6 +136,7 @@ public partial class MainWindow : Window
     {
         try
         {
+            _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
             await _viewModel.PersistSelectionAsync();
             await ShowSelectedServiceAsync();
         }
@@ -93,6 +145,9 @@ public partial class MainWindow : Window
             ShowOperationError("Не удалось переключить аккаунт", exception);
         }
     }
+
+    private void OnActivated(object? sender, EventArgs eventArgs) =>
+        _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
 
     private async void OnSessionRecreationRequested(
         object? sender,

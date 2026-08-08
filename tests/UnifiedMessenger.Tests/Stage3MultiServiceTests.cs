@@ -1,6 +1,7 @@
 using System.IO;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
+using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
 using UnifiedMessenger.App.Services.WebView;
@@ -120,7 +121,12 @@ public sealed class Stage3MultiServiceTests
         _ = ServiceInstanceManager.Add(settings, _catalog.Get(ServiceType.Telegram));
         ServiceInstance whatsapp = ServiceInstanceManager.Add(settings, _catalog.Get(ServiceType.WhatsApp));
         settings.LastServiceId = whatsapp.Id;
-        using MainWindowViewModel viewModel = new(_catalog, new StubSessionManager(), new StubSettingsService());
+        using MainWindowViewModel viewModel = new(
+            _catalog,
+            new StubSessionManager(),
+            new ApplicationSettingsStore(new StubSettingsService()),
+            new ServiceActivityCoordinator(),
+            new StubWebNotificationCoordinator());
 
         viewModel.Initialize(settings);
 
@@ -318,7 +324,20 @@ public sealed class Stage3MultiServiceTests
             remove { }
         }
 
+        public event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived
+        {
+            add { }
+            remove { }
+        }
+
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
+        public bool IsShutdownStarted { get; private set; }
         public WpfWebView2 CreateWebView(ServiceInstance serviceInstance) => throw new NotSupportedException();
         public Task<bool> InitializeAsync(WpfWebView2 webView, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
@@ -333,6 +352,7 @@ public sealed class Stage3MultiServiceTests
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
         public void ReleaseAllSessions() { }
+        public void BeginShutdown() => IsShutdownStarted = true;
         public void Dispose() { }
     }
 
@@ -342,6 +362,17 @@ public sealed class Stage3MultiServiceTests
             Task.FromResult(new SettingsLoadResult(AppSettings.CreateDefault()));
 
         public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class StubWebNotificationCoordinator : IWebNotificationCoordinator
+    {
+        public int PendingCount => 0;
+        public bool HasActiveNotification => false;
+        public void Handle(WebNotificationRequest request) { }
+        public void DiscardPending(Guid serviceInstanceId) { }
+        public void OnDoNotDisturbChanged(bool enabled) { }
+        public void Shutdown() { }
+        public void Dispose() { }
     }
 
     private sealed class TempSettingsFolder : IDisposable

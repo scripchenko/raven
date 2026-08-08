@@ -7,8 +7,11 @@ public interface IWebViewSessionManager : IDisposable
 {
     event EventHandler<WebViewSessionStateChangedEventArgs>? StateChanged;
     event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested;
+    event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged;
+    event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived;
 
     WebViewSessionState State { get; }
+    bool IsShutdownStarted { get; }
     WpfWebView2 CreateWebView(ServiceInstance serviceInstance);
     Task<bool> InitializeAsync(
         WpfWebView2 webView,
@@ -26,4 +29,5 @@ public interface IWebViewSessionManager : IDisposable
         ServiceInstance serviceInstance,
         CancellationToken cancellationToken = default);
     void ReleaseAllSessions();
+    void BeginShutdown();
 }

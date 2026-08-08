@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
+using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.WebView;
 
@@ -12,8 +13,9 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private readonly IBuiltInServiceCatalog _serviceCatalog;
     private readonly IWebViewSessionManager _webViewSessionManager;
-    private readonly ISettingsService _settingsService;
-    private readonly SemaphoreSlim _settingsSaveGate = new(1, 1);
+    private readonly IApplicationSettingsStore _settingsStore;
+    private readonly IServiceActivityCoordinator _activityCoordinator;
+    private readonly IWebNotificationCoordinator _notificationCoordinator;
     private AppSettings _settings = AppSettings.CreateDefault();
     private bool _isInitialized;
     private bool _disposed;
@@ -21,11 +23,15 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public MainWindowViewModel(
         IBuiltInServiceCatalog serviceCatalog,
         IWebViewSessionManager webViewSessionManager,
-        ISettingsService settingsService)
+        IApplicationSettingsStore settingsStore,
+        IServiceActivityCoordinator activityCoordinator,
+        IWebNotificationCoordinator notificationCoordinator)
     {
         _serviceCatalog = serviceCatalog;
         _webViewSessionManager = webViewSessionManager;
-        _settingsService = settingsService;
+        _settingsStore = settingsStore;
+        _activityCoordinator = activityCoordinator;
+        _notificationCoordinator = notificationCoordinator;
         AvailableServices = serviceCatalog.All
             .Where(definition => definition.IsWebViewService && definition.ServiceType != ServiceType.Gmail)
             .ToArray();
@@ -45,6 +51,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(SelectedServiceLabel))]
     [NotifyCanExecuteChangedFor(nameof(ReloadCommand))]
     [NotifyCanExecuteChangedFor(nameof(NavigateHomeCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ToggleSelectedMuteCommand))]
+    [NotifyPropertyChangedFor(nameof(IsSelectedServiceMuted))]
+    [NotifyPropertyChangedFor(nameof(MuteButtonText))]
+    [NotifyPropertyChangedFor(nameof(MuteButtonToolTip))]
     private ServiceInstance? _selectedService;
 
     [ObservableProperty]
@@ -82,6 +92,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         && WebViewStatus is WebViewSessionStatus.Offline or WebViewSessionStatus.Failed;
     public bool IsWebViewInitializing => HasActiveWebView
         && WebViewStatus is WebViewSessionStatus.Uninitialized or WebViewSessionStatus.Initializing;
+    public bool CloseToTray => _settings.CloseToTray;
+    public bool HasShownTrayHint => _settings.HasShownTrayHint;
+    public bool DoNotDisturb => _settings.Notifications.DoNotDisturb;
+    public bool IsSelectedServiceMuted => SelectedService?.IsMuted == true;
+    public string MuteButtonText => IsSelectedServiceMuted ? "🔕" : "🔔";
+    public string MuteButtonToolTip => IsSelectedServiceMuted
+        ? "Включить уведомления аккаунта"
+        : "Отключить уведомления аккаунта";
 
     public string WindowTitle => SelectedService is null
         ? "UnifiedMessenger"
@@ -97,7 +115,9 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         ArgumentNullException.ThrowIfNull(settings);
         _settings = settings;
+        _settingsStore.Initialize(settings);
         _isInitialized = false;
+        _activityCoordinator.Reset(settings.Services);
 
         Services.Clear();
         foreach (ServiceInstance service in ServiceInstanceManager.Sort(settings.Services))
@@ -137,6 +157,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ThrowIfDisposed();
         ServiceInstance target = GetExistingService(service);
         ServiceInstanceManager.SetEnabled(target, isEnabled);
+        if (!isEnabled)
+        {
+            _activityCoordinator.Clear(target);
+            _notificationCoordinator.DiscardPending(target.Id);
+        }
+
         NotifySelectedServiceStateChanged();
         await SaveSettingsAsync();
     }
@@ -188,6 +214,36 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public Task PersistSelectionAsync() => SaveSettingsAsync();
 
+    public void SelectService(Guid serviceInstanceId)
+    {
+        ServiceInstance? service = Services.FirstOrDefault(candidate => candidate.Id == serviceInstanceId);
+        if (service is not null)
+        {
+            SelectedService = service;
+        }
+    }
+
+    public void MarkSelectedServiceViewed(bool isMainWindowVisible, bool isMainWindowActive)
+    {
+        if (isMainWindowVisible && isMainWindowActive && SelectedService is ServiceInstance service)
+        {
+            _activityCoordinator.Clear(service);
+        }
+    }
+
+    public async Task<bool> MarkTrayHintShownAsync()
+    {
+        if (_settings.HasShownTrayHint)
+        {
+            return false;
+        }
+
+        _settings.HasShownTrayHint = true;
+        OnPropertyChanged(nameof(HasShownTrayHint));
+        await SaveSettingsAsync();
+        return true;
+    }
+
     public void SetRuntimeInfo(WebViewRuntimeInfo runtimeInfo)
     {
         ArgumentNullException.ThrowIfNull(runtimeInfo);
@@ -237,7 +293,6 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         _webViewSessionManager.StateChanged -= OnWebViewSessionStateChanged;
-        _settingsSaveGate.Dispose();
     }
 
     [RelayCommand(CanExecute = nameof(CanNavigateBack))]
@@ -259,6 +314,33 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Retry() => _webViewSessionManager.Retry();
 
+    [RelayCommand]
+    private async Task ToggleDoNotDisturb()
+    {
+        _settings.Notifications.DoNotDisturb = !_settings.Notifications.DoNotDisturb;
+        OnPropertyChanged(nameof(DoNotDisturb));
+        await SaveSettingsAsync();
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelectedService))]
+    private async Task ToggleSelectedMute()
+    {
+        if (SelectedService is not ServiceInstance service)
+        {
+            return;
+        }
+
+        service.IsMuted = !service.IsMuted;
+        if (service.IsMuted)
+        {
+            _notificationCoordinator.DiscardPending(service.Id);
+        }
+        OnPropertyChanged(nameof(IsSelectedServiceMuted));
+        OnPropertyChanged(nameof(MuteButtonText));
+        OnPropertyChanged(nameof(MuteButtonToolTip));
+        await SaveSettingsAsync();
+    }
+
     private bool CanUseSelectedWebView() => HasActiveWebView;
 
     partial void OnSelectedServiceChanged(ServiceInstance? value)
@@ -274,6 +356,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             value.LastOpenedAt = DateTimeOffset.UtcNow;
         }
 
+        OnPropertyChanged(nameof(IsSelectedServiceMuted));
+        OnPropertyChanged(nameof(MuteButtonText));
+        OnPropertyChanged(nameof(MuteButtonToolTip));
+
         SelectedServiceChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -284,15 +370,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await _settingsSaveGate.WaitAsync();
-        try
-        {
-            await _settingsService.SaveAsync(CreateSettingsSnapshot());
-        }
-        finally
-        {
-            _settingsSaveGate.Release();
-        }
+        _ = CreateSettingsSnapshot();
+        await _settingsStore.SaveAsync();
     }
 
     private ServiceInstance GetExistingService(ServiceInstance service)

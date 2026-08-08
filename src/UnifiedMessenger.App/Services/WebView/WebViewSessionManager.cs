@@ -2,6 +2,7 @@ using System.IO;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
 using WpfWebView2 = Microsoft.Web.WebView2.Wpf.WebView2;
@@ -14,21 +15,33 @@ public sealed class WebViewSessionManager(
     NavigationPolicy navigationPolicy,
     WebNavigationService webNavigationService,
     WebNewWindowNavigationService newWindowNavigationService,
+    INotificationPermissionCoordinator permissionCoordinator,
     IWebViewProfileCleaner profileCleaner) : IWebViewSessionManager
 {
+    public const bool SaveNotificationPermissionsInProfile = true;
+
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly Dictionary<Guid, SessionEntry> _sessions = [];
     private SessionEntry? _activeSession;
+    private bool _shutdownStarted;
     private bool _disposed;
 
     public event EventHandler<WebViewSessionStateChangedEventArgs>? StateChanged;
     public event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested;
+    public event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged;
+    public event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived;
 
     public WebViewSessionState State { get; private set; } = WebViewSessionState.Uninitialized;
+    public bool IsShutdownStarted => _shutdownStarted;
 
     public WpfWebView2 CreateWebView(ServiceInstance serviceInstance)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_shutdownStarted)
+        {
+            throw new InvalidOperationException("WebView2 shutdown has already started.");
+        }
+
         ValidateServiceInstance(serviceInstance);
 
         if (_sessions.TryGetValue(serviceInstance.Id, out SessionEntry? existingSession))
@@ -61,6 +74,11 @@ public sealed class WebViewSessionManager(
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_shutdownStarted)
+        {
+            throw new InvalidOperationException("WebView2 shutdown has already started.");
+        }
+
         ArgumentNullException.ThrowIfNull(webView);
         ValidateServiceInstance(serviceInstance);
 
@@ -276,6 +294,17 @@ public sealed class WebViewSessionManager(
         DeactivateSession();
     }
 
+    public void BeginShutdown()
+    {
+        if (_shutdownStarted)
+        {
+            return;
+        }
+
+        _shutdownStarted = true;
+        ReleaseAllSessions();
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -283,13 +312,18 @@ public sealed class WebViewSessionManager(
             return;
         }
 
+        BeginShutdown();
         _disposed = true;
-        ReleaseAllSessions();
         _initializationGate.Dispose();
     }
 
     private void ConfigureCoreWebView(SessionEntry session, CoreWebView2 coreWebView)
     {
+        if (!session.SubscriptionGuard.TrySubscribe())
+        {
+            return;
+        }
+
 #if DEBUG
         coreWebView.Settings.AreDevToolsEnabled = true;
 #else
@@ -297,24 +331,56 @@ public sealed class WebViewSessionManager(
 #endif
         session.NavigationStartingHandler = (_, eventArgs) => OnNavigationStarting(session, eventArgs);
         session.NavigationCompletedHandler = (_, eventArgs) => OnNavigationCompleted(session, eventArgs);
+        session.DocumentTitleChangedHandler = (_, _) => OnDocumentTitleChanged(session, coreWebView);
         session.HistoryChangedHandler = (_, _) => OnHistoryChanged(session);
         session.NewWindowRequestedHandler = (_, eventArgs) => OnNewWindowRequested(session, eventArgs);
+        session.PermissionRequestedHandler = (_, eventArgs) => OnPermissionRequested(session, eventArgs);
         session.ProcessFailedHandler = (_, eventArgs) => OnProcessFailed(session, eventArgs);
 
         coreWebView.NavigationStarting += session.NavigationStartingHandler;
         coreWebView.NavigationCompleted += session.NavigationCompletedHandler;
+        coreWebView.DocumentTitleChanged += session.DocumentTitleChangedHandler;
         coreWebView.HistoryChanged += session.HistoryChangedHandler;
         coreWebView.NewWindowRequested += session.NewWindowRequestedHandler;
+        coreWebView.PermissionRequested += session.PermissionRequestedHandler;
         coreWebView.ProcessFailed += session.ProcessFailedHandler;
+
+        session.NotificationReceivedHandler = (_, eventArgs) => OnNotificationReceived(session, eventArgs);
+        try
+        {
+            coreWebView.NotificationReceived += session.NotificationReceivedHandler;
+        }
+        catch (Exception exception) when (exception is NotImplementedException or System.Runtime.InteropServices.COMException)
+        {
+            session.NotificationReceivedHandler = null;
+        }
     }
 
     private static void UnsubscribeCoreWebView(SessionEntry session, CoreWebView2 coreWebView)
     {
+        if (!session.SubscriptionGuard.TryUnsubscribe())
+        {
+            return;
+        }
+
         coreWebView.NavigationStarting -= session.NavigationStartingHandler;
         coreWebView.NavigationCompleted -= session.NavigationCompletedHandler;
+        coreWebView.DocumentTitleChanged -= session.DocumentTitleChangedHandler;
         coreWebView.HistoryChanged -= session.HistoryChangedHandler;
         coreWebView.NewWindowRequested -= session.NewWindowRequestedHandler;
+        coreWebView.PermissionRequested -= session.PermissionRequestedHandler;
         coreWebView.ProcessFailed -= session.ProcessFailedHandler;
+        if (session.NotificationReceivedHandler is not null)
+        {
+            try
+            {
+                coreWebView.NotificationReceived -= session.NotificationReceivedHandler;
+            }
+            catch (Exception exception) when (exception is NotImplementedException or System.Runtime.InteropServices.COMException)
+            {
+                // Older runtimes may not expose the optional notification event.
+            }
+        }
     }
 
     private void OnNavigationStarting(SessionEntry session, CoreWebView2NavigationStartingEventArgs eventArgs)
@@ -374,6 +440,26 @@ public sealed class WebViewSessionManager(
     private void OnHistoryChanged(SessionEntry session) =>
         Publish(session, session.State.Status, session.State.ErrorTitle, session.State.ErrorMessage, session.State.ErrorCode);
 
+    private void OnDocumentTitleChanged(SessionEntry session, CoreWebView2 coreWebView)
+    {
+        string documentTitle;
+        try
+        {
+            documentTitle = coreWebView.DocumentTitle;
+        }
+        catch (Exception exception) when (IsUnavailableControlException(exception))
+        {
+            return;
+        }
+
+        DocumentTitleChanged?.Invoke(
+            this,
+            new ServiceDocumentTitleChangedEventArgs(
+                session.ServiceInstance.Id,
+                session.ServiceInstance.ServiceType,
+                documentTitle));
+    }
+
     private void OnNewWindowRequested(SessionEntry session, CoreWebView2NewWindowRequestedEventArgs eventArgs)
     {
         eventArgs.Handled = true;
@@ -397,6 +483,84 @@ public sealed class WebViewSessionManager(
                 "Адрес нельзя безопасно открыть в системном браузере.",
                 "UnsupportedExternalUri");
         }
+    }
+
+    private async void OnPermissionRequested(
+        SessionEntry session,
+        CoreWebView2PermissionRequestedEventArgs eventArgs)
+    {
+        if (eventArgs.PermissionKind is not CoreWebView2PermissionKind.Notifications)
+        {
+            return;
+        }
+
+        CoreWebView2Deferral? deferral = null;
+        try
+        {
+            deferral = eventArgs.GetDeferral();
+            eventArgs.Handled = true;
+            eventArgs.SavesInProfile = SaveNotificationPermissionsInProfile;
+            NotificationPermissionState decision = await permissionCoordinator.DecideAsync(
+                session.ServiceInstance,
+                eventArgs.Uri);
+            eventArgs.State = decision is NotificationPermissionState.Allowed
+                ? CoreWebView2PermissionState.Allow
+                : CoreWebView2PermissionState.Deny;
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or OperationCanceledException
+                or System.Runtime.InteropServices.COMException)
+        {
+            try
+            {
+                eventArgs.Handled = true;
+                eventArgs.State = CoreWebView2PermissionState.Deny;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // The WebView was disposed while the permission prompt was open.
+            }
+        }
+        finally
+        {
+            try
+            {
+                deferral?.Complete();
+                deferral?.Dispose();
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // A disposed WebView no longer accepts a completed deferral.
+            }
+        }
+    }
+
+    private void OnNotificationReceived(
+        SessionEntry session,
+        CoreWebView2NotificationReceivedEventArgs eventArgs)
+    {
+        eventArgs.Handled = true;
+        WebNotificationLifecycle lifecycle = new(
+            eventArgs.Notification.ReportShown,
+            eventArgs.Notification.ReportClicked,
+            eventArgs.Notification.ReportClosed);
+        EventHandler<WebNotificationReceivedEventArgs>? handler = NotificationReceived;
+        if (handler is null)
+        {
+            lifecycle.CompleteSuppressed();
+            return;
+        }
+
+        handler.Invoke(
+            this,
+            new WebNotificationReceivedEventArgs(
+                session.ServiceInstance.Id,
+                session.ServiceInstance.ServiceType,
+                eventArgs.SenderOrigin,
+                eventArgs.Notification.Title ?? string.Empty,
+                eventArgs.Notification.Body ?? string.Empty,
+                lifecycle));
     }
 
     private void OnProcessFailed(SessionEntry session, CoreWebView2ProcessFailedEventArgs eventArgs)
@@ -476,6 +640,7 @@ public sealed class WebViewSessionManager(
                 StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(State));
             }
         }
+
     }
 
     private Uri GetValidatedStartUri(ServiceInstance serviceInstance)
@@ -582,10 +747,14 @@ public sealed class WebViewSessionManager(
         public HashSet<ulong> CancelledExternalNavigations { get; } = [];
         public bool ProcessFailureDetected { get; set; }
         public bool AutomaticProcessRecoveryUsed { get; set; }
+        public WebViewEventSubscriptionGuard SubscriptionGuard { get; } = new();
         public EventHandler<CoreWebView2NavigationStartingEventArgs>? NavigationStartingHandler { get; set; }
         public EventHandler<CoreWebView2NavigationCompletedEventArgs>? NavigationCompletedHandler { get; set; }
+        public EventHandler<object>? DocumentTitleChangedHandler { get; set; }
         public EventHandler<object>? HistoryChangedHandler { get; set; }
         public EventHandler<CoreWebView2NewWindowRequestedEventArgs>? NewWindowRequestedHandler { get; set; }
+        public EventHandler<CoreWebView2PermissionRequestedEventArgs>? PermissionRequestedHandler { get; set; }
+        public EventHandler<CoreWebView2NotificationReceivedEventArgs>? NotificationReceivedHandler { get; set; }
         public EventHandler<CoreWebView2ProcessFailedEventArgs>? ProcessFailedHandler { get; set; }
     }
 }
