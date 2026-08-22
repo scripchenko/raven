@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Drawing;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Controls;
+using System.Windows.Interop;
 using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Tray;
@@ -9,8 +11,6 @@ using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
 using WpfMenuItem = System.Windows.Controls.MenuItem;
 using WpfMessageBox = System.Windows.MessageBox;
-using WpfPanel = System.Windows.Controls.Panel;
-using WpfWebView2 = Microsoft.Web.WebView2.Wpf.WebView2;
 
 namespace UnifiedMessenger.App.Views;
 
@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private readonly SettingsViewModel _settingsViewModel;
     private readonly IWebViewSessionManager _webViewSessionManager;
+    private readonly IWebViewStartupPrimeCoordinator _startupPrimeCoordinator;
     private readonly IWebViewRuntimeService _webViewRuntimeService;
     private readonly IExternalBrowserService _externalBrowserService;
     private readonly IApplicationExitCoordinator _exitCoordinator;
@@ -26,13 +27,19 @@ public partial class MainWindow : Window
     private readonly IWindowActivationService _windowActivationService;
     private readonly ITaskbarActivityIndicator _taskbarActivityIndicator;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly SemaphoreSlim _deferredPrimeGate = new(1, 1);
+    private readonly HashSet<Guid> _deferredPrimeServiceIds = [];
     private CancellationTokenSource? _selectionCancellation;
+    private HwndSource? _windowSource;
+    private IntPtr _mainWindowHandle;
     private bool _isRuntimeAvailable;
+    private bool _startupPrimeCompleted;
 
     public MainWindow(
         MainWindowViewModel viewModel,
         SettingsViewModel settingsViewModel,
         IWebViewSessionManager webViewSessionManager,
+        IWebViewStartupPrimeCoordinator startupPrimeCoordinator,
         IWebViewRuntimeService webViewRuntimeService,
         IExternalBrowserService externalBrowserService,
         IApplicationExitCoordinator exitCoordinator,
@@ -43,6 +50,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _settingsViewModel = settingsViewModel;
         _webViewSessionManager = webViewSessionManager;
+        _startupPrimeCoordinator = startupPrimeCoordinator;
         _webViewRuntimeService = webViewRuntimeService;
         _externalBrowserService = externalBrowserService;
         _exitCoordinator = exitCoordinator;
@@ -61,6 +69,11 @@ public partial class MainWindow : Window
         ApplySavedWindowSettings(viewModel.WindowSettings);
         Loaded += OnLoaded;
         Activated += OnActivated;
+        SourceInitialized += OnSourceInitialized;
+        LocationChanged += OnWindowLocationChanged;
+        StateChanged += OnWindowStateChanged;
+        IsVisibleChanged += OnWindowVisibilityChanged;
+        WebViewContainer.SizeChanged += OnWebViewContainerSizeChanged;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.SelectedServiceChanged += OnSelectedServiceChanged;
         _settingsViewModel.RenameAccountRequested += OnSettingsRenameAccountRequested;
@@ -73,6 +86,11 @@ public partial class MainWindow : Window
     {
         Loaded -= OnLoaded;
         Activated -= OnActivated;
+        SourceInitialized -= OnSourceInitialized;
+        LocationChanged -= OnWindowLocationChanged;
+        StateChanged -= OnWindowStateChanged;
+        IsVisibleChanged -= OnWindowVisibilityChanged;
+        WebViewContainer.SizeChanged -= OnWebViewContainerSizeChanged;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.SelectedServiceChanged -= OnSelectedServiceChanged;
         _settingsViewModel.RenameAccountRequested -= OnSettingsRenameAccountRequested;
@@ -84,7 +102,8 @@ public partial class MainWindow : Window
         _selectionCancellation = null;
         _lifetimeCancellation.Cancel();
 
-        WebViewContainer.Children.Clear();
+        _windowSource?.RemoveHook(WindowMessageHook);
+        _windowSource = null;
         _webViewSessionManager.ReleaseAllSessions();
         _lifetimeCancellation.Dispose();
         _windowActivationService.Detach(this);
@@ -136,6 +155,13 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs eventArgs)
     {
         Loaded -= OnLoaded;
+        _mainWindowHandle = new WindowInteropHelper(this).Handle;
+
+        if (_startupPrimeCompleted)
+        {
+            UpdateDirectSurface(moveFocus: false);
+            return;
+        }
 
         WebViewRuntimeInfo runtimeInfo = _webViewRuntimeService.DetectRuntime();
         _viewModel.SetRuntimeInfo(runtimeInfo);
@@ -164,15 +190,131 @@ public partial class MainWindow : Window
     }
 
     private void OnActivated(object? sender, EventArgs eventArgs) =>
+        HandleWindowActivated();
+
+    private void HandleWindowActivated()
+    {
         _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
+        UpdateDirectSurface(moveFocus: true);
+    }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
         if (eventArgs.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen)
-            && !_viewModel.IsSettingsOpen)
+            || eventArgs.PropertyName == nameof(MainWindowViewModel.WebViewStatus))
         {
-            _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
+            UpdateDirectSurface(moveFocus: false);
+            if (eventArgs.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen)
+                && !_viewModel.IsSettingsOpen)
+            {
+                _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
+                if (_viewModel.SelectedService is ServiceInstance selected
+                    && _deferredPrimeServiceIds.Contains(selected.Id))
+                {
+                    _ = InitializeSelectedServiceAfterSettingsAsync();
+                }
+            }
         }
+    }
+
+    private async Task InitializeSelectedServiceAfterSettingsAsync()
+    {
+        try
+        {
+            await ShowSelectedServiceAsync();
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось инициализировать аккаунт", exception);
+        }
+    }
+
+    internal WebViewRuntimeInfo DetectRuntimeForStartup()
+    {
+        WebViewRuntimeInfo runtimeInfo = _webViewRuntimeService.DetectRuntime();
+        _viewModel.SetRuntimeInfo(runtimeInfo);
+        _isRuntimeAvailable = runtimeInfo.IsAvailable;
+        return runtimeInfo;
+    }
+
+    internal async Task<StartupPrimeResult> PrimeEnabledServicesBeforeShowAsync(
+        IProgress<StartupPrimeProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!_isRuntimeAvailable)
+        {
+            return StartupPrimeResult.Empty;
+        }
+
+        _mainWindowHandle = new WindowInteropHelper(this).EnsureHandle();
+        Rectangle bounds = GetPreShowDirectWebViewBounds();
+        return await _startupPrimeCoordinator.PrimeAsync(
+            _mainWindowHandle,
+            bounds,
+            _viewModel.Services,
+            _viewModel.SelectedService?.Id,
+            progress,
+            cancellationToken);
+    }
+
+    internal void CompleteStartupPrime()
+    {
+        if (_viewModel.SelectedService is ServiceInstance selected && selected.IsEnabled)
+        {
+            _webViewSessionManager.ActivateSession(
+                selected.Id,
+                GetPreShowDirectWebViewBounds(),
+                isVisible: true,
+                moveFocus: false);
+        }
+
+        _startupPrimeCompleted = true;
+    }
+
+    internal int InitializedControllerCount => _webViewSessionManager.InitializedSessionCount;
+    internal int InitialNavigationCount => _webViewSessionManager.InitialNavigationCount;
+
+    private void OnSourceInitialized(object? sender, EventArgs eventArgs)
+    {
+        _mainWindowHandle = new WindowInteropHelper(this).Handle;
+        _windowSource = HwndSource.FromHwnd(_mainWindowHandle);
+        _windowSource?.AddHook(WindowMessageHook);
+    }
+
+    private void OnWindowLocationChanged(object? sender, EventArgs eventArgs) =>
+        _webViewSessionManager.NotifyParentWindowPositionChanged();
+
+    private void OnWindowStateChanged(object? sender, EventArgs eventArgs) =>
+        UpdateDirectSurface(moveFocus: false);
+
+    private async void OnWindowVisibilityChanged(object sender, DependencyPropertyChangedEventArgs eventArgs)
+    {
+        UpdateDirectSurface(moveFocus: false);
+        if (!IsVisible && !_lifetimeCancellation.IsCancellationRequested)
+        {
+            await PrimeDeferredServicesWhileHiddenAsync(_lifetimeCancellation.Token);
+        }
+    }
+
+    private void OnWebViewContainerSizeChanged(object sender, SizeChangedEventArgs eventArgs) =>
+        UpdateDirectSurface(moveFocus: false);
+
+    private IntPtr WindowMessageHook(
+        IntPtr hwnd,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam,
+        ref bool handled)
+    {
+        const int WindowPositionChanged = 0x0047;
+        const int DpiChanged = 0x02E0;
+        if (message is WindowPositionChanged or DpiChanged)
+        {
+            _webViewSessionManager.NotifyParentWindowPositionChanged();
+            Dispatcher.BeginInvoke(() => UpdateDirectSurface(moveFocus: false));
+        }
+
+        return IntPtr.Zero;
     }
 
     private async void OnSessionRecreationRequested(
@@ -202,7 +344,6 @@ public partial class MainWindow : Window
         CancellationToken cancellationToken = selectionCancellation.Token;
 
         ServiceInstance? service = _viewModel.SelectedService;
-        WebViewContainer.Children.Clear();
         _webViewSessionManager.DeactivateSession();
 
         if (service is null || !service.IsEnabled)
@@ -218,14 +359,14 @@ public partial class MainWindow : Window
                 _webViewSessionManager.ReleaseSession(service.Id);
             }
 
-            WpfWebView2 webView = _webViewSessionManager.CreateWebView(service);
-            if (webView.Parent is WpfPanel previousParent)
-            {
-                previousParent.Children.Remove(webView);
-            }
-
-            WebViewContainer.Children.Add(webView);
-            await _webViewSessionManager.InitializeAsync(webView, service, cancellationToken);
+            _deferredPrimeServiceIds.Remove(service.Id);
+            await _webViewSessionManager.InitializeAsync(
+                _mainWindowHandle,
+                GetDirectWebViewBounds(),
+                service,
+                activate: true,
+                cancellationToken);
+            UpdateDirectSurface(moveFocus: true);
         }
         catch (WebView2RuntimeNotFoundException)
         {
@@ -317,18 +458,39 @@ public partial class MainWindow : Window
         {
             if (!isEnabled)
             {
-                if (_viewModel.SelectedService?.Id == service.Id)
-                {
-                    WebViewContainer.Children.Clear();
-                }
-
-                _webViewSessionManager.ReleaseSession(service.Id);
+                _deferredPrimeServiceIds.Remove(service.Id);
             }
 
             await _viewModel.SetServiceEnabledAsync(service, isEnabled);
             if (_viewModel.SelectedService?.Id == service.Id)
             {
-                await ShowSelectedServiceAsync();
+                if (isEnabled
+                    && IsVisible
+                    && _viewModel.IsSettingsOpen
+                    && !_webViewSessionManager.IsSessionInitialized(service.Id))
+                {
+                    _deferredPrimeServiceIds.Add(service.Id);
+                }
+                else
+                {
+                    await ShowSelectedServiceAsync();
+                }
+            }
+            else if (isEnabled)
+            {
+                EnabledAccountInitializationAction action = EnabledAccountInitializationPolicy.Decide(
+                    service.IsEnabled,
+                    _webViewSessionManager.IsSessionInitialized(service.Id),
+                    IsVisible);
+                if (action is EnabledAccountInitializationAction.PrimeWhileHidden)
+                {
+                    _deferredPrimeServiceIds.Add(service.Id);
+                    await PrimeDeferredServicesWhileHiddenAsync(_lifetimeCancellation.Token);
+                }
+                else if (action is EnabledAccountInitializationAction.WaitForSelectionOrHiddenState)
+                {
+                    _deferredPrimeServiceIds.Add(service.Id);
+                }
             }
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
@@ -366,11 +528,7 @@ public partial class MainWindow : Window
 
         try
         {
-            if (_viewModel.SelectedService?.Id == service.Id)
-            {
-                WebViewContainer.Children.Clear();
-            }
-
+            _deferredPrimeServiceIds.Remove(service.Id);
             bool profileWasDeleted = await _webViewSessionManager.ClearProfileAsync(
                 service,
                 _lifetimeCancellation.Token);
@@ -423,6 +581,135 @@ public partial class MainWindow : Window
     {
         service = (sender as WpfMenuItem)?.CommandParameter as ServiceInstance ?? null!;
         return service is not null;
+    }
+
+    private async Task PrimeDeferredServicesWhileHiddenAsync(CancellationToken cancellationToken)
+    {
+        if (IsVisible
+            || !_isRuntimeAvailable
+            || _mainWindowHandle == IntPtr.Zero
+            || _deferredPrimeServiceIds.Count == 0)
+        {
+            return;
+        }
+
+        await _deferredPrimeGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (IsVisible || _deferredPrimeServiceIds.Count == 0)
+            {
+                return;
+            }
+
+            ServiceInstance[] services = _viewModel.Services
+                .Where(service => service.IsEnabled && _deferredPrimeServiceIds.Contains(service.Id))
+                .ToArray();
+            StartupPrimeResult result = await _startupPrimeCoordinator.PrimeAsync(
+                _mainWindowHandle,
+                GetDirectWebViewBounds(),
+                services,
+                selectedServiceId: null,
+                progress: null,
+                cancellationToken);
+
+            foreach (Guid serviceId in result.AttemptedServiceIds)
+            {
+                _deferredPrimeServiceIds.Remove(serviceId);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Shutdown cancels deferred initialization without creating more UI.
+        }
+        finally
+        {
+            _deferredPrimeGate.Release();
+        }
+    }
+
+    private void UpdateDirectSurface(bool moveFocus)
+    {
+        if (!_isRuntimeAvailable
+            || _mainWindowHandle == IntPtr.Zero
+            || WebViewContainer.ActualWidth <= 0
+            || WebViewContainer.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        Rectangle bounds = GetDirectWebViewBounds();
+        bool isVisible = IsVisible
+            && WindowState != WindowState.Minimized
+            && !_viewModel.IsSettingsOpen
+            && !_viewModel.HasWebViewError
+            && _viewModel.SelectedService?.IsEnabled == true;
+
+        if (_viewModel.SelectedService is ServiceInstance selected
+            && _webViewSessionManager.IsSessionInitialized(selected.Id))
+        {
+            _webViewSessionManager.ActivateSession(selected.Id, bounds, isVisible, moveFocus);
+        }
+        else
+        {
+            _webViewSessionManager.UpdateActiveSessionLayout(bounds, isVisible: false);
+        }
+    }
+
+    private Rectangle GetDirectWebViewBounds()
+    {
+        System.Windows.Point screenTopLeft = WebViewContainer.PointToScreen(new System.Windows.Point(0, 0));
+        System.Windows.Point screenBottomRight = WebViewContainer.PointToScreen(
+            new System.Windows.Point(WebViewContainer.ActualWidth, WebViewContainer.ActualHeight));
+        NativePoint topLeft = new((int)Math.Round(screenTopLeft.X), (int)Math.Round(screenTopLeft.Y));
+        NativePoint bottomRight = new((int)Math.Round(screenBottomRight.X), (int)Math.Round(screenBottomRight.Y));
+        if (!ScreenToClient(_mainWindowHandle, ref topLeft)
+            || !ScreenToClient(_mainWindowHandle, ref bottomRight))
+        {
+            throw new InvalidOperationException("Unable to map the WebView2 bounds to MainWindow client coordinates.");
+        }
+
+        return Rectangle.FromLTRB(topLeft.X, topLeft.Y, bottomRight.X, bottomRight.Y);
+    }
+
+    private Rectangle GetPreShowDirectWebViewBounds()
+    {
+        if (!GetClientRect(_mainWindowHandle, out NativeRect clientRect))
+        {
+            throw new InvalidOperationException("Unable to read the hidden MainWindow client bounds.");
+        }
+
+        uint dpi = GetDpiForWindow(_mainWindowHandle);
+        double scale = dpi == 0 ? 1d : dpi / 96d;
+        int left = (int)Math.Round(84d * scale);
+        int top = (int)Math.Round(64d * scale);
+        return Rectangle.FromLTRB(left, top, clientRect.Right, clientRect.Bottom);
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ScreenToClient(IntPtr window, ref NativePoint point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(IntPtr window, out NativeRect rectangle);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr window);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint(int x, int y)
+    {
+        public int X = x;
+        public int Y = y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 
     private void CompleteSelectionOperation(CancellationTokenSource selectionCancellation)

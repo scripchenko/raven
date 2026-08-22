@@ -1,5 +1,5 @@
+using System.Drawing;
 using UnifiedMessenger.App.Models;
-using WpfWebView2 = Microsoft.Web.WebView2.Wpf.WebView2;
 
 namespace UnifiedMessenger.App.Services.WebView;
 
@@ -12,11 +12,23 @@ public interface IWebViewSessionManager : IDisposable
 
     WebViewSessionState State { get; }
     bool IsShutdownStarted { get; }
-    WpfWebView2 CreateWebView(ServiceInstance serviceInstance);
+    int InitializedSessionCount { get; }
+    int InitialNavigationCount { get; }
     Task<bool> InitializeAsync(
-        WpfWebView2 webView,
+        IntPtr parentWindow,
+        Rectangle bounds,
+        ServiceInstance serviceInstance,
+        bool activate,
+        CancellationToken cancellationToken = default);
+    Task<bool> PrimeAsync(
+        IntPtr parentWindow,
+        Rectangle bounds,
         ServiceInstance serviceInstance,
         CancellationToken cancellationToken = default);
+    bool IsSessionInitialized(Guid serviceInstanceId);
+    void ActivateSession(Guid serviceInstanceId, Rectangle bounds, bool isVisible, bool moveFocus = false);
+    void UpdateActiveSessionLayout(Rectangle bounds, bool isVisible);
+    void NotifyParentWindowPositionChanged();
     bool HasSession(Guid serviceInstanceId);
     void DeactivateSession();
     void GoBack();

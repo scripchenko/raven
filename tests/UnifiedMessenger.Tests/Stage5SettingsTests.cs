@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.IO;
 using System.Text.Json;
 using UnifiedMessenger.App.Models;
@@ -8,7 +9,6 @@ using UnifiedMessenger.App.Services.Security;
 using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
-using WpfWebView2 = Microsoft.Web.WebView2.Wpf.WebView2;
 
 namespace UnifiedMessenger.Tests;
 
@@ -279,7 +279,7 @@ public sealed class Stage5SettingsTests
 
         Assert.False(fixture.Main.IsSettingsOpen);
         Assert.Same(target, fixture.Main.SelectedService);
-        Assert.Equal(0, fixture.Session.CreateWebViewCount);
+        Assert.Equal(0, fixture.Session.InitializeCount);
         Assert.Equal(target.Id, fixture.Settings.LastServiceId);
         Assert.Equal(target.ProfileName, fixture.Main.SelectedService!.ProfileName);
     }
@@ -294,7 +294,7 @@ public sealed class Stage5SettingsTests
 
         Assert.True(fixture.Main.IsSettingsOpen);
         Assert.Same(selected, fixture.Main.SelectedService);
-        Assert.Equal(0, fixture.Session.CreateWebViewCount);
+        Assert.Equal(0, fixture.Session.InitializeCount);
         Assert.Equal(0, fixture.Session.DeactivateCount);
         Assert.Equal(0, fixture.Session.ReleaseSessionCount);
         Assert.Equal(selected.Id, fixture.Main.SelectedService!.Id);
@@ -551,20 +551,24 @@ public sealed class Stage5SettingsTests
 
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted { get; private set; }
-        public int CreateWebViewCount { get; private set; }
+        public int InitializedSessionCount => 0;
+        public int InitialNavigationCount => 0;
+        public int InitializeCount { get; private set; }
         public int DeactivateCount { get; private set; }
         public int ReleaseSessionCount { get; private set; }
         public Guid? LastClearedServiceId { get; private set; }
         public string? LastClearedProfileName { get; private set; }
 
-        public WpfWebView2 CreateWebView(ServiceInstance serviceInstance)
+        public Task<bool> InitializeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, bool activate, CancellationToken cancellationToken = default)
         {
-            CreateWebViewCount++;
-            throw new NotSupportedException();
+            InitializeCount++;
+            return Task.FromResult(true);
         }
-
-        public Task<bool> InitializeAsync(WpfWebView2 webView, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
-            Task.FromResult(true);
+        public Task<bool> PrimeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public bool IsSessionInitialized(Guid serviceInstanceId) => false;
+        public void ActivateSession(Guid serviceInstanceId, Rectangle bounds, bool isVisible, bool moveFocus = false) { }
+        public void UpdateActiveSessionLayout(Rectangle bounds, bool isVisible) { }
+        public void NotifyParentWindowPositionChanged() { }
         public bool HasSession(Guid serviceInstanceId) => false;
         public void DeactivateSession() => DeactivateCount++;
         public void GoBack() { }

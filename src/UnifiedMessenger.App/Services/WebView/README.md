@@ -1,10 +1,13 @@
 # WebView2 module
 
-Stage 4 keeps the lazy, isolated Telegram, WhatsApp, MAX and VK Messenger sessions and adds safe activity and notification events through `IWebViewSessionManager`.
+Stage 6 hosts isolated Telegram, WhatsApp, MAX and VK Messenger sessions with direct `CoreWebView2Controller` instances and exposes safe activity and notification events through `IWebViewSessionManager`.
 
 - `UserDataFolder` is shared at `%LOCALAPPDATA%\UnifiedMessenger\WebView2`.
 - every `ProfileName` is derived once from its persisted service GUID and keeps authentication isolated;
-- a WebView2 control is created only when its account is first selected;
+- one shared `CoreWebView2Environment` creates exactly one direct controller per enabled account;
+- enabled accounts are primed sequentially while the real `MainWindow` is hidden, selected account first and then the remaining user order;
+- startup priming uses the existing `MainWindow` HWND and never creates a technical WPF host window, `HwndHost`, composition control or off-screen surface;
+- switching changes controller bounds, visibility and focus without navigation, reload or profile recreation;
 - top-level navigation is restricted to the per-service catalog allow-list;
 - external HTTP(S) and mail links use the Windows default handler;
 - popup windows are handled explicitly and never create an uncontrolled second WebView2;
@@ -18,6 +21,6 @@ Stage 4 keeps the lazy, isolated Telegram, WhatsApp, MAX and VK Messenger sessio
 
 Telegram notification sounds are produced by UnifiedMessenger from the typed `NotificationReceived` event using a short Windows system sound and a one-second cooldown. To avoid duplicate notification audio, users should disable Telegram Web's built-in notification sound manually. UnifiedMessenger does not change that web setting and never mutes WebView2, so voice messages, calls, video and other media remain unaffected.
 
-WebView2 web notifications are not guaranteed background push. They are available only for created, running sessions; an account that has never been opened may have no active session. If the installed Runtime does not expose `NotificationReceived`, the application continues with `DocumentTitleChanged` as a best-effort fallback. Services can change their title format at any time.
+WebView2 web notifications are not guaranteed background push. Stage 6 primes every enabled session before showing the main window so supported services can establish their notification pipeline without a visible service switch. If the installed Runtime does not expose `NotificationReceived`, the application continues with `DocumentTitleChanged` as a best-effort fallback. Services can change their title format at any time.
 
 This module never injects JavaScript, analyzes the DOM, or reads cookies, page messages, contacts or credentials. Notification text is read only from the typed WebView2 notification event for the short-lived popup.

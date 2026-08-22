@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.IO;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
@@ -6,7 +7,6 @@ using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
-using WpfWebView2 = Microsoft.Web.WebView2.Wpf.WebView2;
 
 namespace UnifiedMessenger.Tests;
 
@@ -338,9 +338,16 @@ public sealed class Stage3MultiServiceTests
 
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted { get; private set; }
-        public WpfWebView2 CreateWebView(ServiceInstance serviceInstance) => throw new NotSupportedException();
-        public Task<bool> InitializeAsync(WpfWebView2 webView, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
+        public int InitializedSessionCount => 0;
+        public int InitialNavigationCount => 0;
+        public Task<bool> InitializeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, bool activate, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task<bool> PrimeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public bool IsSessionInitialized(Guid serviceInstanceId) => false;
+        public void ActivateSession(Guid serviceInstanceId, Rectangle bounds, bool isVisible, bool moveFocus = false) { }
+        public void UpdateActiveSessionLayout(Rectangle bounds, bool isVisible) { }
+        public void NotifyParentWindowPositionChanged() { }
         public bool HasSession(Guid serviceInstanceId) => false;
         public void DeactivateSession() { }
         public void GoBack() { }

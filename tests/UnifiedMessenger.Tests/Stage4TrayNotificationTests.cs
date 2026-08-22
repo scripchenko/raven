@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.IO;
 using System.Text.Json;
 using UnifiedMessenger.App.Models;
@@ -8,7 +9,6 @@ using UnifiedMessenger.App.Services.Security;
 using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
-using WpfWebView2 = Microsoft.Web.WebView2.Wpf.WebView2;
 
 namespace UnifiedMessenger.Tests;
 
@@ -101,6 +101,25 @@ public sealed class Stage4TrayNotificationTests
 
         string json = JsonSerializer.Serialize(settings);
 
+        Assert.DoesNotContain("UnreadCount", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("HasUnreadActivity", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SavingSettings_DoesNotClearRuntimeActivityInMemory()
+    {
+        using TempSettingsFolder temp = new();
+        ServiceInstance service = CreateService(ServiceType.Telegram);
+        service.UnreadCount = 7;
+        service.HasUnreadActivity = true;
+        AppSettings settings = new() { Services = [service] };
+        JsonSettingsService persistence = new(temp.SettingsPath);
+
+        await persistence.SaveAsync(settings);
+
+        Assert.Equal(7, service.UnreadCount);
+        Assert.True(service.HasUnreadActivity);
+        string json = await File.ReadAllTextAsync(temp.SettingsPath);
         Assert.DoesNotContain("UnreadCount", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("HasUnreadActivity", json, StringComparison.OrdinalIgnoreCase);
     }
@@ -384,6 +403,55 @@ public sealed class Stage4TrayNotificationTests
     }
 
     [Fact]
+    public void TelegramAndWhatsAppActivity_AreClearedOnlyWhenTheirOwnAccountIsViewed()
+    {
+        ServiceInstance telegram = CreateService(ServiceType.Telegram);
+        ServiceInstance whatsapp = CreateService(ServiceType.WhatsApp);
+        ServiceInstance max = CreateService(ServiceType.Max);
+        ServiceInstance vk = CreateService(ServiceType.VkMessenger);
+        AppSettings settings = AppSettings.CreateDefault();
+        settings.Services.AddRange([telegram, whatsapp, max, vk]);
+        settings.LastServiceId = max.Id;
+        FakeSettingsStore store = new(settings);
+        using MainWindowViewModel viewModel = CreateViewModel(settings, store);
+        telegram.HasUnreadActivity = true;
+        whatsapp.HasUnreadActivity = true;
+
+        viewModel.SelectService(vk.Id);
+        viewModel.MarkSelectedServiceViewed(true, true);
+        Assert.True(telegram.HasUnreadActivity);
+        Assert.True(whatsapp.HasUnreadActivity);
+
+        viewModel.SelectService(whatsapp.Id);
+        viewModel.MarkSelectedServiceViewed(true, true);
+        Assert.True(telegram.HasUnreadActivity);
+        Assert.False(whatsapp.HasUnreadActivity);
+
+        viewModel.SelectService(telegram.Id);
+        viewModel.MarkSelectedServiceViewed(true, true);
+        Assert.False(telegram.HasUnreadActivity);
+    }
+
+    [Fact]
+    public void StartupPrimeVisibility_DoesNotMarkSelectedServiceViewed()
+    {
+        ServiceInstance max = CreateService(ServiceType.Max);
+        max.HasUnreadActivity = true;
+        AppSettings settings = AppSettings.CreateDefault();
+        settings.Services.Add(max);
+        settings.LastServiceId = max.Id;
+        FakeSettingsStore store = new(settings);
+        using MainWindowViewModel viewModel = CreateViewModel(settings, store);
+        max.HasUnreadActivity = true;
+
+        viewModel.MarkSelectedServiceViewed(
+            isMainWindowVisible: false,
+            isMainWindowActive: false);
+
+        Assert.True(max.HasUnreadActivity);
+    }
+
+    [Fact]
     public void EnteringAccount_WhileWindowIsVisibleAndActive_ClearsActivity()
     {
         AppSettings settings = AppSettings.CreateDefault();
@@ -529,6 +597,35 @@ public sealed class Stage4TrayNotificationTests
         activity.MarkNotificationReceived(service);
 
         activity.Clear(service);
+
+        Assert.False(taskbar.HasActivity);
+    }
+
+    [Fact]
+    public void TaskbarOverlay_RemainsUntilEveryEnabledAccountActivityIsCleared()
+    {
+        AppSettings settings = AppSettings.CreateDefault();
+        ServiceInstance telegram = CreateService(ServiceType.Telegram);
+        ServiceInstance whatsapp = CreateService(ServiceType.WhatsApp);
+        settings.Services.AddRange([telegram, whatsapp]);
+        FakeSettingsStore store = new(settings);
+        ServiceActivityCoordinator activity = new();
+        using MainWindowViewModel viewModel = CreateViewModel(settings, store, activity);
+        FakeTaskbarActivityIndicator taskbar = new();
+        using ApplicationTrayCoordinator coordinator = CreateTrayCoordinator(
+            store,
+            activity,
+            viewModel,
+            taskbar);
+        coordinator.Initialize();
+        activity.MarkNotificationReceived(telegram);
+        activity.MarkNotificationReceived(whatsapp);
+
+        activity.Clear(whatsapp);
+
+        Assert.True(taskbar.HasActivity);
+
+        activity.Clear(telegram);
 
         Assert.False(taskbar.HasActivity);
     }
@@ -1479,8 +1576,14 @@ public sealed class Stage4TrayNotificationTests
 
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted { get; private set; }
-        public WpfWebView2 CreateWebView(ServiceInstance serviceInstance) => throw new NotSupportedException();
-        public Task<bool> InitializeAsync(WpfWebView2 webView, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public int InitializedSessionCount => 0;
+        public int InitialNavigationCount => 0;
+        public Task<bool> InitializeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, bool activate, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> PrimeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public bool IsSessionInitialized(Guid serviceInstanceId) => false;
+        public void ActivateSession(Guid serviceInstanceId, Rectangle bounds, bool isVisible, bool moveFocus = false) { }
+        public void UpdateActiveSessionLayout(Rectangle bounds, bool isVisible) { }
+        public void NotifyParentWindowPositionChanged() { }
         public bool HasSession(Guid serviceInstanceId) => false;
         public void DeactivateSession() { }
         public void GoBack() { }

@@ -21,6 +21,8 @@ public partial class App : System.Windows.Application
     private IApplicationTrayCoordinator? _trayCoordinator;
     private IWebViewEventCoordinator? _webViewEventCoordinator;
     private IWebViewSessionManager? _webViewSessionManager;
+    private CancellationTokenSource? _startupCancellation;
+    private StartupWindow? _startupWindow;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -50,6 +52,35 @@ public partial class App : System.Windows.Application
 
             MainWindow window = _serviceProvider.GetRequiredService<MainWindow>();
             MainWindow = window;
+            WebViewRuntimeInfo runtimeInfo = window.DetectRuntimeForStartup();
+            if (runtimeInfo.IsAvailable)
+            {
+                _startupCancellation = new CancellationTokenSource();
+                _startupWindow = new StartupWindow();
+                _startupWindow.ExitRequested += OnStartupExitRequested;
+                _startupWindow.Show();
+
+                Progress<StartupPrimeProgress> progress = new(_startupWindow.UpdateProgress);
+                try
+                {
+                    await window.PrimeEnabledServicesBeforeShowAsync(
+                        progress,
+                        _startupCancellation.Token);
+                }
+                catch (OperationCanceledException) when (_startupCancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                if (_exitCoordinator.IsExiting)
+                {
+                    return;
+                }
+
+                window.CompleteStartupPrime();
+                CloseStartupWindow();
+            }
+
             window.Show();
             _trayCoordinator = _serviceProvider.GetRequiredService<IApplicationTrayCoordinator>();
             _trayCoordinator.Initialize();
@@ -85,6 +116,9 @@ public partial class App : System.Windows.Application
         _webViewEventCoordinator = null;
         _webViewSessionManager = null;
         _trayCoordinator = null;
+        CloseStartupWindow();
+        _startupCancellation?.Dispose();
+        _startupCancellation = null;
         _serviceProvider?.Dispose();
         base.OnExit(e);
     }
@@ -106,14 +140,19 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        _startupCancellation?.Cancel();
         await ShutdownApplicationAsync();
     }
+
+    private void OnStartupExitRequested(object? sender, EventArgs eventArgs) =>
+        _exitCoordinator?.RequestExit();
 
     private async Task ShutdownApplicationAsync()
     {
         try
         {
             _trayCoordinator?.BeginShutdown();
+            CloseStartupWindow();
 
             if (MainWindow is MainWindow mainWindow)
             {
@@ -176,6 +215,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<WebViewSessionManager>();
         services.AddSingleton<IWebViewSessionManager>(provider =>
             provider.GetRequiredService<WebViewSessionManager>());
+        services.AddSingleton<IWebViewStartupPrimeCoordinator, WebViewStartupPrimeCoordinator>();
         services.AddSingleton<ITelegramNotificationSoundCoordinator, TelegramNotificationSoundCoordinator>();
         services.AddSingleton<IWindowActivationService, WpfWindowActivationService>();
         services.AddSingleton<IWebNotificationCoordinator, WebNotificationCoordinator>();
@@ -192,4 +232,17 @@ public partial class App : System.Windows.Application
                 ValidateScopes = true
             });
     }
+
+    private void CloseStartupWindow()
+    {
+        if (_startupWindow is null)
+        {
+            return;
+        }
+
+        _startupWindow.ExitRequested -= OnStartupExitRequested;
+        _startupWindow.CompleteAndClose();
+        _startupWindow = null;
+    }
+
 }

@@ -1,11 +1,10 @@
+using System.Drawing;
 using System.IO;
 using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
-using WpfWebView2 = Microsoft.Web.WebView2.Wpf.WebView2;
 
 namespace UnifiedMessenger.App.Services.WebView;
 
@@ -19,10 +18,20 @@ public sealed class WebViewSessionManager(
     IWebViewProfileCleaner profileCleaner) : IWebViewSessionManager
 {
     public const bool SaveNotificationPermissionsInProfile = true;
+    internal static readonly TimeSpan StartupPrimeTimeout = TimeSpan.FromSeconds(45);
+
+    // Empirical cold-start validation showed that Telegram registers its notification
+    // pipeline just after the first successful visible navigation. Keep the only
+    // post-navigation settle here so it is bounded, cancellable and easy to remove
+    // when the WebView2/Telegram readiness contract becomes explicit.
+    internal static readonly TimeSpan StartupPrimeSettleDelay = TimeSpan.FromSeconds(1);
 
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
+    private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly Dictionary<Guid, SessionEntry> _sessions = [];
+    private Task<CoreWebView2Environment>? _environmentTask;
     private SessionEntry? _activeSession;
+    private int _initialNavigationCount;
     private bool _shutdownStarted;
     private bool _disposed;
 
@@ -33,45 +42,43 @@ public sealed class WebViewSessionManager(
 
     public WebViewSessionState State { get; private set; } = WebViewSessionState.Uninitialized;
     public bool IsShutdownStarted => _shutdownStarted;
+    public int InitializedSessionCount => _sessions.Values.Count(HasInitializedControl);
+    public int InitialNavigationCount => _initialNavigationCount;
 
-    public WpfWebView2 CreateWebView(ServiceInstance serviceInstance)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_shutdownStarted)
-        {
-            throw new InvalidOperationException("WebView2 shutdown has already started.");
-        }
-
-        ValidateServiceInstance(serviceInstance);
-
-        if (_sessions.TryGetValue(serviceInstance.Id, out SessionEntry? existingSession))
-        {
-            EnsureSameProfile(existingSession.ServiceInstance, serviceInstance);
-            existingSession.ServiceInstance = serviceInstance;
-            return existingSession.WebView;
-        }
-
-        Directory.CreateDirectory(appPaths.WebViewDataFolder);
-        WpfWebView2 webView = new()
-        {
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
-            VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
-            CreationProperties = new CoreWebView2CreationProperties
-            {
-                UserDataFolder = appPaths.WebViewDataFolder,
-                ProfileName = serviceInstance.ProfileName,
-                IsInPrivateModeEnabled = false
-            }
-        };
-
-        _sessions.Add(serviceInstance.Id, new SessionEntry(serviceInstance, webView));
-        return webView;
-    }
-
-    public async Task<bool> InitializeAsync(
-        WpfWebView2 webView,
+    public Task<bool> InitializeAsync(
+        IntPtr parentWindow,
+        Rectangle bounds,
         ServiceInstance serviceInstance,
-        CancellationToken cancellationToken = default)
+        bool activate,
+        CancellationToken cancellationToken = default) =>
+        InitializeInternalAsync(
+            parentWindow,
+            bounds,
+            serviceInstance,
+            activate,
+            primeVisibleWhileParentHidden: false,
+            cancellationToken);
+
+    public Task<bool> PrimeAsync(
+        IntPtr parentWindow,
+        Rectangle bounds,
+        ServiceInstance serviceInstance,
+        CancellationToken cancellationToken = default) =>
+        InitializeInternalAsync(
+            parentWindow,
+            bounds,
+            serviceInstance,
+            activate: false,
+            primeVisibleWhileParentHidden: true,
+            cancellationToken);
+
+    private async Task<bool> InitializeInternalAsync(
+        IntPtr parentWindow,
+        Rectangle bounds,
+        ServiceInstance serviceInstance,
+        bool activate,
+        bool primeVisibleWhileParentHidden,
+        CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_shutdownStarted)
@@ -79,51 +86,168 @@ public sealed class WebViewSessionManager(
             throw new InvalidOperationException("WebView2 shutdown has already started.");
         }
 
-        ArgumentNullException.ThrowIfNull(webView);
+        if (parentWindow == IntPtr.Zero)
+        {
+            throw new ArgumentException("A real MainWindow HWND is required.", nameof(parentWindow));
+        }
+
+        ValidateBounds(bounds);
         ValidateServiceInstance(serviceInstance);
 
-        if (!_sessions.TryGetValue(serviceInstance.Id, out SessionEntry? session)
-            || !ReferenceEquals(session.WebView, webView))
+        if (!_sessions.TryGetValue(serviceInstance.Id, out SessionEntry? session))
         {
-            throw new InvalidOperationException("The WebView2 control does not belong to this service account.");
+            session = new SessionEntry(serviceInstance, parentWindow, bounds);
+            _sessions.Add(serviceInstance.Id, session);
         }
 
         EnsureSameProfile(session.ServiceInstance, serviceInstance);
+        if (session.ParentWindow != parentWindow)
+        {
+            throw new InvalidOperationException("A WebView2 controller cannot switch its MainWindow parent.");
+        }
+
         session.ServiceInstance = serviceInstance;
-        _activeSession = session;
+        session.Bounds = bounds;
+        session.PrimeVisibleWhileParentHidden |= primeVisibleWhileParentHidden;
+
+        if (primeVisibleWhileParentHidden)
+        {
+            HideAllExcept(session);
+        }
+
+        if (activate)
+        {
+            SetActiveSession(session, bounds, isVisible: true, moveFocus: false);
+        }
 
         if (HasInitializedControl(session))
         {
-            Publish(session, session.State.Status is WebViewSessionStatus.Uninitialized
-                ? WebViewSessionStatus.Ready
-                : session.State.Status,
-                session.State.ErrorTitle,
-                session.State.ErrorMessage,
-                session.State.ErrorCode);
+            if (activate && ReferenceEquals(_activeSession, session))
+            {
+                ApplyControllerLayout(session, isVisible: true, moveFocus: false);
+                PublishCurrentState(session);
+            }
+
             return true;
         }
 
+        Task<bool> initializationTask;
+        lock (session.InitializationSync)
+        {
+            session.InitializationTask ??= InitializeCoreAsync(session);
+            initializationTask = session.InitializationTask;
+        }
+
+        bool initialized = await initializationTask.WaitAsync(cancellationToken);
+        if (initialized && activate && ReferenceEquals(_activeSession, session))
+        {
+            ApplyControllerLayout(session, isVisible: true, moveFocus: true);
+            PublishCurrentState(session);
+        }
+
+        return initialized;
+    }
+
+    public bool IsSessionInitialized(Guid serviceInstanceId) =>
+        _sessions.TryGetValue(serviceInstanceId, out SessionEntry? session)
+        && HasInitializedControl(session);
+
+    public void ActivateSession(Guid serviceInstanceId, Rectangle bounds, bool isVisible, bool moveFocus = false)
+    {
+        ValidateBounds(bounds);
+        if (!_sessions.TryGetValue(serviceInstanceId, out SessionEntry? session))
+        {
+            return;
+        }
+
+        SetActiveSession(session, bounds, isVisible, moveFocus);
+        PublishCurrentState(session);
+    }
+
+    public void UpdateActiveSessionLayout(Rectangle bounds, bool isVisible)
+    {
+        ValidateBounds(bounds);
+        if (_activeSession is SessionEntry session && session.Controller is not null)
+        {
+            session.Bounds = bounds;
+            ApplyControllerLayout(session, isVisible, moveFocus: false);
+        }
+    }
+
+    public void NotifyParentWindowPositionChanged()
+    {
+        foreach (SessionEntry session in _sessions.Values)
+        {
+            try
+            {
+                session.Controller?.NotifyParentWindowPositionChanged();
+            }
+            catch (Exception exception) when (IsUnavailableControlException(exception))
+            {
+                PublishUnavailableControl(session, exception);
+            }
+        }
+    }
+
+    private async Task<bool> InitializeCoreAsync(SessionEntry session)
+    {
+        CancellationToken cancellationToken = _shutdownCancellation.Token;
         await _initializationGate.WaitAsync(cancellationToken);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-
             if (HasInitializedControl(session))
             {
-                Publish(session, WebViewSessionStatus.Ready);
                 return true;
             }
 
             session.ProcessFailureDetected = false;
             Publish(session, WebViewSessionStatus.Initializing);
 
-            await webView.EnsureCoreWebView2Async();
+            CoreWebView2Environment environment = await GetEnvironmentAsync();
             cancellationToken.ThrowIfCancellationRequested();
+            CoreWebView2ControllerOptions options = environment.CreateCoreWebView2ControllerOptions();
+            options.ProfileName = session.ServiceInstance.ProfileName;
+            options.IsInPrivateModeEnabled = false;
 
-            ConfigureCoreWebView(session, webView.CoreWebView2);
-            Uri startUri = GetValidatedStartUri(serviceInstance);
-            webView.CoreWebView2.Navigate(startUri.AbsoluteUri);
+            CoreWebView2Controller controller = await environment.CreateCoreWebView2ControllerAsync(
+                session.ParentWindow,
+                options);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                controller.Close();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            session.Controller = controller;
+            session.CoreWebView = controller.CoreWebView2;
+            controller.Bounds = session.Bounds;
+            controller.IsVisible = session.PrimeVisibleWhileParentHidden;
+            ConfigureCoreWebView(session, session.CoreWebView);
+
+            session.CoreWebView.Navigate(GetValidatedStartUri(session.ServiceInstance).AbsoluteUri);
+            Interlocked.Increment(ref _initialNavigationCount);
             Publish(session, WebViewSessionStatus.Navigating);
+
+            if (session.PrimeVisibleWhileParentHidden)
+            {
+                bool navigationReady = await session.FirstNavigationCompleted.Task
+                    .WaitAsync(StartupPrimeTimeout, cancellationToken);
+                if (!navigationReady)
+                {
+                    controller.IsVisible = false;
+                    return false;
+                }
+
+                await Task.Delay(StartupPrimeSettleDelay, cancellationToken);
+                controller.IsVisible = false;
+            }
+
+            if (ReferenceEquals(_activeSession, session))
+            {
+                ApplyControllerLayout(session, isVisible: true, moveFocus: false);
+            }
+
             return true;
         }
         catch (WebView2RuntimeNotFoundException)
@@ -137,14 +261,18 @@ public sealed class WebViewSessionManager(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            ReleaseSessionCore(session, updateState: true);
-            throw;
+            return false;
         }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException or System.Runtime.InteropServices.COMException)
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or ArgumentException
+                or IOException
+                or System.Runtime.InteropServices.COMException
+                or TimeoutException)
         {
             PublishFailure(
                 session,
-                $"Не удалось открыть {serviceInstance.DisplayName}",
+                $"Не удалось открыть {session.ServiceInstance.DisplayName}",
                 "Инициализация защищённого профиля WebView2 завершилась ошибкой. Повторите попытку.",
                 exception.GetType().Name);
             return false;
@@ -155,10 +283,83 @@ public sealed class WebViewSessionManager(
         }
     }
 
+    private Task<CoreWebView2Environment> GetEnvironmentAsync()
+    {
+        Directory.CreateDirectory(appPaths.WebViewDataFolder);
+        return _environmentTask ??= CoreWebView2Environment.CreateAsync(
+            browserExecutableFolder: null,
+            userDataFolder: appPaths.WebViewDataFolder,
+            options: null);
+    }
+
+    private void SetActiveSession(SessionEntry session, Rectangle bounds, bool isVisible, bool moveFocus)
+    {
+        HideAllExcept(session);
+        _activeSession = session;
+        session.Bounds = bounds;
+        ApplyControllerLayout(session, isVisible, moveFocus);
+    }
+
+    private void HideAllExcept(SessionEntry session)
+    {
+        foreach (SessionEntry candidate in _sessions.Values)
+        {
+            if (!ReferenceEquals(candidate, session) && candidate.Controller is not null)
+            {
+                candidate.Controller.IsVisible = false;
+            }
+        }
+    }
+
+    private static void ApplyControllerLayout(SessionEntry session, bool isVisible, bool moveFocus)
+    {
+        CoreWebView2Controller? controller = session.Controller;
+        if (controller is null)
+        {
+            return;
+        }
+
+        bool canShow = isVisible
+            && session.State.Status is not WebViewSessionStatus.Failed
+            && session.State.Status is not WebViewSessionStatus.Offline;
+        controller.Bounds = session.Bounds;
+        controller.IsVisible = canShow;
+        if (canShow && moveFocus)
+        {
+            controller.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
+        }
+    }
+
+    private void PublishCurrentState(SessionEntry session) =>
+        Publish(
+            session,
+            session.State.Status is WebViewSessionStatus.Uninitialized
+                ? WebViewSessionStatus.Ready
+                : session.State.Status,
+            session.State.ErrorTitle,
+            session.State.ErrorMessage,
+            session.State.ErrorCode);
+
+    private static void ValidateBounds(Rectangle bounds)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bounds), "The WebView2 bounds must be positive.");
+        }
+    }
+
     public bool HasSession(Guid serviceInstanceId) => _sessions.ContainsKey(serviceInstanceId);
 
     public void DeactivateSession()
     {
+        foreach (SessionEntry session in _sessions.Values)
+        {
+            if (session.Controller is not null)
+            {
+                session.Controller.IsVisible = false;
+            }
+        }
+
         _activeSession = null;
         State = WebViewSessionState.Uninitialized;
         StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(State));
@@ -169,9 +370,9 @@ public sealed class WebViewSessionManager(
         SessionEntry? session = _activeSession;
         try
         {
-            if (session is not null && !session.ProcessFailureDetected && session.WebView.CanGoBack)
+            if (session?.CoreWebView is not null && !session.ProcessFailureDetected && session.CoreWebView.CanGoBack)
             {
-                session.WebView.GoBack();
+                session.CoreWebView.GoBack();
             }
         }
         catch (Exception exception) when (IsUnavailableControlException(exception))
@@ -185,9 +386,9 @@ public sealed class WebViewSessionManager(
         SessionEntry? session = _activeSession;
         try
         {
-            if (session is not null && !session.ProcessFailureDetected && session.WebView.CanGoForward)
+            if (session?.CoreWebView is not null && !session.ProcessFailureDetected && session.CoreWebView.CanGoForward)
             {
-                session.WebView.GoForward();
+                session.CoreWebView.GoForward();
             }
         }
         catch (Exception exception) when (IsUnavailableControlException(exception))
@@ -201,9 +402,9 @@ public sealed class WebViewSessionManager(
         SessionEntry? session = _activeSession;
         try
         {
-            if (session?.WebView.CoreWebView2 is not null && !session.ProcessFailureDetected)
+            if (session?.CoreWebView is not null && !session.ProcessFailureDetected)
             {
-                session.WebView.Reload();
+                session.CoreWebView.Reload();
             }
         }
         catch (Exception exception) when (IsUnavailableControlException(exception))
@@ -217,12 +418,12 @@ public sealed class WebViewSessionManager(
         SessionEntry? session = _activeSession;
         try
         {
-            if (session?.WebView.CoreWebView2 is null || session.ProcessFailureDetected)
+            if (session?.CoreWebView is null || session.ProcessFailureDetected)
             {
                 return;
             }
 
-            session.WebView.CoreWebView2.Navigate(GetValidatedStartUri(session.ServiceInstance).AbsoluteUri);
+            session.CoreWebView.Navigate(GetValidatedStartUri(session.ServiceInstance).AbsoluteUri);
         }
         catch (Exception exception) when (IsUnavailableControlException(exception))
         {
@@ -268,7 +469,7 @@ public sealed class WebViewSessionManager(
         {
             try
             {
-                if (session.WebView.CoreWebView2?.Profile is CoreWebView2Profile profile)
+                if (session.CoreWebView?.Profile is CoreWebView2Profile profile)
                 {
                     await profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.AllProfile);
                 }
@@ -302,6 +503,7 @@ public sealed class WebViewSessionManager(
         }
 
         _shutdownStarted = true;
+        _shutdownCancellation.Cancel();
         ReleaseAllSessions();
     }
 
@@ -314,7 +516,9 @@ public sealed class WebViewSessionManager(
 
         BeginShutdown();
         _disposed = true;
-        _initializationGate.Dispose();
+        // Controller creation is an async COM operation that cannot be synchronously
+        // interrupted. The shutdown token makes the continuation close a late
+        // controller; disposing these primitives here would race that continuation.
     }
 
     private void ConfigureCoreWebView(SessionEntry session, CoreWebView2 coreWebView)
@@ -416,6 +620,8 @@ public sealed class WebViewSessionManager(
 
     private void OnNavigationCompleted(SessionEntry session, CoreWebView2NavigationCompletedEventArgs eventArgs)
     {
+        session.FirstNavigationCompleted.TrySetResult(eventArgs.IsSuccess);
+
         if (session.CancelledExternalNavigations.Remove(eventArgs.NavigationId))
         {
             Publish(session, WebViewSessionStatus.Ready);
@@ -473,7 +679,7 @@ public sealed class WebViewSessionManager(
         WebNavigationDisposition disposition = newWindowNavigationService.Route(
             session.ServiceInstance,
             target,
-            internalTarget => session.WebView.CoreWebView2.Navigate(internalTarget.AbsoluteUri));
+            internalTarget => session.CoreWebView?.Navigate(internalTarget.AbsoluteUri));
 
         if (disposition is WebNavigationDisposition.Blocked)
         {
@@ -617,7 +823,7 @@ public sealed class WebViewSessionManager(
     {
         try
         {
-            if (session.WebView.CoreWebView2 is CoreWebView2 coreWebView)
+            if (session.CoreWebView is CoreWebView2 coreWebView)
             {
                 UnsubscribeCoreWebView(session, coreWebView);
             }
@@ -627,7 +833,13 @@ public sealed class WebViewSessionManager(
             // A crashed or disposed controller has no usable events left to detach.
         }
 
-        session.WebView.Dispose();
+        if (session.CloseGuard.TryBeginClose())
+        {
+            session.Controller?.Close();
+        }
+
+        session.Controller = null;
+        session.CoreWebView = null;
         _sessions.Remove(session.ServiceInstance.Id);
         session.CancelledExternalNavigations.Clear();
 
@@ -696,14 +908,7 @@ public sealed class WebViewSessionManager(
 
     private static bool HasInitializedControl(SessionEntry session)
     {
-        try
-        {
-            return session.WebView.CoreWebView2 is not null;
-        }
-        catch (Exception exception) when (IsUnavailableControlException(exception))
-        {
-            return false;
-        }
+        return session.Controller is not null && session.CoreWebView is not null;
     }
 
     private static (bool CanGoBack, bool CanGoForward) ReadHistoryState(SessionEntry session)
@@ -712,7 +917,7 @@ public sealed class WebViewSessionManager(
         {
             return session.ProcessFailureDetected
                 ? (false, false)
-                : (session.WebView.CanGoBack, session.WebView.CanGoForward);
+                : (session.CoreWebView?.CanGoBack == true, session.CoreWebView?.CanGoForward == true);
         }
         catch (Exception exception) when (IsUnavailableControlException(exception))
         {
@@ -739,10 +944,19 @@ public sealed class WebViewSessionManager(
         exception is InvalidOperationException
             or System.Runtime.InteropServices.COMException;
 
-    private sealed class SessionEntry(ServiceInstance serviceInstance, WpfWebView2 webView)
+    private sealed class SessionEntry(ServiceInstance serviceInstance, IntPtr parentWindow, Rectangle bounds)
     {
         public ServiceInstance ServiceInstance { get; set; } = serviceInstance;
-        public WpfWebView2 WebView { get; } = webView;
+        public IntPtr ParentWindow { get; } = parentWindow;
+        public Rectangle Bounds { get; set; } = bounds;
+        public CoreWebView2Controller? Controller { get; set; }
+        public CoreWebView2? CoreWebView { get; set; }
+        public object InitializationSync { get; } = new();
+        public Task<bool>? InitializationTask { get; set; }
+        public TaskCompletionSource<bool> FirstNavigationCompleted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool PrimeVisibleWhileParentHidden { get; set; }
+        public WebViewControllerCloseGuard CloseGuard { get; } = new();
         public WebViewSessionState State { get; set; } = WebViewSessionState.Uninitialized;
         public HashSet<ulong> CancelledExternalNavigations { get; } = [];
         public bool ProcessFailureDetected { get; set; }

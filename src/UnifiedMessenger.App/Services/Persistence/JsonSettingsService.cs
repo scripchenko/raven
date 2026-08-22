@@ -50,7 +50,7 @@ public sealed class JsonSettingsService : ISettingsService
                 throw new InvalidDataException("The settings document is empty or has an invalid schema version.");
             }
 
-            bool wasMigrated = Normalize(settings);
+            bool wasMigrated = Normalize(settings, resetRuntimeActivity: true);
             return new SettingsLoadResult(settings, WasMigrated: wasMigrated);
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or NotSupportedException)
@@ -67,7 +67,7 @@ public sealed class JsonSettingsService : ISettingsService
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        _ = Normalize(settings);
+        _ = Normalize(settings, resetRuntimeActivity: false);
 
         string directory = Path.GetDirectoryName(_settingsFilePath)
             ?? throw new InvalidOperationException("The settings path must include a directory.");
@@ -113,7 +113,7 @@ public sealed class JsonSettingsService : ISettingsService
         return options;
     }
 
-    private static bool Normalize(AppSettings settings)
+    private static bool Normalize(AppSettings settings, bool resetRuntimeActivity)
     {
         bool changed = settings.SchemaVersion != AppSettings.CurrentSchemaVersion;
         settings.SchemaVersion = AppSettings.CurrentSchemaVersion;
@@ -170,8 +170,11 @@ public sealed class JsonSettingsService : ISettingsService
                 changed = true;
             }
 
-            service.UnreadCount = null;
-            service.HasUnreadActivity = false;
+            if (resetRuntimeActivity)
+            {
+                service.UnreadCount = null;
+                service.HasUnreadActivity = false;
+            }
         }
 
         return changed;
