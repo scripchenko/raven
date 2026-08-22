@@ -4,8 +4,10 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Mail;
 using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
@@ -26,6 +28,8 @@ public partial class MainWindow : Window
     private readonly IApplicationTrayCoordinator _trayCoordinator;
     private readonly IWindowActivationService _windowActivationService;
     private readonly ITaskbarActivityIndicator _taskbarActivityIndicator;
+    private readonly IMailProviderFactory _mailProviderFactory;
+    private readonly IMailAccountProvisioningService _mailAccountProvisioningService;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly SemaphoreSlim _deferredPrimeGate = new(1, 1);
     private readonly HashSet<Guid> _deferredPrimeServiceIds = [];
@@ -45,7 +49,9 @@ public partial class MainWindow : Window
         IApplicationExitCoordinator exitCoordinator,
         IApplicationTrayCoordinator trayCoordinator,
         IWindowActivationService windowActivationService,
-        ITaskbarActivityIndicator taskbarActivityIndicator)
+        ITaskbarActivityIndicator taskbarActivityIndicator,
+        IMailProviderFactory mailProviderFactory,
+        IMailAccountProvisioningService mailAccountProvisioningService)
     {
         _viewModel = viewModel;
         _settingsViewModel = settingsViewModel;
@@ -57,6 +63,8 @@ public partial class MainWindow : Window
         _trayCoordinator = trayCoordinator;
         _windowActivationService = windowActivationService;
         _taskbarActivityIndicator = taskbarActivityIndicator;
+        _mailProviderFactory = mailProviderFactory;
+        _mailAccountProvisioningService = mailAccountProvisioningService;
         DataContext = viewModel;
 
         InitializeComponent();
@@ -79,6 +87,10 @@ public partial class MainWindow : Window
         _settingsViewModel.RenameAccountRequested += OnSettingsRenameAccountRequested;
         _settingsViewModel.AccountEnabledChangeRequested += OnSettingsAccountEnabledChangeRequested;
         _settingsViewModel.DeleteAccountRequested += OnSettingsDeleteAccountRequested;
+        _settingsViewModel.AddMailAccountRequested += OnSettingsAddMailAccountRequested;
+        _settingsViewModel.RenameMailAccountRequested += OnSettingsRenameMailAccountRequested;
+        _settingsViewModel.MailAccountEnabledChangeRequested += OnSettingsMailAccountEnabledChangeRequested;
+        _settingsViewModel.DeleteMailAccountRequested += OnSettingsDeleteMailAccountRequested;
         _webViewSessionManager.SessionRecreationRequested += OnSessionRecreationRequested;
     }
 
@@ -96,6 +108,10 @@ public partial class MainWindow : Window
         _settingsViewModel.RenameAccountRequested -= OnSettingsRenameAccountRequested;
         _settingsViewModel.AccountEnabledChangeRequested -= OnSettingsAccountEnabledChangeRequested;
         _settingsViewModel.DeleteAccountRequested -= OnSettingsDeleteAccountRequested;
+        _settingsViewModel.AddMailAccountRequested -= OnSettingsAddMailAccountRequested;
+        _settingsViewModel.RenameMailAccountRequested -= OnSettingsRenameMailAccountRequested;
+        _settingsViewModel.MailAccountEnabledChangeRequested -= OnSettingsMailAccountEnabledChangeRequested;
+        _settingsViewModel.DeleteMailAccountRequested -= OnSettingsDeleteMailAccountRequested;
         _webViewSessionManager.SessionRecreationRequested -= OnSessionRecreationRequested;
         _selectionCancellation?.Cancel();
         _selectionCancellation?.Dispose();
@@ -360,9 +376,14 @@ public partial class MainWindow : Window
             }
 
             _deferredPrimeServiceIds.Remove(service.Id);
+            Rectangle bounds = await WebViewSurfaceBoundsReadiness.GetReadyBoundsAsync(
+                () => WebViewContainer.ActualWidth > 0 && WebViewContainer.ActualHeight > 0,
+                WaitForWebViewSurfaceLayoutAsync,
+                GetDirectWebViewBounds,
+                cancellationToken);
             await _webViewSessionManager.InitializeAsync(
                 _mainWindowHandle,
-                GetDirectWebViewBounds(),
+                bounds,
                 service,
                 activate: true,
                 cancellationToken);
@@ -400,14 +421,33 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnSettingsAddMailAccountRequested(object? sender, EventArgs eventArgs)
+    {
+        AddMailAccountWindow dialog = new(_mailProviderFactory, _mailAccountProvisioningService)
+        {
+            Owner = this
+        };
+        if (dialog.ShowDialog() == true && dialog.ConnectedAccount is MailAccount account)
+        {
+            _viewModel.AddConnectedMailAccount(account);
+        }
+    }
+
     private async void RenameAccount_Click(object sender, RoutedEventArgs eventArgs)
     {
-        if (!TryGetMenuService(sender, out ServiceInstance service))
+        if (!TryGetNavigationItem(sender, out NavigationAccountItem item))
         {
             return;
         }
 
-        await RenameAccountAsync(service);
+        if (item.Service is ServiceInstance service)
+        {
+            await RenameAccountAsync(service);
+        }
+        else if (item.MailAccount is MailAccount mailAccount)
+        {
+            await RenameMailAccountAsync(mailAccount);
+        }
     }
 
     private async void OnSettingsRenameAccountRequested(object? sender, SettingsAccountEventArgs eventArgs) =>
@@ -431,11 +471,43 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnSettingsRenameMailAccountRequested(
+        object? sender,
+        SettingsMailAccountEventArgs eventArgs) =>
+        await RenameMailAccountAsync(eventArgs.Account);
+
+    private async Task RenameMailAccountAsync(MailAccount account)
+    {
+        RenameAccountWindow dialog = new(account.DisplayLabel) { Owner = this };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await _viewModel.RenameMailAccountAsync(account, dialog.AccountName);
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось переименовать почтовый аккаунт", exception);
+        }
+    }
+
     private async void ToggleAccount_Click(object sender, RoutedEventArgs eventArgs)
     {
-        if (TryGetMenuService(sender, out ServiceInstance service))
+        if (!TryGetNavigationItem(sender, out NavigationAccountItem item))
+        {
+            return;
+        }
+
+        if (item.Service is ServiceInstance service)
         {
             await SetAccountEnabledAsync(service, !service.IsEnabled);
+        }
+        else if (item.MailAccount is MailAccount mailAccount)
+        {
+            await SetMailAccountEnabledAsync(mailAccount, !mailAccount.IsEnabled);
         }
     }
 
@@ -443,6 +515,25 @@ public partial class MainWindow : Window
         object? sender,
         SettingsAccountEnabledEventArgs eventArgs) =>
         await SetAccountEnabledAsync(eventArgs.Service, eventArgs.IsEnabled);
+
+    private async void OnSettingsMailAccountEnabledChangeRequested(
+        object? sender,
+        SettingsMailAccountEnabledEventArgs eventArgs) =>
+        await SetMailAccountEnabledAsync(eventArgs.Account, eventArgs.IsEnabled);
+
+    private async Task SetMailAccountEnabledAsync(MailAccount account, bool isEnabled)
+    {
+        try
+        {
+            await _viewModel.SetMailAccountEnabledAsync(account, isEnabled);
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError(
+                isEnabled ? "Не удалось включить почтовый аккаунт" : "Не удалось отключить почтовый аккаунт",
+                exception);
+        }
+    }
 
     private async void EnableSelectedAccount_Click(object sender, RoutedEventArgs eventArgs)
     {
@@ -501,16 +592,57 @@ public partial class MainWindow : Window
 
     private async void DeleteAccount_Click(object sender, RoutedEventArgs eventArgs)
     {
-        if (!TryGetMenuService(sender, out ServiceInstance service))
+        if (!TryGetNavigationItem(sender, out NavigationAccountItem item))
         {
             return;
         }
 
-        await DeleteAccountAsync(service);
+        if (item.Service is ServiceInstance service)
+        {
+            await DeleteAccountAsync(service);
+        }
+        else if (item.MailAccount is MailAccount mailAccount)
+        {
+            await DeleteMailAccountAsync(mailAccount);
+        }
     }
 
     private async void OnSettingsDeleteAccountRequested(object? sender, SettingsAccountEventArgs eventArgs) =>
         await DeleteAccountAsync(eventArgs.Service);
+
+    private async void OnSettingsDeleteMailAccountRequested(
+        object? sender,
+        SettingsMailAccountEventArgs eventArgs) =>
+        await DeleteMailAccountAsync(eventArgs.Account);
+
+    private async Task DeleteMailAccountAsync(MailAccount account)
+    {
+        MessageBoxResult confirmation = WpfMessageBox.Show(
+            this,
+            $"Удалить почтовый аккаунт «{account.DisplayLabel}»?\n\nСохранённые учётные данные этого почтового аккаунта будут удалены из защищённого хранилища Windows.",
+            "Удаление почтового аккаунта",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            await _mailAccountProvisioningService.DeleteAsync(account.Id, _lifetimeCancellation.Token);
+            _viewModel.RemoveMailAccountFromNavigation(account);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            // The application is closing.
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось удалить почтовый аккаунт", exception);
+        }
+    }
 
     private async Task DeleteAccountAsync(ServiceInstance service)
     {
@@ -579,8 +711,19 @@ public partial class MainWindow : Window
 
     private static bool TryGetMenuService(object sender, out ServiceInstance service)
     {
-        service = (sender as WpfMenuItem)?.CommandParameter as ServiceInstance ?? null!;
+        service = (sender as WpfMenuItem)?.CommandParameter switch
+        {
+            ServiceInstance direct => direct,
+            NavigationAccountItem item => item.Service ?? null!,
+            _ => null!
+        };
         return service is not null;
+    }
+
+    private static bool TryGetNavigationItem(object sender, out NavigationAccountItem item)
+    {
+        item = (sender as WpfMenuItem)?.CommandParameter as NavigationAccountItem ?? null!;
+        return item is not null;
     }
 
     private async Task PrimeDeferredServicesWhileHiddenAsync(CancellationToken cancellationToken)
@@ -669,6 +812,14 @@ public partial class MainWindow : Window
         }
 
         return Rectangle.FromLTRB(topLeft.X, topLeft.Y, bottomRight.X, bottomRight.Y);
+    }
+
+    private async Task WaitForWebViewSurfaceLayoutAsync(CancellationToken cancellationToken)
+    {
+        await Dispatcher.InvokeAsync(
+            () => ServiceWorkspace.UpdateLayout(),
+            DispatcherPriority.Loaded,
+            cancellationToken);
     }
 
     private Rectangle GetPreShowDirectWebViewBounds()

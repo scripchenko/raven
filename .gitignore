@@ -33,6 +33,9 @@ appsettings.*.local.json
 *.p12
 *.snk
 *.jks
+**/Credentials/
+*.credential
+*.credential.bin
 
 # Local application data, browser state, cookies and logs
 **/settings.json

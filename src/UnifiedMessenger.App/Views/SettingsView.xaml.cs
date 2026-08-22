@@ -6,4 +6,12 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     {
         InitializeComponent();
     }
+
+    private void AddMailAccount_Click(object sender, System.Windows.RoutedEventArgs eventArgs)
+    {
+        if (DataContext is ViewModels.SettingsViewModel viewModel)
+        {
+            viewModel.RequestAddMailAccount();
+        }
+    }
 }

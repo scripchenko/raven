@@ -55,7 +55,7 @@ public sealed class Stage4TrayNotificationTests
         SettingsLoadResult result = await new JsonSettingsService(temp.SettingsPath).LoadAsync();
 
         Assert.True(result.WasMigrated);
-        Assert.Equal(3, result.Settings.SchemaVersion);
+        Assert.Equal(AppSettings.CurrentSchemaVersion, result.Settings.SchemaVersion);
         Assert.Equal(vkId, result.Settings.LastServiceId);
         Assert.Equal([telegramId, vkId], result.Settings.Services.Select(service => service.Id));
         Assert.Equal([telegramProfile, vkProfile], result.Settings.Services.Select(service => service.ProfileName));

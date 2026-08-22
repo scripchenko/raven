@@ -30,15 +30,21 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         _selectedSection = Sections[0];
         SynchronizeAccounts();
         _mainWindowViewModel.Services.CollectionChanged += OnServicesCollectionChanged;
+        _mainWindowViewModel.MailAccounts.CollectionChanged += OnMailAccountsCollectionChanged;
         _mainWindowViewModel.PropertyChanged += OnMainWindowPropertyChanged;
     }
 
     public event EventHandler<SettingsAccountEventArgs>? RenameAccountRequested;
     public event EventHandler<SettingsAccountEnabledEventArgs>? AccountEnabledChangeRequested;
     public event EventHandler<SettingsAccountEventArgs>? DeleteAccountRequested;
+    public event EventHandler? AddMailAccountRequested;
+    public event EventHandler<SettingsMailAccountEventArgs>? RenameMailAccountRequested;
+    public event EventHandler<SettingsMailAccountEnabledEventArgs>? MailAccountEnabledChangeRequested;
+    public event EventHandler<SettingsMailAccountEventArgs>? DeleteMailAccountRequested;
 
     public IReadOnlyList<SettingsSectionItem> Sections { get; }
     public ObservableCollection<SettingsAccountViewModel> Accounts { get; } = [];
+    public ObservableCollection<SettingsMailAccountViewModel> MailAccounts { get; } = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsGeneralSelected))]
@@ -62,6 +68,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void Close() => _mainWindowViewModel.CloseSettingsCommand.Execute(null);
+
+    public void RequestAddMailAccount() => AddMailAccountRequested?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
     private async Task SetCloseToTray(bool? value)
@@ -134,6 +142,19 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         NotifyAccountOrderChanged();
     }
 
+    internal void OpenMailAccount(MailAccount account) => _mainWindowViewModel.SelectMailAccount(account.Id);
+
+    internal void RequestRenameMail(MailAccount account) =>
+        RenameMailAccountRequested?.Invoke(this, new SettingsMailAccountEventArgs(account));
+
+    internal void RequestSetMailEnabled(MailAccount account, bool isEnabled) =>
+        MailAccountEnabledChangeRequested?.Invoke(
+            this,
+            new SettingsMailAccountEnabledEventArgs(account, isEnabled));
+
+    internal void RequestDeleteMail(MailAccount account) =>
+        DeleteMailAccountRequested?.Invoke(this, new SettingsMailAccountEventArgs(account));
+
     internal bool CanMove(ServiceInstance service, int offset)
     {
         int index = _mainWindowViewModel.Services.IndexOf(service);
@@ -150,6 +171,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         _mainWindowViewModel.Services.CollectionChanged -= OnServicesCollectionChanged;
+        _mainWindowViewModel.MailAccounts.CollectionChanged -= OnMailAccountsCollectionChanged;
         _mainWindowViewModel.PropertyChanged -= OnMainWindowPropertyChanged;
         foreach (SettingsAccountViewModel account in Accounts)
         {
@@ -157,10 +179,19 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         Accounts.Clear();
+        foreach (SettingsMailAccountViewModel account in MailAccounts)
+        {
+            account.Dispose();
+        }
+
+        MailAccounts.Clear();
     }
 
     private void OnServicesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs eventArgs) =>
         SynchronizeAccounts();
+
+    private void OnMailAccountsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs eventArgs) =>
+        SynchronizeMailAccounts();
 
     private void OnMainWindowPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
@@ -208,6 +239,21 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         NotifyAccountOrderChanged();
+        SynchronizeMailAccounts();
+    }
+
+    private void SynchronizeMailAccounts()
+    {
+        foreach (SettingsMailAccountViewModel account in MailAccounts)
+        {
+            account.Dispose();
+        }
+
+        MailAccounts.Clear();
+        foreach (MailAccount account in _mainWindowViewModel.MailAccounts.OrderBy(account => account.SortOrder))
+        {
+            MailAccounts.Add(new SettingsMailAccountViewModel(this, account));
+        }
     }
 
     private void NotifyAccountOrderChanged()

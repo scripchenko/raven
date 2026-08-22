@@ -19,6 +19,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private AppSettings _settings = AppSettings.CreateDefault();
     private bool _isInitialized;
     private bool _disposed;
+    private bool _isSynchronizingSelection;
 
     public MainWindowViewModel(
         IBuiltInServiceCatalog serviceCatalog,
@@ -41,7 +42,25 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public event EventHandler? SelectedServiceChanged;
 
     public ObservableCollection<ServiceInstance> Services { get; } = [];
+    public ObservableCollection<MailAccount> MailAccounts { get; } = [];
+    public ObservableCollection<NavigationAccountItem> NavigationItems { get; } = [];
     public IReadOnlyList<ServiceDefinition> AvailableServices { get; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedAccount))]
+    [NotifyPropertyChangedFor(nameof(IsMailSelected))]
+    [NotifyPropertyChangedFor(nameof(IsSelectedMailAccountEnabled))]
+    [NotifyPropertyChangedFor(nameof(IsSelectedMailAccountDisabled))]
+    [NotifyPropertyChangedFor(nameof(WindowTitle))]
+    [NotifyPropertyChangedFor(nameof(SelectedAccountDisplayName))]
+    [NotifyPropertyChangedFor(nameof(SelectedAccountLabel))]
+    private NavigationAccountItem? _selectedNavigationItem;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsMailSelected))]
+    [NotifyPropertyChangedFor(nameof(IsSelectedMailAccountEnabled))]
+    [NotifyPropertyChangedFor(nameof(IsSelectedMailAccountDisabled))]
+    private MailAccount? _selectedMailAccount;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelectedService))]
@@ -90,8 +109,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isSettingsOpen;
 
     public bool HasSelectedService => SelectedService is not null;
+    public bool HasSelectedAccount => SelectedNavigationItem is not null;
     public bool HasActiveWebView => SelectedService?.IsEnabled == true;
     public bool IsSelectedServiceDisabled => SelectedService is { IsEnabled: false };
+    public bool IsMailSelected => SelectedMailAccount is not null;
+    public bool IsSelectedMailAccountEnabled => SelectedMailAccount is { IsEnabled: true };
+    public bool IsSelectedMailAccountDisabled => SelectedMailAccount is { IsEnabled: false };
     public bool HasWebViewError => HasActiveWebView
         && WebViewStatus is WebViewSessionStatus.Offline or WebViewSessionStatus.Failed;
     public bool IsWebViewInitializing => HasActiveWebView
@@ -110,9 +133,15 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string WindowTitle => IsSettingsOpen
         ? "Настройки — UnifiedMessenger"
-        : SelectedService is null
+        : SelectedNavigationItem is null
             ? "UnifiedMessenger"
-            : $"{SelectedService.DisplayName} — UnifiedMessenger";
+            : $"{SelectedNavigationItem.DisplayName} — UnifiedMessenger";
+
+    public string SelectedAccountDisplayName => SelectedNavigationItem?.DisplayName ?? "UnifiedMessenger";
+
+    public string SelectedAccountLabel => SelectedMailAccount is MailAccount mailAccount
+        ? $"{GetMailProviderDisplayName(mailAccount.Provider)} · Почта"
+        : SelectedServiceLabel;
 
     public string SelectedServiceLabel => SelectedService is null
         ? "WebView2"
@@ -134,10 +163,22 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             Services.Add(service);
         }
 
-        ServiceInstance? restoredService = settings.RestoreLastService && settings.LastServiceId is Guid lastServiceId
-            ? Services.FirstOrDefault(service => service.Id == lastServiceId)
+        MailAccounts.Clear();
+        foreach (MailAccount account in settings.MailAccounts.OrderBy(account => account.SortOrder))
+        {
+            MailAccounts.Add(account);
+        }
+
+        RebuildNavigationItems();
+
+        Guid? restoredId = settings.RestoreLastService
+            ? settings.LastNavigationAccountId ?? settings.LastServiceId
             : null;
-        SelectedService = restoredService ?? Services.FirstOrDefault(service => service.IsEnabled) ?? Services.FirstOrDefault();
+        SelectedNavigationItem = NavigationItems.FirstOrDefault(item => item.Id == restoredId)
+            ?? NavigationItems.FirstOrDefault(item => item.IsEnabled)
+            ?? NavigationItems.FirstOrDefault();
+        SelectedService = SelectedNavigationItem?.Service;
+        SelectedMailAccount = SelectedNavigationItem?.MailAccount;
         _isInitialized = true;
     }
 
@@ -147,9 +188,66 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ServiceDefinition definition = _serviceCatalog.Get(serviceType);
         ServiceInstance service = ServiceInstanceManager.Add(_settings, definition, displayName);
         Services.Add(service);
-        SelectedService = service;
+        NavigationAccountItem item = NavigationAccountItem.FromService(service);
+        NavigationItems.Add(item);
+        SelectedNavigationItem = item;
         await SaveSettingsAsync();
         return service;
+    }
+
+    public void AddConnectedMailAccount(MailAccount account)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(account);
+        if (MailAccounts.Any(existing => existing.Id == account.Id))
+        {
+            return;
+        }
+
+        MailAccounts.Add(account);
+        NavigationAccountItem item = NavigationAccountItem.FromMail(account);
+        NavigationItems.Add(item);
+        SelectedNavigationItem = item;
+        IsSettingsOpen = false;
+    }
+
+    public async Task RenameMailAccountAsync(MailAccount account, string displayName)
+    {
+        MailAccount target = GetExistingMailAccount(account);
+        target.DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+        OnPropertyChanged(nameof(WindowTitle));
+        OnPropertyChanged(nameof(SelectedAccountDisplayName));
+        await SaveSettingsAsync();
+    }
+
+    public async Task SetMailAccountEnabledAsync(MailAccount account, bool isEnabled)
+    {
+        MailAccount target = GetExistingMailAccount(account);
+        target.IsEnabled = isEnabled;
+        OnPropertyChanged(nameof(IsSelectedMailAccountEnabled));
+        OnPropertyChanged(nameof(IsSelectedMailAccountDisabled));
+        await SaveSettingsAsync();
+    }
+
+    public void RemoveMailAccountFromNavigation(MailAccount account)
+    {
+        MailAccount target = GetExistingMailAccount(account);
+        NavigationAccountItem? item = NavigationItems.FirstOrDefault(candidate => candidate.Id == target.Id);
+        bool wasSelected = SelectedNavigationItem?.Id == target.Id;
+        int removedIndex = item is null ? -1 : NavigationItems.IndexOf(item);
+        MailAccounts.Remove(target);
+        if (item is not null)
+        {
+            NavigationItems.Remove(item);
+            item.Dispose();
+        }
+
+        if (wasSelected)
+        {
+            SelectedNavigationItem = NavigationItems.Count == 0
+                ? null
+                : NavigationItems[Math.Clamp(removedIndex, 0, NavigationItems.Count - 1)];
+        }
     }
 
     public async Task RenameServiceAsync(ServiceInstance service, string displayName)
@@ -235,12 +333,18 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _ = ServiceInstanceManager.Remove(_settings.Services, target.Id);
         Services.Remove(target);
+        NavigationAccountItem? navigationItem = NavigationItems.FirstOrDefault(item => item.Id == target.Id);
+        if (navigationItem is not null)
+        {
+            NavigationItems.Remove(navigationItem);
+            navigationItem.Dispose();
+        }
 
         if (wasSelected)
         {
-            SelectedService = Services.Count == 0
+            SelectedNavigationItem = NavigationItems.Count == 0
                 ? null
-                : Services[Math.Min(removedIndex, Services.Count - 1)];
+                : NavigationItems[Math.Min(removedIndex, NavigationItems.Count - 1)];
         }
 
         await SaveSettingsAsync();
@@ -253,7 +357,18 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ServiceInstance? service = Services.FirstOrDefault(candidate => candidate.Id == serviceInstanceId);
         if (service is not null)
         {
-            SelectedService = service;
+            SelectedNavigationItem = NavigationItems.First(item => item.Id == service.Id);
+            IsSettingsOpen = false;
+        }
+    }
+
+    public void SelectMailAccount(Guid mailAccountId)
+    {
+        NavigationAccountItem? item = NavigationItems.FirstOrDefault(candidate =>
+            candidate.Id == mailAccountId && candidate.IsMailAccount);
+        if (item is not null)
+        {
+            SelectedNavigationItem = item;
             IsSettingsOpen = false;
         }
     }
@@ -396,7 +511,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public AppSettings CreateSettingsSnapshot()
     {
         _settings.Services = ServiceInstanceManager.Sort(Services).ToList();
-        _settings.LastServiceId = SelectedService?.Id;
+        _settings.MailAccounts = MailAccounts.OrderBy(account => account.SortOrder).ToList();
+        _settings.LastNavigationAccountId = SelectedNavigationItem?.Id;
+        if (SelectedService is not null)
+        {
+            _settings.LastServiceId = SelectedService.Id;
+        }
         return _settings;
     }
 
@@ -409,6 +529,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         _webViewSessionManager.StateChanged -= OnWebViewSessionStateChanged;
+        foreach (NavigationAccountItem item in NavigationItems)
+        {
+            item.Dispose();
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanNavigateBack))]
@@ -457,6 +581,20 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedServiceChanged(ServiceInstance? value)
     {
+        if (_isSynchronizingSelection)
+        {
+            return;
+        }
+
+        NavigationAccountItem? item = value is null
+            ? null
+            : NavigationItems.FirstOrDefault(candidate => candidate.Id == value.Id);
+        if (!ReferenceEquals(SelectedNavigationItem, item))
+        {
+            SelectedNavigationItem = item;
+            return;
+        }
+
         if (!_isInitialized)
         {
             return;
@@ -472,6 +610,46 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(MuteButtonText));
         OnPropertyChanged(nameof(MuteButtonToolTip));
 
+        SelectedServiceChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    partial void OnSelectedNavigationItemChanged(NavigationAccountItem? value)
+    {
+        if (_isSynchronizingSelection)
+        {
+            return;
+        }
+
+        _isSynchronizingSelection = true;
+        try
+        {
+            SelectedService = value?.Service;
+            SelectedMailAccount = value?.MailAccount;
+        }
+        finally
+        {
+            _isSynchronizingSelection = false;
+        }
+
+        if (!_isInitialized)
+        {
+            return;
+        }
+
+        _settings.LastNavigationAccountId = value?.Id;
+        if (value?.Service is ServiceInstance service)
+        {
+            _settings.LastServiceId = service.Id;
+            service.LastOpenedAt = DateTimeOffset.UtcNow;
+        }
+
+        OnPropertyChanged(nameof(WindowTitle));
+        OnPropertyChanged(nameof(SelectedAccountDisplayName));
+        OnPropertyChanged(nameof(SelectedAccountLabel));
+        OnPropertyChanged(nameof(IsSelectedServiceMuted));
+        OnPropertyChanged(nameof(MuteButtonText));
+        OnPropertyChanged(nameof(MuteButtonToolTip));
+        NotifySelectedServiceStateChanged();
         SelectedServiceChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -492,6 +670,41 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         return Services.FirstOrDefault(existing => existing.Id == service.Id)
             ?? throw new InvalidOperationException("The service account is no longer available.");
     }
+
+    private MailAccount GetExistingMailAccount(MailAccount account)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+        return MailAccounts.FirstOrDefault(existing => existing.Id == account.Id)
+            ?? throw new InvalidOperationException("The mail account is no longer available.");
+    }
+
+    private void RebuildNavigationItems()
+    {
+        foreach (NavigationAccountItem item in NavigationItems)
+        {
+            item.Dispose();
+        }
+
+        NavigationItems.Clear();
+        foreach (ServiceInstance service in Services)
+        {
+            NavigationItems.Add(NavigationAccountItem.FromService(service));
+        }
+
+        foreach (MailAccount account in MailAccounts.OrderBy(account => account.SortOrder))
+        {
+            NavigationItems.Add(NavigationAccountItem.FromMail(account));
+        }
+    }
+
+    private static string GetMailProviderDisplayName(MailProviderType provider) => provider switch
+    {
+        MailProviderType.Gmail => "Gmail",
+        MailProviderType.Yandex => "Яндекс Почта",
+        MailProviderType.MailRu => "Почта Mail.ru",
+        MailProviderType.GenericImap => "IMAP/SMTP",
+        _ => "Почта"
+    };
 
     private void OnWebViewSessionStateChanged(object? sender, WebViewSessionStateChangedEventArgs eventArgs)
     {

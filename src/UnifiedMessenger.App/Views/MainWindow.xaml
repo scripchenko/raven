@@ -48,8 +48,8 @@
                 <ListBox x:Name="AccountsList"
                          Grid.Row="1"
                          Margin="0,14"
-                         ItemsSource="{Binding Services}"
-                         SelectedItem="{Binding SelectedService}"
+                         ItemsSource="{Binding NavigationItems}"
+                         SelectedItem="{Binding SelectedNavigationItem}"
                          Background="Transparent"
                          BorderThickness="0"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -83,8 +83,8 @@
                                         <MenuItem Header="Переименовать" CommandParameter="{Binding}" Click="RenameAccount_Click" />
                                         <MenuItem Header="Включить / отключить" CommandParameter="{Binding}" Click="ToggleAccount_Click" />
                                         <Separator />
-                                        <MenuItem Header="Переместить выше" CommandParameter="{Binding}" Click="MoveAccountUp_Click" />
-                                        <MenuItem Header="Переместить ниже" CommandParameter="{Binding}" Click="MoveAccountDown_Click" />
+                                        <MenuItem Header="Переместить выше" CommandParameter="{Binding}" IsEnabled="{Binding IsWebService}" Click="MoveAccountUp_Click" />
+                                        <MenuItem Header="Переместить ниже" CommandParameter="{Binding}" IsEnabled="{Binding IsWebService}" Click="MoveAccountDown_Click" />
                                         <Separator />
                                         <MenuItem Header="Удалить…" CommandParameter="{Binding}" Click="DeleteAccount_Click" />
                                     </ContextMenu>
@@ -94,7 +94,7 @@
                                                VerticalAlignment="Center"
                                                FontWeight="SemiBold"
                                                Foreground="White"
-                                               Text="{Binding ServiceType, Converter={StaticResource ServiceGlyphConverter}}" />
+                                               Text="{Binding Glyph}" />
                                     <Border MinWidth="20"
                                             Height="18"
                                             Padding="4,0"
@@ -138,7 +138,8 @@
                             ToolTip="Добавить сервис"
                             Click="AddService_Click"
                             Content="+" />
-                    <Button Command="{Binding OpenSettingsCommand}"
+                    <Button AutomationProperties.AutomationId="OpenSettingsButton"
+                            Command="{Binding OpenSettingsCommand}"
                             Style="{StaticResource SidebarActionButtonStyle}"
                             ToolTip="Настройки"
                             Content="⚙" />
@@ -197,7 +198,7 @@
                     <StackPanel Grid.Column="1" Margin="18,0" VerticalAlignment="Center">
                         <TextBlock FontSize="17"
                                    FontWeight="SemiBold"
-                                   Text="{Binding SelectedService.DisplayName, TargetNullValue=UnifiedMessenger}" />
+                                   Text="{Binding SelectedAccountDisplayName}" />
                         <ProgressBar Height="2"
                                      Margin="0,6,0,0"
                                      IsIndeterminate="True"
@@ -216,7 +217,7 @@
                                 Background="{DynamicResource AccentSoftBrush}"
                                 CornerRadius="10"
                                 ToolTip="{Binding WebViewRuntimeVersion, StringFormat=WebView2 Runtime {0}}">
-                            <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="{Binding SelectedServiceLabel}" />
+                            <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="{Binding SelectedAccountLabel}" />
                         </Border>
                     </StackPanel>
                 </Grid>
@@ -228,7 +229,7 @@
                         <Style TargetType="views:WelcomeView">
                             <Setter Property="Visibility" Value="Collapsed" />
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedService}" Value="{x:Null}">
+                                <DataTrigger Binding="{Binding SelectedNavigationItem}" Value="{x:Null}">
                                     <Setter Property="Visibility" Value="Visible" />
                                 </DataTrigger>
                             </Style.Triggers>
@@ -239,6 +240,54 @@
                 <Grid x:Name="WebViewContainer"
                       Background="White"
                       Visibility="{Binding HasActiveWebView, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                <Border Margin="36"
+                        Padding="38"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="1"
+                        CornerRadius="20"
+                        Visibility="{Binding IsSelectedMailAccountEnabled, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel MaxWidth="600">
+                        <TextBlock HorizontalAlignment="Center"
+                                   FontSize="26"
+                                   FontWeight="SemiBold"
+                                   Text="Почта подключена" />
+                        <TextBlock Margin="0,12,0,0"
+                                   HorizontalAlignment="Center"
+                                   FontSize="17"
+                                   Text="{Binding SelectedMailAccount.EmailAddress}" />
+                        <TextBlock Margin="0,14,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Нативный интерфейс входящих писем будет добавлен на следующем этапе. Почтовый аккаунт не использует WebView2."
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="36"
+                        Padding="38"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="1"
+                        CornerRadius="20"
+                        Visibility="{Binding IsSelectedMailAccountDisabled, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel MaxWidth="560">
+                        <TextBlock HorizontalAlignment="Center"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Text="Почтовый аккаунт отключён" />
+                        <TextBlock Margin="0,12,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Учётные данные сохранены. Включить аккаунт можно в разделе Настройки → Аккаунты."
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
 
                 <Border Background="#EFFFFFFF"
                         Visibility="{Binding IsWebViewInitializing, Converter={StaticResource BooleanToVisibilityConverter}}">

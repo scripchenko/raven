@@ -1,0 +1,128 @@
+<Window x:Class="UnifiedMessenger.App.Views.AddMailAccountWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Добавить почту"
+        Width="590"
+        Height="720"
+        MinWidth="540"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Добавить почтовый аккаунт" />
+            <TextBlock Margin="0,8,0,0"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       Text="Учётные данные проверяются прямым подключением к серверу и сохраняются через защиту Windows для текущего пользователя."
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" Margin="0,20,0,20" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock FontWeight="SemiBold" Text="Провайдер" />
+                <ComboBox x:Name="ProviderBox"
+                          Margin="0,7,0,0"
+                          ItemsSource="{Binding Providers}"
+                          DisplayMemberPath="DisplayName"
+                          SelectionChanged="ProviderBox_SelectionChanged" />
+
+                <Border x:Name="GmailInformation"
+                        Margin="0,16,0,0"
+                        Padding="14"
+                        Background="#FFF4D6"
+                        CornerRadius="8"
+                        Visibility="Collapsed">
+                    <TextBlock Text="Gmail будет подключаться только через OAuth. Эта архитектура подготовлена, но само подключение Gmail появится на следующем этапе. Пароль Google здесь вводить не нужно."
+                               TextWrapping="Wrap" />
+                </Border>
+
+                <StackPanel x:Name="PasswordAccountFields">
+                    <TextBlock Margin="0,16,0,0" FontWeight="SemiBold" Text="Адрес почты" />
+                    <TextBox x:Name="EmailBox" Margin="0,7,0,0" />
+                    <TextBlock Margin="0,16,0,0" FontWeight="SemiBold" Text="Название в UnifiedMessenger (необязательно)" />
+                    <TextBox x:Name="DisplayNameBox" Margin="0,7,0,0" />
+                    <TextBlock Margin="0,16,0,0" FontWeight="SemiBold" Text="Пароль приложения" />
+                    <PasswordBox x:Name="SecretBox" Margin="0,7,0,0" />
+                    <TextBlock x:Name="ProviderGuidance"
+                               Margin="0,7,0,0"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+
+                <Grid x:Name="GenericSettings" Margin="0,18,0,0" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="110" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.ColumnSpan="3" FontSize="16" FontWeight="SemiBold" Text="Параметры IMAP/SMTP" />
+                    <TextBlock Grid.Row="1" Margin="0,14,0,5" Text="IMAP host" />
+                    <TextBlock Grid.Row="1" Grid.Column="2" Margin="0,14,0,5" Text="Port" />
+                    <TextBox x:Name="ImapHostBox" Grid.Row="2" />
+                    <TextBox x:Name="ImapPortBox" Grid.Row="2" Grid.Column="2" Text="993" />
+                    <TextBlock Grid.Row="3" Margin="0,14,0,5" Text="SMTP host" />
+                    <TextBlock Grid.Row="3" Grid.Column="2" Margin="0,14,0,5" Text="Port" />
+                    <TextBox x:Name="SmtpHostBox" Grid.Row="4" />
+                    <TextBox x:Name="SmtpPortBox" Grid.Row="4" Grid.Column="2" Text="465" />
+                    <StackPanel Grid.Row="5" Grid.ColumnSpan="3" Margin="0,14,0,0">
+                        <TextBlock Text="Имя пользователя (если отличается от адреса)" />
+                        <TextBox x:Name="UsernameBox" Margin="0,5,0,0" />
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Режим защиты IMAP" />
+                                <ComboBox x:Name="ImapSecurityBox"
+                                          Margin="0,5,0,0"
+                                          ItemsSource="{Binding SecureModes}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Режим защиты SMTP" />
+                                <ComboBox x:Name="SmtpSecurityBox"
+                                          Margin="0,5,0,0"
+                                          ItemsSource="{Binding SecureModes}" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Margin="0,9,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Обычно используются SslOnConnect с IMAP 993 и SMTP 465; StartTls можно выбрать для серверов, которые его требуют."
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock x:Name="StatusText"
+                           Margin="0,16,0,0"
+                           Foreground="#B3261E"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" HorizontalAlignment="Right" Orientation="Horizontal">
+            <Button Width="110" Click="Cancel_Click" Content="Отмена" IsCancel="True" />
+            <Button x:Name="ConnectButton"
+                    Width="150"
+                    Margin="10,0,0,0"
+                    Click="Connect_Click"
+                    Content="Проверить и добавить"
+                    IsDefault="True" />
+        </StackPanel>
+    </Grid>
+</Window>

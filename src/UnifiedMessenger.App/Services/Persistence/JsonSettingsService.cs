@@ -115,7 +115,8 @@ public sealed class JsonSettingsService : ISettingsService
 
     private static bool Normalize(AppSettings settings, bool resetRuntimeActivity)
     {
-        bool changed = settings.SchemaVersion != AppSettings.CurrentSchemaVersion;
+        int sourceSchemaVersion = settings.SchemaVersion;
+        bool changed = sourceSchemaVersion != AppSettings.CurrentSchemaVersion;
         settings.SchemaVersion = AppSettings.CurrentSchemaVersion;
 
         string normalizedLanguage = string.IsNullOrWhiteSpace(settings.Language) ? "ru-RU" : settings.Language.Trim();
@@ -129,6 +130,18 @@ public sealed class JsonSettingsService : ISettingsService
         if (settings.Services is null)
         {
             settings.Services = [];
+            changed = true;
+        }
+
+        if (settings.MailAccounts is null)
+        {
+            settings.MailAccounts = [];
+            changed = true;
+        }
+
+        if (sourceSchemaVersion < 4 && settings.LastNavigationAccountId is null)
+        {
+            settings.LastNavigationAccountId = settings.LastServiceId;
             changed = true;
         }
 
@@ -175,6 +188,72 @@ public sealed class JsonSettingsService : ISettingsService
                 service.UnreadCount = null;
                 service.HasUnreadActivity = false;
             }
+        }
+
+        HashSet<Guid> mailAccountIds = [];
+        HashSet<string> credentialKeys = new(StringComparer.OrdinalIgnoreCase);
+        for (int index = settings.MailAccounts.Count - 1; index >= 0; index--)
+        {
+            MailAccount account = settings.MailAccounts[index];
+            if (account.Id == Guid.Empty
+                || !mailAccountIds.Add(account.Id)
+                || string.IsNullOrWhiteSpace(account.EmailAddress)
+                || string.IsNullOrWhiteSpace(account.CredentialKey)
+                || !Guid.TryParseExact(account.CredentialKey, "N", out _)
+                || !credentialKeys.Add(account.CredentialKey))
+            {
+                settings.MailAccounts.RemoveAt(index);
+                changed = true;
+                continue;
+            }
+
+            string normalizedEmail = account.EmailAddress.Trim();
+            string? normalizedDisplayName = string.IsNullOrWhiteSpace(account.DisplayName)
+                ? null
+                : account.DisplayName.Trim();
+            changed |= !string.Equals(account.EmailAddress, normalizedEmail, StringComparison.Ordinal)
+                || !string.Equals(account.DisplayName, normalizedDisplayName, StringComparison.Ordinal);
+            account.EmailAddress = normalizedEmail;
+            account.DisplayName = normalizedDisplayName;
+            account.SortOrder = Math.Max(0, account.SortOrder);
+
+            if (!Enum.IsDefined(account.Provider))
+            {
+                settings.MailAccounts.RemoveAt(index);
+                changed = true;
+                continue;
+            }
+
+            MailAuthenticationKind expectedAuthentication = account.Provider == MailProviderType.Gmail
+                ? MailAuthenticationKind.OAuth
+                : MailAuthenticationKind.Password;
+            if (account.AuthenticationKind != expectedAuthentication)
+            {
+                account.AuthenticationKind = expectedAuthentication;
+                changed = true;
+            }
+
+            if (account.Provider != MailProviderType.GenericImap && account.GenericConnectionSettings is not null)
+            {
+                account.GenericConnectionSettings = null;
+                changed = true;
+            }
+        }
+
+        int mailOrder = 0;
+        foreach (MailAccount account in settings.MailAccounts.OrderBy(account => account.SortOrder))
+        {
+            changed |= account.SortOrder != mailOrder;
+            account.SortOrder = mailOrder++;
+        }
+
+        bool navigationTargetExists = settings.LastNavigationAccountId is Guid navigationId
+            && (settings.Services.Any(service => service.Id == navigationId)
+                || settings.MailAccounts.Any(account => account.Id == navigationId));
+        if (!navigationTargetExists && settings.LastNavigationAccountId is not null)
+        {
+            settings.LastNavigationAccountId = settings.LastServiceId;
+            changed = true;
         }
 
         return changed;

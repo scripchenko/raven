@@ -80,7 +80,8 @@
                     Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource DividerBrush}"
                     BorderThickness="0,0,1,0">
-                <ListBox ItemsSource="{Binding Sections}"
+                <ListBox AutomationProperties.AutomationId="SettingsSectionsList"
+                         ItemsSource="{Binding Sections}"
                          SelectedItem="{Binding SelectedSection}"
                          Background="Transparent"
                          BorderThickness="0"
@@ -225,6 +226,22 @@
                                    Text="Профили и авторизации сохраняются отдельно для каждого аккаунта."
                                    TextWrapping="Wrap" />
 
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock VerticalAlignment="Center"
+                                       FontSize="17"
+                                       FontWeight="SemiBold"
+                                       Text="Мессенджеры" />
+                            <Button Grid.Column="1"
+                                    AutomationProperties.AutomationId="AddMailAccountButton"
+                                    Click="AddMailAccount_Click"
+                                    Content="Добавить почту"
+                                    Style="{StaticResource CompactButtonStyle}" />
+                        </Grid>
+
                         <ItemsControl ItemsSource="{Binding Accounts}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -282,6 +299,70 @@
                                                 <Button Command="{Binding MoveDownCommand}"
                                                         Content="Ниже"
                                                         IsEnabled="{Binding CanMoveDown}"
+                                                        Style="{StaticResource CompactButtonStyle}" />
+                                                <Button Command="{Binding DeleteCommand}"
+                                                        Content="Удалить…"
+                                                        Foreground="#C62828"
+                                                        Style="{StaticResource CompactButtonStyle}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Margin="0,22,0,10"
+                                   FontSize="17"
+                                   FontWeight="SemiBold"
+                                   Text="Почтовые аккаунты" />
+                        <TextBlock Margin="0,0,0,12"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Пароли хранятся отдельно в защищённом хранилище Windows и не записываются в settings.json."
+                                   TextWrapping="Wrap" />
+                        <ItemsControl ItemsSource="{Binding MailAccounts}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource SettingsCardStyle}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="46" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="38"
+                                                        Height="38"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AccentBrush}"
+                                                        CornerRadius="10">
+                                                    <TextBlock HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="White"
+                                                               Text="{Binding Glyph}" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="{Binding DisplayName}" />
+                                                    <TextBlock Margin="0,3,0,0"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               Text="{Binding EmailAddress}" />
+                                                    <TextBlock Margin="0,2,0,0"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               Text="{Binding ProviderLabel}" />
+                                                </StackPanel>
+                                                <Button Grid.Column="2"
+                                                        Command="{Binding OpenCommand}"
+                                                        Content="Открыть"
+                                                        Style="{StaticResource CompactButtonStyle}" />
+                                            </Grid>
+                                            <WrapPanel Margin="46,12,0,0">
+                                                <CheckBox Margin="0,8,18,4"
+                                                          Command="{Binding SetEnabledCommand}"
+                                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                                          Content="Включён"
+                                                          IsChecked="{Binding IsEnabled, Mode=OneWay}" />
+                                                <Button Command="{Binding RenameCommand}"
+                                                        Content="Переименовать"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                                 <Button Command="{Binding DeleteCommand}"
                                                         Content="Удалить…"

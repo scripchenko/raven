@@ -20,5 +20,6 @@ public sealed class AppPaths : IAppPaths
     public string LocalDataFolder { get; }
     public string SettingsFilePath => Path.Combine(RoamingDataFolder, "settings.json");
     public string WebViewDataFolder => Path.Combine(LocalDataFolder, "WebView2");
+    public string MailCredentialsFolder => Path.Combine(LocalDataFolder, "Credentials", "Mail");
     public string LogsFolder => Path.Combine(LocalDataFolder, "Logs");
 }
