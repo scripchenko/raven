@@ -204,6 +204,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailCredentialProtector, DpapiMailCredentialProtector>();
         services.AddSingleton<IMailCredentialStore, FileMailCredentialStore>();
         services.AddSingleton<IMailConnectionValidator, MailKitConnectionValidator>();
+        services.AddSingleton(GmailOAuthOptions.Default);
+        services.AddSingleton<IGoogleOAuthClientConfigurationSource, GoogleOAuthClientConfigurationSource>();
+        services.AddSingleton<ISystemBrowserLauncher, SystemBrowserLauncher>();
+        services.AddSingleton<IOAuthStateGenerator, CryptographicOAuthStateGenerator>();
+        services.AddSingleton<IOAuthLoopbackListenerFactory, OAuthLoopbackListenerFactory>();
+        services.AddSingleton<IGoogleOAuthProtocolClient, GoogleOAuthProtocolClient>();
+        services.AddSingleton<IGmailOAuthService, GmailOAuthService>();
         services.AddSingleton<IMailProvider, GmailApiProvider>();
         services.AddSingleton<IMailProvider, YandexMailProvider>();
         services.AddSingleton<IMailProvider, MailRuMailProvider>();

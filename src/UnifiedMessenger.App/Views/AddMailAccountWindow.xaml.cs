@@ -8,6 +8,8 @@ namespace UnifiedMessenger.App.Views;
 public partial class AddMailAccountWindow : Window
 {
     private readonly IMailAccountProvisioningService _provisioningService;
+    private CancellationTokenSource? _operationCancellation;
+    private bool _isBusy;
 
     public AddMailAccountWindow(
         IMailProviderFactory providerFactory,
@@ -45,14 +47,15 @@ public partial class AddMailAccountWindow : Window
         GenericSettings.Visibility = provider.Provider == MailProviderType.GenericImap
             ? Visibility.Visible
             : Visibility.Collapsed;
-        ConnectButton.IsEnabled = !isGmail;
+        ConnectButton.Content = isGmail ? "Войти через Google" : "Проверить и добавить";
+        ConnectButton.IsEnabled = !_isBusy;
         ProviderGuidance.Text = provider.Guidance;
         StatusText.Text = string.Empty;
     }
 
     private async void Connect_Click(object sender, RoutedEventArgs eventArgs)
     {
-        if (SelectedProvider is not MailProviderDescriptor provider || provider.Provider == MailProviderType.Gmail)
+        if (_isBusy || SelectedProvider is not MailProviderDescriptor provider)
         {
             return;
         }
@@ -93,19 +96,26 @@ public partial class AddMailAccountWindow : Window
             };
         }
 
+        _isBusy = true;
+        _operationCancellation = new CancellationTokenSource();
         ConnectButton.IsEnabled = false;
         ProviderBox.IsEnabled = false;
         StatusText.Foreground = System.Windows.Media.Brushes.DimGray;
-        StatusText.Text = "Проверяем IMAP и SMTP…";
+        StatusText.Text = provider.Provider == MailProviderType.Gmail
+            ? "Ожидаем завершения входа в системном браузере…"
+            : "Проверяем IMAP и SMTP…";
         try
         {
-            MailAccountProvisioningResult result = await _provisioningService.ConnectAsync(
-                new MailAccountConnectionRequest(
-                    provider.Provider,
-                    EmailBox.Text,
-                    DisplayNameBox.Text,
-                    genericSettings),
-                SecretBox.Password);
+            MailAccountProvisioningResult result = provider.Provider == MailProviderType.Gmail
+                ? await _provisioningService.ConnectGmailAsync(_operationCancellation.Token)
+                : await _provisioningService.ConnectAsync(
+                    new MailAccountConnectionRequest(
+                        provider.Provider,
+                        EmailBox.Text,
+                        DisplayNameBox.Text,
+                        genericSettings),
+                    SecretBox.Password,
+                    _operationCancellation.Token);
             if (!result.IsSuccess)
             {
                 StatusText.Foreground = System.Windows.Media.Brushes.Firebrick;
@@ -130,14 +140,30 @@ public partial class AddMailAccountWindow : Window
         finally
         {
             SecretBox.Clear();
+            _operationCancellation.Dispose();
+            _operationCancellation = null;
+            _isBusy = false;
             ProviderBox.IsEnabled = true;
-            ConnectButton.IsEnabled = SelectedProvider?.Provider != MailProviderType.Gmail;
+            ConnectButton.IsEnabled = true;
         }
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs eventArgs)
     {
         SecretBox.Clear();
+        if (_isBusy)
+        {
+            _operationCancellation?.Cancel();
+            StatusText.Text = "Отменяем подключение…";
+            return;
+        }
+
         DialogResult = false;
+    }
+
+    protected override void OnClosed(EventArgs eventArgs)
+    {
+        _operationCancellation?.Cancel();
+        base.OnClosed(eventArgs);
     }
 }

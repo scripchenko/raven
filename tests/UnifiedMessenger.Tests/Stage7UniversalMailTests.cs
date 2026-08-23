@@ -128,15 +128,15 @@ public sealed class Stage7UniversalMailTests
         string firstKey = Guid.NewGuid().ToString("N");
         string secondKey = Guid.NewGuid().ToString("N");
 
-        await store.SaveAsync(firstKey, "first-secret");
-        await store.SaveAsync(secondKey, "second-secret");
-        await store.SaveAsync(firstKey, "replacement-secret");
+        await store.SaveAsync(firstKey, MailCredential.CreatePassword("first-secret"));
+        await store.SaveAsync(secondKey, MailCredential.CreatePassword("second-secret"));
+        await store.SaveAsync(firstKey, MailCredential.CreatePassword("replacement-secret"));
 
-        Assert.Equal("replacement-secret", await store.LoadAsync(firstKey));
-        Assert.Equal("second-secret", await store.LoadAsync(secondKey));
+        Assert.Equal("replacement-secret", (await store.LoadAsync(firstKey))?.Secret);
+        Assert.Equal("second-secret", (await store.LoadAsync(secondKey))?.Secret);
         await store.DeleteAsync(firstKey);
         Assert.Null(await store.LoadAsync(firstKey));
-        Assert.Equal("second-secret", await store.LoadAsync(secondKey));
+        Assert.Equal("second-secret", (await store.LoadAsync(secondKey))?.Secret);
     }
 
     [Fact]
@@ -307,8 +307,8 @@ public sealed class Stage7UniversalMailTests
         MailAccount second = CreateMailAccount(MailProviderType.MailRu, "two@mail.ru");
         AppSettings settings = new() { Services = [web], MailAccounts = [first, second] };
         RecordingCredentialStore credentials = new();
-        credentials.Values[first.CredentialKey] = "one";
-        credentials.Values[second.CredentialKey] = "two";
+        credentials.Values[first.CredentialKey] = MailCredential.CreatePassword("one");
+        credentials.Values[second.CredentialKey] = MailCredential.CreatePassword("two");
         MailAccountProvisioningService service = CreateProvisioner(
             new StaticProvider(MailProviderType.Yandex, MailConnectionValidationResult.Success(new MailIdentity("x", null))),
             credentials,
@@ -511,7 +511,12 @@ public sealed class Stage7UniversalMailTests
         IMailProvider provider,
         IMailCredentialStore credentials,
         IApplicationSettingsStore settingsStore) =>
-        new(new MailProviderFactory([provider]), credentials, settingsStore, TimeProvider.System);
+        new(
+            new MailProviderFactory([provider]),
+            credentials,
+            new NoOpGmailOAuthService(),
+            settingsStore,
+            TimeProvider.System);
 
     private static MainWindowViewModel CreateMainViewModel(
         AppSettings settings,
@@ -581,16 +586,21 @@ public sealed class Stage7UniversalMailTests
 
     private sealed class RecordingCredentialStore : IMailCredentialStore
     {
-        public Dictionary<string, string> Values { get; } = [];
+        public Dictionary<string, MailCredential> Values { get; } = [];
 
-        public Task SaveAsync(string credentialKey, string secret, CancellationToken cancellationToken = default)
+        public Task SaveAsync(
+            string credentialKey,
+            MailCredential credential,
+            CancellationToken cancellationToken = default)
         {
-            Values[credentialKey] = secret;
+            Values[credentialKey] = credential;
             return Task.CompletedTask;
         }
 
-        public Task<string?> LoadAsync(string credentialKey, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Values.TryGetValue(credentialKey, out string? value) ? value : null);
+        public Task<MailCredential?> LoadAsync(
+            string credentialKey,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Values.TryGetValue(credentialKey, out MailCredential? value) ? value : null);
 
         public Task DeleteAsync(string credentialKey, CancellationToken cancellationToken = default)
         {
@@ -716,7 +726,29 @@ public sealed class Stage7UniversalMailTests
                     MailConnectionFailureKind.OAuthNotAvailable,
                     "Недоступно."));
 
+        public Task<MailAccountProvisioningResult> ConnectGmailAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(
+                MailAccountProvisioningResult.Failure(
+                    MailConnectionFailureKind.OAuthNotAvailable,
+                    "Недоступно."));
+
         public Task DeleteAsync(Guid accountId, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class NoOpGmailOAuthService : IGmailOAuthService
+    {
+        public Task<GmailOAuthAuthorizationResult> AuthorizeAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(
+                GmailOAuthAuthorizationResult.Failure(
+                    MailConnectionFailureKind.OAuthNotAvailable,
+                    "Недоступно."));
+
+        public Task<GmailProfileResult> GetProfileAsync(
+            GmailOAuthSession session,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(GmailProfileResult.Failure("Недоступно."));
     }
 }

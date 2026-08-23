@@ -7,6 +7,7 @@ namespace UnifiedMessenger.App.Services.Mail;
 public sealed class MailAccountProvisioningService(
     IMailProviderFactory providerFactory,
     IMailCredentialStore credentialStore,
+    IGmailOAuthService gmailOAuthService,
     IApplicationSettingsStore settingsStore,
     TimeProvider timeProvider) : IMailAccountProvisioningService
 {
@@ -70,7 +71,10 @@ public sealed class MailAccountProvisioningService(
 
             try
             {
-                await credentialStore.SaveAsync(credentialKey, secret, cancellationToken);
+                await credentialStore.SaveAsync(
+                    credentialKey,
+                    MailCredential.CreatePassword(secret),
+                    cancellationToken);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
             {
@@ -97,6 +101,119 @@ public sealed class MailAccountProvisioningService(
                 return MailAccountProvisioningResult.Failure(
                     MailConnectionFailureKind.PersistenceFailed,
                     "Не удалось сохранить настройки почтового аккаунта.");
+            }
+
+            return MailAccountProvisioningResult.Success(account);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<MailAccountProvisioningResult> ConnectGmailAsync(
+        CancellationToken cancellationToken = default)
+    {
+        GmailOAuthAuthorizationResult authorization = await gmailOAuthService.AuthorizeAsync(cancellationToken);
+        if (!authorization.IsSuccess || authorization.Session is not GmailOAuthSession session)
+        {
+            return MailAccountProvisioningResult.Failure(
+                authorization.FailureKind,
+                authorization.UserMessage);
+        }
+
+        string credentialKey = Guid.NewGuid().ToString("N");
+        try
+        {
+            await credentialStore.SaveAsync(
+                credentialKey,
+                session.PersistentCredential,
+                cancellationToken);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or System.Security.Cryptography.CryptographicException
+                or System.Text.Json.JsonException)
+        {
+            return MailAccountProvisioningResult.Failure(
+                MailConnectionFailureKind.CredentialStorageFailed,
+                "Не удалось безопасно сохранить Gmail OAuth credential в Windows.");
+        }
+
+        GmailProfileResult profileResult;
+        try
+        {
+            profileResult = await gmailOAuthService.GetProfileAsync(session, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
+            throw;
+        }
+
+        if (!profileResult.IsSuccess || profileResult.Profile is not GmailUserProfile profile)
+        {
+            await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
+            return MailAccountProvisioningResult.Failure(
+                profileResult.FailureKind,
+                profileResult.UserMessage);
+        }
+
+        string normalizedEmail = profile.EmailAddress.Trim();
+        try
+        {
+            await _gate.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
+            throw;
+        }
+
+        try
+        {
+            AppSettings settings = settingsStore.Current;
+            if (settings.MailAccounts.Any(account =>
+                account.Provider == MailProviderType.Gmail
+                && string.Equals(account.EmailAddress, normalizedEmail, StringComparison.OrdinalIgnoreCase)))
+            {
+                await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
+                return MailAccountProvisioningResult.Failure(
+                    MailConnectionFailureKind.AlreadyExists,
+                    "Этот аккаунт Gmail уже подключён.");
+            }
+
+            MailAccount account = new()
+            {
+                Id = Guid.NewGuid(),
+                Provider = MailProviderType.Gmail,
+                EmailAddress = normalizedEmail,
+                IsEnabled = true,
+                CredentialKey = credentialKey,
+                AuthenticationKind = MailAuthenticationKind.OAuth,
+                LastSuccessfulConnectionUtc = timeProvider.GetUtcNow(),
+                SortOrder = settings.MailAccounts.Count
+            };
+
+            settings.MailAccounts.Add(account);
+            try
+            {
+                await settingsStore.SaveAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                settings.MailAccounts.Remove(account);
+                await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
+                throw;
+            }
+            catch
+            {
+                settings.MailAccounts.Remove(account);
+                await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
+                return MailAccountProvisioningResult.Failure(
+                    MailConnectionFailureKind.PersistenceFailed,
+                    "Не удалось сохранить настройки Gmail аккаунта.");
             }
 
             return MailAccountProvisioningResult.Success(account);

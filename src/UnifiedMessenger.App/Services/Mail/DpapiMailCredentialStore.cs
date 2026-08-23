@@ -1,6 +1,8 @@
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using UnifiedMessenger.App.Services.Persistence;
 
 namespace UnifiedMessenger.App.Services.Mail;
@@ -28,6 +30,11 @@ public sealed class DpapiMailCredentialProtector : IMailCredentialProtector
 
 public sealed class FileMailCredentialStore : IMailCredentialStore
 {
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     private readonly string _credentialsFolder;
     private readonly IMailCredentialProtector _protector;
 
@@ -45,14 +52,19 @@ public sealed class FileMailCredentialStore : IMailCredentialStore
 
     public async Task SaveAsync(
         string credentialKey,
-        string secret,
+        MailCredential credential,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(secret);
+        ArgumentNullException.ThrowIfNull(credential);
+        if (!credential.IsValid())
+        {
+            throw new ArgumentException("The mail credential payload is invalid.", nameof(credential));
+        }
+
         string targetPath = GetCredentialPath(credentialKey);
         Directory.CreateDirectory(_credentialsFolder);
         string temporaryPath = targetPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        byte[] plaintext = Encoding.UTF8.GetBytes(secret);
+        byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(credential, SerializerOptions);
         byte[]? protectedBytes = null;
         try
         {
@@ -75,7 +87,7 @@ public sealed class FileMailCredentialStore : IMailCredentialStore
         }
     }
 
-    public async Task<string?> LoadAsync(
+    public async Task<MailCredential?> LoadAsync(
         string credentialKey,
         CancellationToken cancellationToken = default)
     {
@@ -90,9 +102,9 @@ public sealed class FileMailCredentialStore : IMailCredentialStore
         try
         {
             plaintext = _protector.Unprotect(protectedBytes);
-            return Encoding.UTF8.GetString(plaintext);
+            return DeserializeCredential(plaintext);
         }
-        catch (CryptographicException)
+        catch (Exception exception) when (exception is CryptographicException or JsonException)
         {
             return null;
         }
@@ -103,6 +115,24 @@ public sealed class FileMailCredentialStore : IMailCredentialStore
             {
                 CryptographicOperations.ZeroMemory(plaintext);
             }
+        }
+    }
+
+    private static MailCredential? DeserializeCredential(byte[] plaintext)
+    {
+        try
+        {
+            MailCredential? credential = JsonSerializer.Deserialize<MailCredential>(plaintext, SerializerOptions);
+            return credential?.IsValid() == true ? credential : null;
+        }
+        catch (JsonException)
+        {
+            // Stage 7 stored password credentials as protected UTF-8 text. Reading that format keeps
+            // existing IMAP accounts compatible while all new writes use the typed envelope.
+            string legacyPassword = Encoding.UTF8.GetString(plaintext);
+            return string.IsNullOrWhiteSpace(legacyPassword)
+                ? null
+                : MailCredential.CreatePassword(legacyPassword);
         }
     }
 

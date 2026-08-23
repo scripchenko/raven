@@ -17,8 +17,9 @@ temp-sdk/
 # Credentials, private keys, OAuth data and local environment files
 credentials.json
 credentials.*.json
-!credentials.example.json
 client_secret*.json
+google-oauth*.json
+**/GoogleOAuth/
 **/tokens/
 *.token
 *.tokens

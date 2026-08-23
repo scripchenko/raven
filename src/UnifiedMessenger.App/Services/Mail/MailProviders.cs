@@ -133,8 +133,8 @@ public sealed class GmailApiProvider : IMailProvider
         MailProviderType.Gmail,
         "Gmail",
         MailAuthenticationKind.OAuth,
-        MailProviderCapabilities.OAuthAuthentication,
-        "Подключение Gmail через OAuth будет добавлено отдельно. Пароль Google здесь не запрашивается.");
+        MailProviderCapabilities.OAuthAuthentication | MailProviderCapabilities.IdentityValidation,
+        "Авторизация откроется в системном браузере. Пароль Google в UnifiedMessenger не вводится.");
 
     public Task<MailConnectionValidationResult> ValidateAsync(
         MailAccountConnectionRequest request,
@@ -143,7 +143,7 @@ public sealed class GmailApiProvider : IMailProvider
         Task.FromResult(
             MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.OAuthNotAvailable,
-                "Подключение Gmail через OAuth пока недоступно. Пароль Google вводить не нужно."));
+                "Для Gmail используйте вход через Google в системном браузере."));
 }
 
 public sealed class MailProviderFactory(IEnumerable<IMailProvider> providers) : IMailProviderFactory

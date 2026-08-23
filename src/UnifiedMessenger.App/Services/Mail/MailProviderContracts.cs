@@ -30,6 +30,16 @@ public enum MailConnectionFailureKind
     ConnectionFailed,
     SmtpValidationFailed,
     OAuthNotAvailable,
+    OAuthConfigurationMissing,
+    OAuthConfigurationInvalid,
+    OAuthBrowserLaunchFailed,
+    OAuthDenied,
+    OAuthStateMismatch,
+    OAuthTimeout,
+    OAuthTokenExchangeFailed,
+    OAuthRefreshTokenMissing,
+    GmailProfileFailed,
+    OperationCanceled,
     CredentialStorageFailed,
     PersistenceFailed,
     AlreadyExists
@@ -108,8 +118,15 @@ public interface IMailProviderFactory
 
 public interface IMailCredentialStore
 {
-    Task SaveAsync(string credentialKey, string secret, CancellationToken cancellationToken = default);
-    Task<string?> LoadAsync(string credentialKey, CancellationToken cancellationToken = default);
+    Task SaveAsync(
+        string credentialKey,
+        MailCredential credential,
+        CancellationToken cancellationToken = default);
+
+    Task<MailCredential?> LoadAsync(
+        string credentialKey,
+        CancellationToken cancellationToken = default);
+
     Task DeleteAsync(string credentialKey, CancellationToken cancellationToken = default);
 }
 
@@ -124,6 +141,9 @@ public interface IMailAccountProvisioningService
     Task<MailAccountProvisioningResult> ConnectAsync(
         MailAccountConnectionRequest request,
         string secret,
+        CancellationToken cancellationToken = default);
+
+    Task<MailAccountProvisioningResult> ConnectGmailAsync(
         CancellationToken cancellationToken = default);
 
     Task DeleteAsync(Guid accountId, CancellationToken cancellationToken = default);

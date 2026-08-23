@@ -39,8 +39,12 @@
                         Background="#FFF4D6"
                         CornerRadius="8"
                         Visibility="Collapsed">
-                    <TextBlock Text="Gmail будет подключаться только через OAuth. Эта архитектура подготовлена, но само подключение Gmail появится на следующем этапе. Пароль Google здесь вводить не нужно."
-                               TextWrapping="Wrap" />
+                    <StackPanel>
+                        <TextBlock FontSize="17" FontWeight="SemiBold" Text="Gmail" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Text="Авторизация откроется в системном браузере. UnifiedMessenger не запрашивает пароль Google и не использует WebView2 для входа."
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
                 </Border>
 
                 <StackPanel x:Name="PasswordAccountFields">

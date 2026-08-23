@@ -7,5 +7,7 @@ public interface IAppPaths
     string SettingsFilePath { get; }
     string WebViewDataFolder { get; }
     string MailCredentialsFolder => System.IO.Path.Combine(LocalDataFolder, "Credentials", "Mail");
+    string GoogleOAuthClientConfigurationPath =>
+        System.IO.Path.Combine(LocalDataFolder, "GoogleOAuth", "client_secret.json");
     string LogsFolder { get; }
 }
