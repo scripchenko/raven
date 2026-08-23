@@ -2,10 +2,14 @@ using UnifiedMessenger.App.Models;
 
 namespace UnifiedMessenger.App.Services.Mail;
 
-public sealed class MailReadProviderFactory(IEnumerable<IMailReadProvider> providers)
+public sealed class MailReadProviderFactory(
+    IEnumerable<IMailReadProvider> providers,
+    IGmailScopeUpgradeService? gmailScopeUpgradeService = null)
     : IMailReadProviderFactory
 {
     private readonly IReadOnlyList<IMailReadProvider> _providers = providers.ToArray();
+
+    public IGmailScopeUpgradeService? GmailScopeUpgradeService { get; } = gmailScopeUpgradeService;
 
     public IMailReadProvider Get(MailProviderType providerType)
     {

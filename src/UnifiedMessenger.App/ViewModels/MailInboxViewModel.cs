@@ -9,26 +9,39 @@ namespace UnifiedMessenger.App.ViewModels;
 public sealed class MailInboxViewModel : ObservableObject, IDisposable
 {
     public const int InitialPageSize = 30;
+    public const int MessageBodyCacheCapacity = 20;
+    public const int RemoteImageConsentCacheCapacity = 20;
 
     private readonly IMailReadProviderFactory _providerFactory;
-    private readonly Dictionary<Guid, AccountInboxState> _accountStates = [];
-    private readonly HashSet<RemoteImageConsentKey> _remoteImageConsents = [];
+    private readonly Dictionary<FolderStateKey, FolderState> _folderStates = [];
+    private readonly Dictionary<Guid, AccountFolderState> _accountFolderStates = [];
+    private readonly BoundedLruCache<MessageBodyCacheKey, MailMessageContent> _messageBodyCache =
+        new(MessageBodyCacheCapacity);
+    private readonly BoundedLruCache<RemoteImageConsentKey, bool> _remoteImageConsents =
+        new(RemoteImageConsentCacheCapacity);
     private CancellationTokenSource? _activationCancellation;
     private CancellationTokenSource? _listCancellation;
     private CancellationTokenSource? _messageCancellation;
+    private CancellationTokenSource? _mutationCancellation;
     private MailAccount? _activeAccount;
+    private MailFolder? _selectedFolder;
     private MailMessageSummary? _selectedMessageSummary;
     private MailMessageContent? _selectedMessageContent;
     private bool _isListLoading;
     private bool _isMessageLoading;
     private bool _isRemoteImageLoading;
+    private bool _isReadStateChanging;
     private bool _hasLoaded;
     private string? _listErrorMessage;
     private string? _messageErrorMessage;
+    private string? _readStateErrorMessage;
+    private string? _authorizationMessage;
     private MailReadFailureKind? _failureKind;
+    private MailReadStateCapability _readStateCapability = MailReadStateCapability.Unsupported;
     private string? _continuationToken;
-    private long _activationVersion;
+    private long _viewVersion;
     private bool _isApplyingState;
+    private bool _isReadStateMetadataUpdate;
     private bool _disposed;
 
     public MailInboxViewModel(IMailReadProviderFactory providerFactory)
@@ -38,16 +51,25 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         LoadMoreCommand = new AsyncRelayCommand(LoadMoreAsync, CanLoadMore);
         RetryCommand = new AsyncRelayCommand(RetryAsync, CanRetry);
         RetryMessageCommand = new AsyncRelayCommand(RetryMessageAsync, CanRetryMessage);
+        SetReadStateCommand = new AsyncRelayCommand(SetReadStateAsync, CanSetReadState);
+        AuthorizeGmailCommand = new AsyncRelayCommand(AuthorizeGmailAsync, CanAuthorizeGmail);
     }
 
+    public ObservableCollection<MailFolder> Folders { get; } = [];
     public ObservableCollection<MailMessageSummary> Messages { get; } = [];
 
     public IAsyncRelayCommand RefreshCommand { get; }
     public IAsyncRelayCommand LoadMoreCommand { get; }
     public IAsyncRelayCommand RetryCommand { get; }
     public IAsyncRelayCommand RetryMessageCommand { get; }
+    public IAsyncRelayCommand SetReadStateCommand { get; }
+    public IAsyncRelayCommand AuthorizeGmailCommand { get; }
 
     internal Task CurrentMessageLoadTask { get; private set; } = Task.CompletedTask;
+    internal Task CurrentFolderLoadTask { get; private set; } = Task.CompletedTask;
+    internal int CachedMessageBodyCount => _messageBodyCache.Count;
+    internal int CachedRemoteImageConsentCount => _remoteImageConsents.Count;
+    internal bool IsReadStateMetadataUpdate => _isReadStateMetadataUpdate;
 
     public MailAccount? ActiveAccount
     {
@@ -61,8 +83,25 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(ProviderDisplayName));
                 OnPropertyChanged(nameof(EmailAddress));
                 RaiseRemoteImageConsentStateChanged();
+                RaiseReadStateChanged();
                 NotifyCommandStates();
             }
+        }
+    }
+
+    public MailFolder? SelectedFolder
+    {
+        get => _selectedFolder;
+        set
+        {
+            if (!SetProperty(ref _selectedFolder, value) || _isApplyingState || value is null || ActiveAccount is null)
+            {
+                return;
+            }
+
+            AccountFolderState catalog = GetAccountFolderState(ActiveAccount.Id);
+            catalog.SelectedFolderKey = value.Key;
+            CurrentFolderLoadTask = SwitchFolderAsync(ActiveAccount, value);
         }
     }
 
@@ -77,29 +116,33 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             }
 
             OnPropertyChanged(nameof(HasSelectedMessage));
-            if (_isApplyingState || ActiveAccount is null)
+            RaiseReadStateChanged();
+            if (_isApplyingState || ActiveAccount is null || SelectedFolder is null)
             {
                 return;
             }
 
-            AccountInboxState state = GetState(ActiveAccount.Id);
+            FolderState state = GetState(ActiveAccount.Id, SelectedFolder.Key);
             state.SelectedMessageKey = value?.MessageKey;
+            CancelMessageOperation();
+            IsMessageLoading = false;
             if (value is null)
             {
-                state.SelectedContent = null;
                 SelectedMessageContent = null;
                 MessageErrorMessage = null;
                 return;
             }
 
-            if (state.SelectedContent?.MessageKey == value.MessageKey)
+            MessageBodyCacheKey cacheKey = new(ActiveAccount.Id, value.MessageKey);
+            if (_messageBodyCache.TryGet(cacheKey, out MailMessageContent? cachedContent))
             {
-                SelectedMessageContent = state.SelectedContent;
+                SelectedMessageContent = cachedContent;
                 MessageErrorMessage = null;
+                CurrentMessageLoadTask = Task.CompletedTask;
+                CurrentFolderLoadTask = RefreshReadStateCapabilityAsync();
                 return;
             }
 
-            state.SelectedContent = null;
             CurrentMessageLoadTask = LoadSelectedMessageAsync(value);
         }
     }
@@ -116,13 +159,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsSelectedMessagePlainText));
                 OnPropertyChanged(nameof(IsSelectedMessageHtml));
                 RaiseRemoteImageConsentStateChanged();
+                RaiseReadStateChanged();
             }
         }
     }
 
     public bool AreRemoteImagesShown =>
         TryGetCurrentRemoteImageConsentKey(out RemoteImageConsentKey key)
-        && _remoteImageConsents.Contains(key);
+        && _remoteImageConsents.TryGet(key, out _);
 
     public bool IsRemoteImageLoading
     {
@@ -145,6 +189,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isListLoading, value))
             {
                 RaiseListStateChanged();
+                NotifyCommandStates();
             }
         }
     }
@@ -158,6 +203,18 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(ShowMessagePlaceholder));
                 RetryMessageCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool IsReadStateChanging
+    {
+        get => _isReadStateChanging;
+        private set
+        {
+            if (SetProperty(ref _isReadStateChanging, value))
+            {
+                RaiseReadStateChanged();
             }
         }
     }
@@ -200,6 +257,30 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
+    public string? ReadStateErrorMessage
+    {
+        get => _readStateErrorMessage;
+        private set
+        {
+            if (SetProperty(ref _readStateErrorMessage, value))
+            {
+                OnPropertyChanged(nameof(HasReadStateError));
+            }
+        }
+    }
+
+    public string? AuthorizationMessage
+    {
+        get => _authorizationMessage;
+        private set
+        {
+            if (SetProperty(ref _authorizationMessage, value))
+            {
+                RaiseReadStateChanged();
+            }
+        }
+    }
+
     public MailReadFailureKind? FailureKind
     {
         get => _failureKind;
@@ -226,26 +307,43 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     }
 
     public bool IsActive => ActiveAccount is { IsEnabled: true };
+    public bool HasFolders => Folders.Count > 0;
     public bool HasMessages => Messages.Count > 0;
     public bool HasMore => !string.IsNullOrWhiteSpace(ContinuationToken);
     public bool HasListError => !string.IsNullOrWhiteSpace(ListErrorMessage);
     public bool HasBlockingListError => HasListError && !HasMessages;
     public bool HasMessageError => !string.IsNullOrWhiteSpace(MessageErrorMessage);
+    public bool HasReadStateError => !string.IsNullOrWhiteSpace(ReadStateErrorMessage);
     public bool IsInitialLoading => IsListLoading && !HasMessages;
     public bool IsEmpty => HasLoaded && !IsListLoading && !HasMessages && !HasListError;
     public bool HasSelectedMessage => SelectedMessageSummary is not null;
     public bool HasSelectedContent => SelectedMessageContent is not null;
-    public bool IsSelectedMessagePlainText =>
-        SelectedMessageContent?.BodyKind is MailMessageBodyKind.PlainText;
-    public bool IsSelectedMessageHtml =>
-        SelectedMessageContent?.BodyKind is MailMessageBodyKind.SanitizedHtml;
-    public bool ShowRemoteImagesBanner =>
-        SelectedMessageContent?.HasRemoteImages == true && !AreRemoteImagesShown;
+    public bool IsSelectedMessagePlainText => SelectedMessageContent?.BodyKind is MailMessageBodyKind.PlainText;
+    public bool IsSelectedMessageHtml => SelectedMessageContent?.BodyKind is MailMessageBodyKind.SanitizedHtml;
+    public bool ShowRemoteImagesBanner => SelectedMessageContent?.HasRemoteImages == true && !AreRemoteImagesShown;
     public bool CanShowRemoteImages => ShowRemoteImagesBanner && !IsRemoteImageLoading;
-    public string RemoteImagesButtonText => IsRemoteImageLoading
-        ? "Загружаем…"
-        : "Показать";
+    public string RemoteImagesButtonText => IsRemoteImageLoading ? "Загружаем…" : "Показать";
     public bool ShowMessagePlaceholder => !HasSelectedContent && !IsMessageLoading && !HasMessageError;
+    public bool ShowReadStateAction =>
+        HasSelectedContent
+        && SelectedFolder?.SupportsReadState == true
+        && _readStateCapability.CanSetReadState;
+    public bool RequiresGmailAuthorization =>
+        ActiveAccount?.Provider is MailProviderType.Gmail
+        && _readStateCapability.RequiresAuthorization;
+    public bool CanChangeReadState =>
+        _readStateCapability.CanSetReadState
+        && HasSelectedContent
+        && !IsReadStateChanging;
+    public string ReadStateActionText => IsReadStateChanging
+        ? "Сохраняем…"
+        : SelectedMessageSummary?.IsUnread == true
+            ? "Отметить прочитанным"
+            : "Отметить непрочитанным";
+    public string ReadStateAuthorizationText =>
+        AuthorizationMessage
+        ?? _readStateCapability.UserMessage
+        ?? "Чтобы менять статус писем, нужно снова разрешить доступ Google.";
     public string AccountDisplayName => ActiveAccount?.DisplayLabel ?? string.Empty;
     public string EmailAddress => ActiveAccount?.EmailAddress ?? string.Empty;
     public string ProviderDisplayName => ActiveAccount?.Provider switch
@@ -260,19 +358,17 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public string ErrorTitle => FailureKind switch
     {
         MailReadFailureKind.ReauthorizationRequired => "Требуется повторный вход в Google",
-        MailReadFailureKind.AuthenticationFailed or MailReadFailureKind.CredentialMissing =>
-            "Не удалось войти в почту",
+        MailReadFailureKind.AuthenticationFailed or MailReadFailureKind.CredentialMissing => "Не удалось войти в почту",
+        MailReadFailureKind.FolderUnavailable => "Папка недоступна",
         _ => "Не удалось загрузить почту"
     };
 
     public void SetRemoteImageLoading(bool isLoading)
     {
-        if (_disposed)
+        if (!_disposed)
         {
-            return;
+            IsRemoteImageLoading = isLoading;
         }
-
-        IsRemoteImageLoading = isLoading;
     }
 
     public void MarkRemoteImagesShown()
@@ -283,51 +379,86 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
 
         IsRemoteImageLoading = false;
-        if (TryGetCurrentRemoteImageConsentKey(out RemoteImageConsentKey key)
-            && _remoteImageConsents.Add(key))
+        if (TryGetCurrentRemoteImageConsentKey(out RemoteImageConsentKey key))
+        {
+            _remoteImageConsents.Set(key, true);
+            RaiseRemoteImageConsentStateChanged();
+        }
+    }
+
+    internal void ForgetRemoteImagesShown(Guid accountId, string messageKey)
+    {
+        _remoteImageConsents.RemoveWhere(
+            key => key.AccountId == accountId
+                && string.Equals(key.MessageKey, messageKey, StringComparison.Ordinal));
+        if (ActiveAccount?.Id == accountId
+            && string.Equals(SelectedMessageContent?.MessageKey, messageKey, StringComparison.Ordinal))
         {
             RaiseRemoteImageConsentStateChanged();
         }
     }
 
-    public async Task ActivateAsync(
-        MailAccount? account,
-        CancellationToken cancellationToken = default)
+    public async Task ActivateAsync(MailAccount? account, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         CancelActivation();
-        long version = ++_activationVersion;
+        long version = ++_viewVersion;
         _activationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         ActiveAccount = account;
-        OnPropertyChanged(nameof(IsActive));
         IsListLoading = false;
         IsMessageLoading = false;
+        ReadStateErrorMessage = null;
+        AuthorizationMessage = null;
 
         if (account is null || !account.IsEnabled)
         {
-            ClearDisplayedState();
+            ClearDisplayedState(clearFolders: true);
             return;
         }
 
-        AccountInboxState state = GetState(account.Id);
-        ApplyState(state);
-        if (state.HasLoaded)
+        AccountFolderState folderState = GetAccountFolderState(account.Id);
+        if (!folderState.HasLoaded)
         {
+            await LoadFoldersAsync(account, folderState, version, _activationCancellation.Token);
             return;
         }
 
-        await LoadPageAsync(account, state, replace: true, version, _activationCancellation.Token);
+        ApplyFolders(folderState);
+        MailFolder? folder = ResolveSelectedFolder(folderState);
+        if (folder is null)
+        {
+            ShowNoFoldersError();
+            return;
+        }
+
+        SetSelectedFolderWithoutSwitch(folder);
+        FolderState state = GetState(account.Id, folder.Key);
+        ApplyState(state);
+        if (!state.HasLoaded)
+        {
+            await LoadPageAsync(account, folder, state, true, version, _activationCancellation.Token);
+        }
+        else
+        {
+            await RefreshReadStateCapabilityAsync();
+        }
     }
 
     public void RemoveAccount(Guid accountId)
     {
         CancelActivation();
-        _accountStates.Remove(accountId);
+        _accountFolderStates.Remove(accountId);
+        foreach (FolderStateKey key in _folderStates.Keys.Where(key => key.AccountId == accountId).ToArray())
+        {
+            _folderStates.Remove(key);
+        }
+
         _remoteImageConsents.RemoveWhere(key => key.AccountId == accountId);
+        _messageBodyCache.RemoveWhere(key => key.AccountId == accountId);
         if (ActiveAccount?.Id == accountId)
         {
             ActiveAccount = null;
-            ClearDisplayedState();
+            ClearDisplayedState(clearFolders: true);
         }
     }
 
@@ -340,39 +471,117 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         CancelActivation();
-        _accountStates.Clear();
+        _folderStates.Clear();
+        _accountFolderStates.Clear();
+        _messageBodyCache.Clear();
         _remoteImageConsents.Clear();
+    }
+
+    private async Task LoadFoldersAsync(
+        MailAccount account,
+        AccountFolderState accountState,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        IsListLoading = true;
+        ClearDisplayedState(clearFolders: true, preserveLoading: true);
+        try
+        {
+            IMailReadProvider provider = _providerFactory.Get(account.Provider);
+            IReadOnlyList<MailFolder> folders = await provider.GetFoldersAsync(account, cancellationToken);
+            if (!IsCurrentAccount(account.Id, version, cancellationToken))
+            {
+                return;
+            }
+
+            accountState.Folders.Clear();
+            accountState.Folders.AddRange(folders.Where(folder => folder.IsAvailable));
+            accountState.HasLoaded = true;
+            ApplyFolders(accountState);
+            MailFolder? selected = ResolveSelectedFolder(accountState);
+            if (selected is null)
+            {
+                ShowNoFoldersError();
+                return;
+            }
+
+            accountState.SelectedFolderKey = selected.Key;
+            SetSelectedFolderWithoutSwitch(selected);
+            FolderState state = GetState(account.Id, selected.Key);
+            ApplyState(state);
+            await LoadPageAsync(account, selected, state, true, version, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (MailReadException exception) when (IsCurrentAccount(account.Id, version, cancellationToken))
+        {
+            HasLoaded = true;
+            ListErrorMessage = exception.UserMessage;
+            FailureKind = exception.FailureKind;
+        }
+        catch (Exception) when (IsCurrentAccount(account.Id, version, cancellationToken))
+        {
+            HasLoaded = true;
+            ListErrorMessage = "Не удалось загрузить папки почты. Попробуйте ещё раз.";
+            FailureKind = MailReadFailureKind.ConnectionFailed;
+        }
+        finally
+        {
+            if (IsCurrentAccount(account.Id, version, cancellationToken))
+            {
+                IsListLoading = false;
+            }
+        }
+    }
+
+    private async Task SwitchFolderAsync(MailAccount account, MailFolder folder)
+    {
+        long version = ++_viewVersion;
+        CancelListOperation();
+        CancelMessageOperation();
+        CancelMutationOperation();
+        ReadStateErrorMessage = null;
+        AuthorizationMessage = null;
+        FolderState state = GetState(account.Id, folder.Key);
+        ApplyState(state);
+        if (!state.HasLoaded)
+        {
+            await LoadPageAsync(account, folder, state, true, version, GetActivationToken());
+        }
+        else
+        {
+            await RefreshReadStateCapabilityAsync();
+        }
     }
 
     private async Task RefreshAsync()
     {
-        if (ActiveAccount is not { IsEnabled: true } account)
+        if (ActiveAccount is not { IsEnabled: true } account || SelectedFolder is not MailFolder folder)
         {
             return;
         }
 
-        AccountInboxState state = GetState(account.Id);
+        FolderState state = GetState(account.Id, folder.Key);
         state.PrepareRefresh();
         ContinuationToken = null;
         ListErrorMessage = null;
         FailureKind = null;
-        await LoadPageAsync(account, state, replace: true, _activationVersion, GetActivationToken());
+        await LoadPageAsync(account, folder, state, true, _viewVersion, GetActivationToken());
     }
 
     private async Task LoadMoreAsync()
     {
-        if (ActiveAccount is not { IsEnabled: true } account)
+        if (ActiveAccount is not { IsEnabled: true } account || SelectedFolder is not MailFolder folder)
         {
             return;
         }
 
-        AccountInboxState state = GetState(account.Id);
-        if (string.IsNullOrWhiteSpace(state.ContinuationToken))
+        FolderState state = GetState(account.Id, folder.Key);
+        if (!string.IsNullOrWhiteSpace(state.ContinuationToken))
         {
-            return;
+            await LoadPageAsync(account, folder, state, false, _viewVersion, GetActivationToken());
         }
-
-        await LoadPageAsync(account, state, replace: false, _activationVersion, GetActivationToken());
     }
 
     private async Task RetryAsync()
@@ -382,16 +591,29 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             return;
         }
 
-        AccountInboxState state = GetState(account.Id);
+        if (!HasFolders)
+        {
+            AccountFolderState accountState = GetAccountFolderState(account.Id);
+            accountState.HasLoaded = false;
+            await LoadFoldersAsync(account, accountState, _viewVersion, GetActivationToken());
+            return;
+        }
+
+        if (SelectedFolder is not MailFolder folder)
+        {
+            return;
+        }
+
+        FolderState state = GetState(account.Id, folder.Key);
         if (state.Messages.Count == 0)
         {
             state.Reset();
             ApplyState(state);
-            await LoadPageAsync(account, state, replace: true, _activationVersion, GetActivationToken());
+            await LoadPageAsync(account, folder, state, true, _viewVersion, GetActivationToken());
         }
         else
         {
-            await LoadPageAsync(account, state, replace: false, _activationVersion, GetActivationToken());
+            await LoadPageAsync(account, folder, state, false, _viewVersion, GetActivationToken());
         }
     }
 
@@ -406,7 +628,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     private async Task LoadPageAsync(
         MailAccount account,
-        AccountInboxState state,
+        MailFolder folder,
+        FolderState state,
         bool replace,
         long version,
         CancellationToken activationToken)
@@ -420,47 +643,43 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         try
         {
             IMailReadProvider provider = _providerFactory.Get(account.Provider);
-            MailPage<MailMessageSummary> page = await provider.GetInboxPageAsync(
+            MailPage<MailMessageSummary> page = await provider.GetPageAsync(
                 account,
+                folder,
                 replace ? null : state.ContinuationToken,
                 InitialPageSize,
                 cancellationToken);
-            if (!IsCurrent(account.Id, version, cancellationToken))
+            if (!IsCurrent(account.Id, folder.Key, version, cancellationToken))
             {
                 return;
             }
 
             if (replace)
             {
-                MailMessageSummary? retainedSelection = state.SelectedMessageKey is null
+                MailMessageSummary? retained = state.SelectedMessageKey is null
                     ? null
-                    : state.Messages.FirstOrDefault(
-                        message => message.MessageKey == state.SelectedMessageKey);
+                    : state.Messages.FirstOrDefault(message => message.MessageKey == state.SelectedMessageKey);
                 state.Messages.Clear();
-
-                HashSet<string> refreshedKeys = new(StringComparer.Ordinal);
+                HashSet<string> keys = new(StringComparer.Ordinal);
                 foreach (MailMessageSummary summary in page.Items)
                 {
-                    if (refreshedKeys.Add(summary.MessageKey))
+                    if (keys.Add(summary.MessageKey))
                     {
                         state.Messages.Add(summary);
                     }
                 }
 
-                if (retainedSelection is not null
-                    && refreshedKeys.Add(retainedSelection.MessageKey))
+                if (retained is not null && keys.Add(retained.MessageKey))
                 {
-                    state.Messages.Add(retainedSelection);
+                    state.Messages.Add(retained);
                 }
             }
             else
             {
-                HashSet<string> existingKeys = state.Messages
-                    .Select(message => message.MessageKey)
-                    .ToHashSet(StringComparer.Ordinal);
+                HashSet<string> keys = state.Messages.Select(message => message.MessageKey).ToHashSet(StringComparer.Ordinal);
                 foreach (MailMessageSummary summary in page.Items)
                 {
-                    if (existingKeys.Add(summary.MessageKey))
+                    if (keys.Add(summary.MessageKey))
                     {
                         state.Messages.Add(summary);
                     }
@@ -473,25 +692,24 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             state.FailureKind = null;
             ApplyState(state);
             if (replace
-                && state.SelectedContent is null
-                && SelectedMessageSummary is MailMessageSummary restoredSelection
+                && SelectedMessageContent is null
+                && SelectedMessageSummary is MailMessageSummary restored
                 && CurrentMessageLoadTask.IsCompleted)
             {
-                CurrentMessageLoadTask = LoadSelectedMessageAsync(restoredSelection);
+                CurrentMessageLoadTask = LoadSelectedMessageAsync(restored);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // A newer account selection or request owns the UI state.
         }
-        catch (MailReadException exception) when (IsCurrent(account.Id, version, cancellationToken))
+        catch (MailReadException exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
             state.HasLoaded = true;
             state.ListErrorMessage = exception.UserMessage;
             state.FailureKind = exception.FailureKind;
             ApplyState(state);
         }
-        catch (Exception) when (IsCurrent(account.Id, version, cancellationToken))
+        catch (Exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
             state.HasLoaded = true;
             state.ListErrorMessage = "Не удалось загрузить почту. Попробуйте ещё раз.";
@@ -500,7 +718,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            if (IsCurrent(account.Id, version, cancellationToken))
+            if (IsCurrent(account.Id, folder.Key, version, cancellationToken))
             {
                 IsListLoading = false;
             }
@@ -509,13 +727,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     private async Task LoadSelectedMessageAsync(MailMessageSummary summary)
     {
-        if (ActiveAccount is not { IsEnabled: true } account)
+        if (ActiveAccount is not { IsEnabled: true } account || SelectedFolder is not MailFolder folder)
         {
             return;
         }
 
-        long version = _activationVersion;
-        CancelMessageOperation();
+        long version = _viewVersion;
         _messageCancellation = CancellationTokenSource.CreateLinkedTokenSource(GetActivationToken());
         CancellationToken cancellationToken = _messageCancellation.Token;
         IsMessageLoading = true;
@@ -524,43 +741,246 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         try
         {
             IMailReadProvider provider = _providerFactory.Get(account.Provider);
-            MailMessageContent content = await provider.GetMessageAsync(
-                account,
-                summary.MessageKey,
-                cancellationToken);
-            if (!IsCurrent(account.Id, version, cancellationToken)
+            MailMessageContent content = await provider.GetMessageAsync(account, folder, summary.MessageKey, cancellationToken);
+            if (!string.Equals(content.MessageKey, summary.MessageKey, StringComparison.Ordinal))
+            {
+                throw new MailReadException(
+                    MailReadFailureKind.InvalidMessage,
+                    "Поставщик вернул содержимое другого письма.");
+            }
+
+            if (_disposed || !_accountFolderStates.ContainsKey(account.Id))
+            {
+                return;
+            }
+
+            _messageBodyCache.Set(new MessageBodyCacheKey(account.Id, summary.MessageKey), content);
+            if (!IsCurrent(account.Id, folder.Key, version, cancellationToken)
                 || SelectedMessageSummary?.MessageKey != summary.MessageKey)
             {
                 return;
             }
 
-            AccountInboxState state = GetState(account.Id);
+            FolderState state = GetState(account.Id, folder.Key);
             state.SelectedMessageKey = summary.MessageKey;
-            state.SelectedContent = content;
             SelectedMessageContent = content;
+            await RefreshReadStateCapabilityAsync();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // A newer message or account selection owns the viewer.
         }
-        catch (MailReadException exception) when (IsCurrent(account.Id, version, cancellationToken))
+        catch (MailReadException exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
             MessageErrorMessage = exception.UserMessage;
         }
-        catch (Exception) when (IsCurrent(account.Id, version, cancellationToken))
+        catch (Exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
             MessageErrorMessage = "Не удалось загрузить выбранное письмо.";
         }
         finally
         {
-            if (IsCurrent(account.Id, version, cancellationToken))
+            if (IsCurrent(account.Id, folder.Key, version, cancellationToken))
             {
                 IsMessageLoading = false;
             }
         }
     }
 
-    private void ApplyState(AccountInboxState state)
+    private async Task RefreshReadStateCapabilityAsync()
+    {
+        _readStateCapability = MailReadStateCapability.Unsupported;
+        if (ActiveAccount is not MailAccount account
+            || SelectedFolder is not MailFolder folder
+            || !folder.SupportsReadState
+            || _providerFactory.Get(account.Provider) is not IMailMessageStateProvider stateProvider)
+        {
+            RaiseReadStateChanged();
+            return;
+        }
+
+        try
+        {
+            _readStateCapability = await stateProvider.GetReadStateCapabilityAsync(account, folder, GetActivationToken());
+        }
+        catch (MailReadException exception)
+        {
+            ReadStateErrorMessage = exception.UserMessage;
+        }
+        finally
+        {
+            RaiseReadStateChanged();
+        }
+    }
+
+    private async Task SetReadStateAsync()
+    {
+        if (ActiveAccount is not MailAccount account
+            || SelectedFolder is not MailFolder folder
+            || SelectedMessageSummary is not MailMessageSummary summary
+            || _providerFactory.Get(account.Provider) is not IMailMessageStateProvider provider)
+        {
+            return;
+        }
+
+        CancelMutationOperation();
+        _mutationCancellation = CancellationTokenSource.CreateLinkedTokenSource(GetActivationToken());
+        CancellationToken cancellationToken = _mutationCancellation.Token;
+        bool isRead = summary.IsUnread;
+        IsReadStateChanging = true;
+        ReadStateErrorMessage = null;
+        try
+        {
+            await provider.SetReadStateAsync(account, folder, summary.MessageKey, isRead, cancellationToken);
+            if (!IsCurrent(account.Id, folder.Key, _viewVersion, cancellationToken)
+                || SelectedMessageSummary?.MessageKey != summary.MessageKey)
+            {
+                return;
+            }
+
+            bool isUnread = !isRead;
+            MailMessageSummary updatedSummary = summary with { IsUnread = isUnread };
+            FolderState state = GetState(account.Id, folder.Key);
+            int stateIndex = state.Messages.FindIndex(message => message.MessageKey == summary.MessageKey);
+            if (stateIndex >= 0)
+            {
+                state.Messages[stateIndex] = updatedSummary;
+            }
+
+            int visibleIndex = Messages.IndexOf(summary);
+            MailMessageContent? selectedContent = SelectedMessageContent?.MessageKey == summary.MessageKey
+                ? SelectedMessageContent
+                : _messageBodyCache.TryGet(
+                    new MessageBodyCacheKey(account.Id, summary.MessageKey),
+                    out MailMessageContent? cachedContent)
+                    ? cachedContent
+                    : null;
+
+            _isApplyingState = true;
+            try
+            {
+                if (visibleIndex >= 0)
+                {
+                    Messages[visibleIndex] = updatedSummary;
+                }
+
+                _selectedMessageSummary = updatedSummary;
+                OnPropertyChanged(nameof(SelectedMessageSummary));
+                OnPropertyChanged(nameof(HasSelectedMessage));
+            }
+            finally
+            {
+                _isApplyingState = false;
+            }
+
+            if (selectedContent is not null)
+            {
+                MailMessageContent updatedContent = selectedContent with { IsUnread = isUnread };
+                _messageBodyCache.Set(
+                    new MessageBodyCacheKey(account.Id, summary.MessageKey),
+                    updatedContent);
+                _isReadStateMetadataUpdate = true;
+                try
+                {
+                    SelectedMessageContent = updatedContent;
+                }
+                finally
+                {
+                    _isReadStateMetadataUpdate = false;
+                }
+            }
+
+            RaiseReadStateChanged();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (MailReadException exception)
+        {
+            ReadStateErrorMessage = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            ReadStateErrorMessage = "Не удалось изменить статус письма. Попробуйте ещё раз.";
+        }
+        finally
+        {
+            IsReadStateChanging = false;
+        }
+    }
+
+    private async Task AuthorizeGmailAsync()
+    {
+        if (ActiveAccount is not MailAccount account
+            || _providerFactory.GmailScopeUpgradeService is not IGmailScopeUpgradeService upgradeService)
+        {
+            return;
+        }
+
+        IsReadStateChanging = true;
+        AuthorizationMessage = null;
+        try
+        {
+            GmailScopeUpgradeResult result = await upgradeService.UpgradeAsync(account, GetActivationToken());
+            if (!result.IsSuccess)
+            {
+                AuthorizationMessage = result.UserMessage;
+                return;
+            }
+
+            AuthorizationMessage = null;
+            await RefreshReadStateCapabilityAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            AuthorizationMessage = "Разрешение Google не изменено.";
+        }
+        finally
+        {
+            IsReadStateChanging = false;
+        }
+    }
+
+    private void ApplyFolders(AccountFolderState accountState)
+    {
+        _isApplyingState = true;
+        try
+        {
+            Folders.Clear();
+            foreach (MailFolder folder in accountState.Folders)
+            {
+                Folders.Add(folder);
+            }
+
+            OnPropertyChanged(nameof(HasFolders));
+        }
+        finally
+        {
+            _isApplyingState = false;
+        }
+    }
+
+    private MailFolder? ResolveSelectedFolder(AccountFolderState accountState) =>
+        accountState.SelectedFolderKey is string key
+            ? accountState.Folders.FirstOrDefault(folder => folder.Key == key)
+                ?? accountState.Folders.FirstOrDefault(folder => folder.Kind is MailFolderKind.Inbox)
+                ?? accountState.Folders.FirstOrDefault()
+            : accountState.Folders.FirstOrDefault(folder => folder.Kind is MailFolderKind.Inbox)
+                ?? accountState.Folders.FirstOrDefault();
+
+    private void SetSelectedFolderWithoutSwitch(MailFolder folder)
+    {
+        _isApplyingState = true;
+        try
+        {
+            SelectedFolder = folder;
+        }
+        finally
+        {
+            _isApplyingState = false;
+        }
+    }
+
+    private void ApplyState(FolderState state)
     {
         _isApplyingState = true;
         try
@@ -575,19 +995,26 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             HasLoaded = state.HasLoaded;
             ListErrorMessage = state.ListErrorMessage;
             FailureKind = state.FailureKind;
-            MailMessageSummary? selectedMessage = state.SelectedMessageKey is null
+            MailMessageSummary? selected = state.SelectedMessageKey is null
                 ? null
                 : Messages.FirstOrDefault(message => message.MessageKey == state.SelectedMessageKey);
-            if (!ReferenceEquals(_selectedMessageSummary, selectedMessage))
+            if (!ReferenceEquals(_selectedMessageSummary, selected))
             {
-                _selectedMessageSummary = selectedMessage;
+                _selectedMessageSummary = selected;
                 OnPropertyChanged(nameof(SelectedMessageSummary));
                 OnPropertyChanged(nameof(HasSelectedMessage));
             }
 
-            SelectedMessageContent = state.SelectedContent;
+            SelectedMessageContent = selected is not null
+                && _messageBodyCache.TryGet(
+                    new MessageBodyCacheKey(ActiveAccount!.Id, selected.MessageKey),
+                    out MailMessageContent? cachedContent)
+                    ? cachedContent
+                    : null;
             MessageErrorMessage = null;
+            ReadStateErrorMessage = null;
             RaiseListStateChanged();
+            RaiseReadStateChanged();
         }
         finally
         {
@@ -595,22 +1022,37 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void ClearDisplayedState()
+    private void ClearDisplayedState(bool clearFolders, bool preserveLoading = false)
     {
         _isApplyingState = true;
         try
         {
+            if (clearFolders)
+            {
+                Folders.Clear();
+                _selectedFolder = null;
+                OnPropertyChanged(nameof(SelectedFolder));
+                OnPropertyChanged(nameof(HasFolders));
+            }
+
             Messages.Clear();
-            SelectedMessageSummary = null;
+            _selectedMessageSummary = null;
+            OnPropertyChanged(nameof(SelectedMessageSummary));
             SelectedMessageContent = null;
             ContinuationToken = null;
             HasLoaded = false;
-            IsListLoading = false;
+            if (!preserveLoading)
+            {
+                IsListLoading = false;
+            }
             IsMessageLoading = false;
             ListErrorMessage = null;
             MessageErrorMessage = null;
+            ReadStateErrorMessage = null;
             FailureKind = null;
+            _readStateCapability = MailReadStateCapability.Unsupported;
             RaiseListStateChanged();
+            RaiseReadStateChanged();
         }
         finally
         {
@@ -618,29 +1060,52 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
-    private AccountInboxState GetState(Guid accountId)
+    private void ShowNoFoldersError()
     {
-        if (!_accountStates.TryGetValue(accountId, out AccountInboxState? state))
+        HasLoaded = true;
+        ListErrorMessage = "Почтовый сервер не предоставил доступные системные папки.";
+        FailureKind = MailReadFailureKind.FolderUnavailable;
+    }
+
+    private FolderState GetState(Guid accountId, string folderKey)
+    {
+        FolderStateKey key = new(accountId, folderKey);
+        if (!_folderStates.TryGetValue(key, out FolderState? state))
         {
-            state = new AccountInboxState();
-            _accountStates.Add(accountId, state);
+            state = new FolderState();
+            _folderStates.Add(key, state);
         }
 
         return state;
     }
 
-    private bool IsCurrent(Guid accountId, long version, CancellationToken cancellationToken) =>
+    private AccountFolderState GetAccountFolderState(Guid accountId)
+    {
+        if (!_accountFolderStates.TryGetValue(accountId, out AccountFolderState? state))
+        {
+            state = new AccountFolderState();
+            _accountFolderStates.Add(accountId, state);
+        }
+
+        return state;
+    }
+
+    private bool IsCurrentAccount(Guid accountId, long version, CancellationToken cancellationToken) =>
         !cancellationToken.IsCancellationRequested
         && ActiveAccount?.Id == accountId
-        && _activationVersion == version;
+        && _viewVersion == version;
 
-    private CancellationToken GetActivationToken() =>
-        _activationCancellation?.Token ?? CancellationToken.None;
+    private bool IsCurrent(Guid accountId, string folderKey, long version, CancellationToken cancellationToken) =>
+        IsCurrentAccount(accountId, version, cancellationToken)
+        && SelectedFolder?.Key == folderKey;
 
-    private bool CanRefresh() => IsActive && !IsListLoading;
+    private CancellationToken GetActivationToken() => _activationCancellation?.Token ?? CancellationToken.None;
+    private bool CanRefresh() => IsActive && SelectedFolder is not null && !IsListLoading;
     private bool CanLoadMore() => IsActive && HasMore && !IsListLoading;
     private bool CanRetry() => IsActive && HasListError && !IsListLoading;
     private bool CanRetryMessage() => IsActive && HasMessageError && !IsMessageLoading;
+    private bool CanSetReadState() => CanChangeReadState;
+    private bool CanAuthorizeGmail() => RequiresGmailAuthorization && !IsReadStateChanging && _providerFactory.GmailScopeUpgradeService is not null;
 
     private void RaiseListStateChanged()
     {
@@ -654,18 +1119,30 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         RetryCommand.NotifyCanExecuteChanged();
     }
 
+    private void RaiseReadStateChanged()
+    {
+        OnPropertyChanged(nameof(ShowReadStateAction));
+        OnPropertyChanged(nameof(RequiresGmailAuthorization));
+        OnPropertyChanged(nameof(CanChangeReadState));
+        OnPropertyChanged(nameof(ReadStateActionText));
+        OnPropertyChanged(nameof(ReadStateAuthorizationText));
+        SetReadStateCommand.NotifyCanExecuteChanged();
+        AuthorizeGmailCommand.NotifyCanExecuteChanged();
+    }
+
     private void NotifyCommandStates()
     {
         RefreshCommand.NotifyCanExecuteChanged();
         LoadMoreCommand.NotifyCanExecuteChanged();
         RetryCommand.NotifyCanExecuteChanged();
         RetryMessageCommand.NotifyCanExecuteChanged();
+        SetReadStateCommand.NotifyCanExecuteChanged();
+        AuthorizeGmailCommand.NotifyCanExecuteChanged();
     }
 
     private bool TryGetCurrentRemoteImageConsentKey(out RemoteImageConsentKey key)
     {
-        if (ActiveAccount is MailAccount account
-            && SelectedMessageContent is MailMessageContent content)
+        if (ActiveAccount is MailAccount account && SelectedMessageContent is MailMessageContent content)
         {
             key = new RemoteImageConsentKey(account.Id, content.MessageKey);
             return true;
@@ -686,6 +1163,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     {
         CancelListOperation();
         CancelMessageOperation();
+        CancelMutationOperation();
         _activationCancellation?.Cancel();
         _activationCancellation?.Dispose();
         _activationCancellation = null;
@@ -705,14 +1183,27 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         _messageCancellation = null;
     }
 
+    private void CancelMutationOperation()
+    {
+        _mutationCancellation?.Cancel();
+        _mutationCancellation?.Dispose();
+        _mutationCancellation = null;
+    }
+
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
-    private sealed class AccountInboxState
+    private sealed class AccountFolderState
+    {
+        public List<MailFolder> Folders { get; } = [];
+        public string? SelectedFolderKey { get; set; }
+        public bool HasLoaded { get; set; }
+    }
+
+    private sealed class FolderState
     {
         public List<MailMessageSummary> Messages { get; } = [];
         public string? ContinuationToken { get; set; }
         public string? SelectedMessageKey { get; set; }
-        public MailMessageContent? SelectedContent { get; set; }
         public bool HasLoaded { get; set; }
         public string? ListErrorMessage { get; set; }
         public MailReadFailureKind? FailureKind { get; set; }
@@ -722,7 +1213,6 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             Messages.Clear();
             ContinuationToken = null;
             SelectedMessageKey = null;
-            SelectedContent = null;
             HasLoaded = false;
             ListErrorMessage = null;
             FailureKind = null;
@@ -736,5 +1226,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
+    private readonly record struct FolderStateKey(Guid AccountId, string FolderKey);
+    private readonly record struct MessageBodyCacheKey(Guid AccountId, string MessageKey);
     private readonly record struct RemoteImageConsentKey(Guid AccountId, string MessageKey);
 }

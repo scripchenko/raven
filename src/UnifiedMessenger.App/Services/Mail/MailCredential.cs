@@ -15,6 +15,7 @@ public sealed record MailCredential
     public required string Secret { get; init; }
     public string? OAuthClientId { get; init; }
     public string? OAuthClientSecret { get; init; }
+    public string? OAuthScope { get; init; }
 
     public static MailCredential CreatePassword(string password)
     {
@@ -29,7 +30,8 @@ public sealed record MailCredential
     public static MailCredential CreateGmailOAuth(
         string refreshToken,
         string clientId,
-        string clientSecret)
+        string clientSecret,
+        string oauthScope = GmailOAuthConstants.ReadOnlyScope)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(refreshToken);
         ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
@@ -39,7 +41,8 @@ public sealed record MailCredential
             Kind = MailCredentialKind.GmailOAuthRefreshToken,
             Secret = refreshToken,
             OAuthClientId = clientId,
-            OAuthClientSecret = clientSecret
+            OAuthClientSecret = clientSecret,
+            OAuthScope = oauthScope
         };
     }
 
@@ -52,7 +55,13 @@ public sealed record MailCredential
                 string.IsNullOrEmpty(OAuthClientId) && string.IsNullOrEmpty(OAuthClientSecret),
             MailCredentialKind.GmailOAuthRefreshToken =>
                 !string.IsNullOrWhiteSpace(OAuthClientId)
-                && !string.IsNullOrWhiteSpace(OAuthClientSecret),
+                && !string.IsNullOrWhiteSpace(OAuthClientSecret)
+                && (string.IsNullOrWhiteSpace(OAuthScope)
+                    || OAuthScope is GmailOAuthConstants.ReadOnlyScope or GmailOAuthConstants.ModifyScope),
             _ => false
         };
+
+    public bool HasGmailModifyScope =>
+        Kind is MailCredentialKind.GmailOAuthRefreshToken
+        && string.Equals(OAuthScope, GmailOAuthConstants.ModifyScope, StringComparison.Ordinal);
 }

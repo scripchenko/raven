@@ -18,6 +18,7 @@ namespace UnifiedMessenger.App.Views;
 
 public partial class MainWindow : Window
 {
+    internal const int RemoteImageSessionCacheCapacity = 20;
     private readonly MainWindowViewModel _viewModel;
     private readonly MailInboxViewModel _mailInboxViewModel;
     private readonly SettingsViewModel _settingsViewModel;
@@ -42,8 +43,8 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _remoteImageLoadCancellation;
     private IReadOnlyDictionary<string, MailImageContent> _loadedRemoteImages =
         new Dictionary<string, MailImageContent>(StringComparer.Ordinal);
-    private readonly Dictionary<RemoteImageCacheKey, IReadOnlyDictionary<string, MailImageContent>>
-        _sessionRemoteImages = [];
+    private readonly BoundedLruCache<RemoteImageCacheKey, IReadOnlyDictionary<string, MailImageContent>>
+        _sessionRemoteImages = new(RemoteImageSessionCacheCapacity);
     private Guid? _remoteImageAccountId;
     private string? _remoteImageMessageKey;
     private HwndSource? _windowSource;
@@ -296,15 +297,23 @@ public partial class MainWindow : Window
 
     private async void OnMailInboxViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
-        if (eventArgs.PropertyName is not nameof(MailInboxViewModel.SelectedMessageContent)
-            and not nameof(MailInboxViewModel.ActiveAccount)
-            and not nameof(MailInboxViewModel.IsMessageLoading))
+        if (!ShouldRefreshMailRendererContent(_mailInboxViewModel, eventArgs.PropertyName))
         {
             return;
         }
 
         await RefreshMailRendererContentAsync();
     }
+
+    internal static bool ShouldRefreshMailRendererContent(
+        MailInboxViewModel viewModel,
+        string? propertyName) =>
+        propertyName switch
+        {
+            nameof(MailInboxViewModel.SelectedMessageContent) => !viewModel.IsReadStateMetadataUpdate,
+            nameof(MailInboxViewModel.ActiveAccount) or nameof(MailInboxViewModel.IsMessageLoading) => true,
+            _ => false
+        };
 
     private async Task InitializeSelectedServiceAfterSettingsAsync()
     {
@@ -740,12 +749,7 @@ public partial class MainWindow : Window
         {
             await _mailAccountProvisioningService.DeleteAsync(account.Id, _lifetimeCancellation.Token);
             _mailInboxViewModel.RemoveAccount(account.Id);
-            foreach (RemoteImageCacheKey key in _sessionRemoteImages.Keys
-                .Where(key => key.AccountId == account.Id)
-                .ToArray())
-            {
-                _sessionRemoteImages.Remove(key);
-            }
+            _sessionRemoteImages.RemoveWhere(key => key.AccountId == account.Id);
 
             _viewModel.RemoveMailAccountFromNavigation(account);
         }
@@ -1015,7 +1019,7 @@ public partial class MainWindow : Window
             }
 
             _loadedRemoteImages = images;
-            _sessionRemoteImages[new RemoteImageCacheKey(account.Id, content.MessageKey)] = images;
+            _sessionRemoteImages.Set(new RemoteImageCacheKey(account.Id, content.MessageKey), images);
             _mailInboxViewModel.MarkRemoteImagesShown();
             await RefreshMailRendererContentAsync();
         }
@@ -1052,13 +1056,21 @@ public partial class MainWindow : Window
         _remoteImageLoadCancellation?.Cancel();
         _remoteImageLoadCancellation?.Dispose();
         _remoteImageLoadCancellation = null;
-        _loadedRemoteImages = accountId is Guid currentAccountId
+        IReadOnlyDictionary<string, MailImageContent>? cachedImages = null;
+        bool hasCachedImages = accountId is Guid currentAccountId
             && !string.IsNullOrWhiteSpace(messageKey)
-            && _sessionRemoteImages.TryGetValue(
+            && _sessionRemoteImages.TryGet(
                 new RemoteImageCacheKey(currentAccountId, messageKey),
-                out IReadOnlyDictionary<string, MailImageContent>? cachedImages)
-                ? cachedImages
-                : new Dictionary<string, MailImageContent>(StringComparer.Ordinal);
+                out cachedImages);
+        _loadedRemoteImages = hasCachedImages
+            ? cachedImages!
+            : new Dictionary<string, MailImageContent>(StringComparer.Ordinal);
+        if (!hasCachedImages
+            && accountId is Guid missingAccountId
+            && !string.IsNullOrWhiteSpace(messageKey))
+        {
+            _mailInboxViewModel.ForgetRemoteImagesShown(missingAccountId, messageKey);
+        }
         _remoteImageAccountId = accountId;
         _remoteImageMessageKey = messageKey;
     }

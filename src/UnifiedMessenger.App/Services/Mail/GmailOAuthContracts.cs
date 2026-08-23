@@ -3,13 +3,17 @@ namespace UnifiedMessenger.App.Services.Mail;
 public static class GmailOAuthConstants
 {
     public const string ReadOnlyScope = "https://www.googleapis.com/auth/gmail.readonly";
+    public const string ModifyScope = "https://www.googleapis.com/auth/gmail.modify";
     public const string CallbackPath = "/oauth2/callback/";
     public const string ApplicationName = "UnifiedMessenger";
 }
 
 public sealed record GoogleOAuthClientConfiguration(string ClientId, string ClientSecret);
 
-public sealed record GoogleOAuthAuthorizationRequest(Uri AuthorizationUri, string CodeVerifier);
+public sealed record GoogleOAuthAuthorizationRequest(
+    Uri AuthorizationUri,
+    string CodeVerifier,
+    string RequestedScope = GmailOAuthConstants.ReadOnlyScope);
 
 public sealed record GoogleOAuthTokenResult(string AccessToken, string RefreshToken);
 
@@ -86,12 +90,33 @@ public interface IGoogleOAuthProtocolClient
         Uri redirectUri,
         string state);
 
+    GoogleOAuthAuthorizationRequest CreateAuthorizationRequest(
+        GoogleOAuthClientConfiguration configuration,
+        Uri redirectUri,
+        string state,
+        string scope) =>
+        CreateAuthorizationRequest(configuration, redirectUri, state);
+
     Task<GoogleOAuthTokenResult> ExchangeCodeAsync(
         GoogleOAuthClientConfiguration configuration,
         string authorizationCode,
         string codeVerifier,
         Uri redirectUri,
         CancellationToken cancellationToken = default);
+
+    Task<GoogleOAuthTokenResult> ExchangeCodeAsync(
+        GoogleOAuthClientConfiguration configuration,
+        string authorizationCode,
+        string codeVerifier,
+        Uri redirectUri,
+        string scope,
+        CancellationToken cancellationToken = default) =>
+        ExchangeCodeAsync(
+            configuration,
+            authorizationCode,
+            codeVerifier,
+            redirectUri,
+            cancellationToken);
 
     Task<GmailUserProfile> GetProfileAsync(
         string accessToken,
@@ -102,6 +127,11 @@ public interface IGmailOAuthService
 {
     Task<GmailOAuthAuthorizationResult> AuthorizeAsync(
         CancellationToken cancellationToken = default);
+
+    Task<GmailOAuthAuthorizationResult> AuthorizeAsync(
+        string scope,
+        CancellationToken cancellationToken = default) =>
+        AuthorizeAsync(cancellationToken);
 
     Task<GmailProfileResult> GetProfileAsync(
         GmailOAuthSession session,

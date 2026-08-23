@@ -24,7 +24,9 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Входящие" />
+                        <TextBlock FontSize="18"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding SelectedFolder.DisplayName, TargetNullValue=Почта}" />
                         <Border Margin="10,0,0,0"
                                 Padding="8,2"
                                 Background="{DynamicResource AccentSoftBrush}"
@@ -48,12 +50,39 @@
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="410" MinWidth="340" MaxWidth="430" />
+                <ColumnDefinition Width="156" MinWidth="130" MaxWidth="170" />
+                <ColumnDefinition Width="1" />
+                <ColumnDefinition Width="360" MinWidth="300" MaxWidth="410" />
                 <ColumnDefinition Width="1" />
                 <ColumnDefinition Width="*" MinWidth="330" />
             </Grid.ColumnDefinitions>
 
-            <Grid Grid.Column="0" Background="{DynamicResource SurfaceBrush}">
+            <ListBox Grid.Column="0"
+                     Padding="8,12"
+                     ItemsSource="{Binding Folders}"
+                     SelectedItem="{Binding SelectedFolder, Mode=TwoWay}"
+                     Background="{DynamicResource SurfaceBrush}"
+                     BorderThickness="0"
+                     HorizontalContentAlignment="Stretch">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0,2" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Padding="10,9"
+                                   Text="{Binding DisplayName}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <Border Grid.Column="1" Background="{DynamicResource DividerBrush}" />
+
+            <Grid Grid.Column="2" Background="{DynamicResource SurfaceBrush}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -177,7 +206,7 @@
                     <TextBlock HorizontalAlignment="Center"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="Во входящих пока нет писем." />
+                               Text="В этой папке пока нет писем." />
                 </Grid>
 
                 <Grid Grid.RowSpan="2"
@@ -202,9 +231,9 @@
                 </Grid>
             </Grid>
 
-            <Border Grid.Column="1" Background="{DynamicResource DividerBrush}" />
+            <Border Grid.Column="3" Background="{DynamicResource DividerBrush}" />
 
-            <Grid Grid.Column="2" Background="{DynamicResource WindowBackgroundBrush}">
+            <Grid Grid.Column="4" Background="{DynamicResource WindowBackgroundBrush}">
                 <Grid Visibility="{Binding HasSelectedContent, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -253,6 +282,32 @@
                                        Foreground="{DynamicResource TextSecondaryBrush}"
                                        Text="В письме есть вложения. Загрузка вложений появится в следующем этапе."
                                        Visibility="{Binding SelectedMessageContent.HasAttachments, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <StackPanel Margin="0,14,0,0">
+                                <Button HorizontalAlignment="Left"
+                                        Padding="14,7"
+                                        Command="{Binding SetReadStateCommand}"
+                                        Content="{Binding ReadStateActionText}"
+                                        IsEnabled="{Binding CanChangeReadState}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        Visibility="{Binding ShowReadStateAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <StackPanel Visibility="{Binding RequiresGmailAuthorization, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock MaxWidth="520"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="{Binding ReadStateAuthorizationText}"
+                                               TextWrapping="Wrap" />
+                                    <Button Margin="0,8,0,0"
+                                            HorizontalAlignment="Left"
+                                            Padding="14,7"
+                                            Command="{Binding AuthorizeGmailCommand}"
+                                            Content="Разрешить"
+                                            Style="{StaticResource PrimaryButtonStyle}" />
+                                </StackPanel>
+                                <TextBlock Margin="0,8,0,0"
+                                           Foreground="#FFB42318"
+                                           Text="{Binding ReadStateErrorMessage}"
+                                           TextWrapping="Wrap"
+                                           Visibility="{Binding HasReadStateError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                     <Border Grid.Row="1"

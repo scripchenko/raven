@@ -15,8 +15,19 @@ public sealed class GmailOAuthService(
     GmailOAuthOptions options) : IGmailOAuthService
 {
     public async Task<GmailOAuthAuthorizationResult> AuthorizeAsync(
+        CancellationToken cancellationToken = default) =>
+        await AuthorizeAsync(GmailOAuthConstants.ReadOnlyScope, cancellationToken);
+
+    public async Task<GmailOAuthAuthorizationResult> AuthorizeAsync(
+        string scope,
         CancellationToken cancellationToken = default)
     {
+        if (scope is not GmailOAuthConstants.ReadOnlyScope and not GmailOAuthConstants.ModifyScope)
+        {
+            return GmailOAuthAuthorizationResult.Failure(
+                MailConnectionFailureKind.InvalidConfiguration,
+                "Запрошено неподдерживаемое разрешение Gmail.");
+        }
         GoogleOAuthClientConfiguration? configuration;
         try
         {
@@ -62,7 +73,8 @@ public sealed class GmailOAuthService(
                 request = protocolClient.CreateAuthorizationRequest(
                     configuration,
                     listener.RedirectUri,
-                    state);
+                    state,
+                    scope);
             }
             catch (Exception exception) when (
                 exception is ArgumentException or InvalidOperationException or GoogleOAuthProtocolException)
@@ -135,6 +147,7 @@ public sealed class GmailOAuthService(
                     callback.Code,
                     request.CodeVerifier,
                     listener.RedirectUri,
+                    scope,
                     cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -165,7 +178,8 @@ public sealed class GmailOAuthService(
             MailCredential persistentCredential = MailCredential.CreateGmailOAuth(
                 tokens.RefreshToken,
                 configuration.ClientId,
-                configuration.ClientSecret);
+                configuration.ClientSecret,
+                scope);
             return GmailOAuthAuthorizationResult.Success(
                 new GmailOAuthSession(tokens.AccessToken, persistentCredential));
         }

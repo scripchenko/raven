@@ -15,13 +15,21 @@ public sealed class GoogleOAuthProtocolClient : IGoogleOAuthProtocolClient
     public GoogleOAuthAuthorizationRequest CreateAuthorizationRequest(
         GoogleOAuthClientConfiguration configuration,
         Uri redirectUri,
-        string state)
+        string state) =>
+        CreateAuthorizationRequest(configuration, redirectUri, state, GmailOAuthConstants.ReadOnlyScope);
+
+    public GoogleOAuthAuthorizationRequest CreateAuthorizationRequest(
+        GoogleOAuthClientConfiguration configuration,
+        Uri redirectUri,
+        string state,
+        string scope)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(redirectUri);
         ArgumentException.ThrowIfNullOrWhiteSpace(state);
 
-        using PkceGoogleAuthorizationCodeFlow flow = CreateFlow(configuration);
+        ValidateScope(scope);
+        using PkceGoogleAuthorizationCodeFlow flow = CreateFlow(configuration, scope);
         AuthorizationCodeRequestUrl requestBase = flow.CreateAuthorizationCodeRequest(
             redirectUri.AbsoluteUri,
             out string codeVerifier);
@@ -33,7 +41,7 @@ public sealed class GoogleOAuthProtocolClient : IGoogleOAuthProtocolClient
         request.State = state;
         request.AccessType = "offline";
         request.Prompt = "consent";
-        return new GoogleOAuthAuthorizationRequest(request.Build(), codeVerifier);
+        return new GoogleOAuthAuthorizationRequest(request.Build(), codeVerifier, scope);
     }
 
     public async Task<GoogleOAuthTokenResult> ExchangeCodeAsync(
@@ -41,6 +49,21 @@ public sealed class GoogleOAuthProtocolClient : IGoogleOAuthProtocolClient
         string authorizationCode,
         string codeVerifier,
         Uri redirectUri,
+        CancellationToken cancellationToken = default) =>
+        await ExchangeCodeAsync(
+            configuration,
+            authorizationCode,
+            codeVerifier,
+            redirectUri,
+            GmailOAuthConstants.ReadOnlyScope,
+            cancellationToken);
+
+    public async Task<GoogleOAuthTokenResult> ExchangeCodeAsync(
+        GoogleOAuthClientConfiguration configuration,
+        string authorizationCode,
+        string codeVerifier,
+        Uri redirectUri,
+        string scope,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -50,7 +73,8 @@ public sealed class GoogleOAuthProtocolClient : IGoogleOAuthProtocolClient
 
         try
         {
-            using PkceGoogleAuthorizationCodeFlow flow = CreateFlow(configuration);
+            ValidateScope(scope);
+            using PkceGoogleAuthorizationCodeFlow flow = CreateFlow(configuration, scope);
             TokenResponse response = await flow.ExchangeCodeForTokenAsync(
                 "gmail-desktop-oauth",
                 authorizationCode,
@@ -117,7 +141,8 @@ public sealed class GoogleOAuthProtocolClient : IGoogleOAuthProtocolClient
     }
 
     private static PkceGoogleAuthorizationCodeFlow CreateFlow(
-        GoogleOAuthClientConfiguration configuration) =>
+        GoogleOAuthClientConfiguration configuration,
+        string scope) =>
         new(
             new GoogleAuthorizationCodeFlow.Initializer
             {
@@ -126,6 +151,14 @@ public sealed class GoogleOAuthProtocolClient : IGoogleOAuthProtocolClient
                     ClientId = configuration.ClientId,
                     ClientSecret = configuration.ClientSecret
                 },
-                Scopes = [GmailOAuthConstants.ReadOnlyScope]
+                Scopes = [scope]
             });
+
+    private static void ValidateScope(string scope)
+    {
+        if (scope is not GmailOAuthConstants.ReadOnlyScope and not GmailOAuthConstants.ModifyScope)
+        {
+            throw new ArgumentException("Unsupported Gmail OAuth scope.", nameof(scope));
+        }
+    }
 }

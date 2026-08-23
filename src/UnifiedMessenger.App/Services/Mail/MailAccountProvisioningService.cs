@@ -114,7 +114,9 @@ public sealed class MailAccountProvisioningService(
     public async Task<MailAccountProvisioningResult> ConnectGmailAsync(
         CancellationToken cancellationToken = default)
     {
-        GmailOAuthAuthorizationResult authorization = await gmailOAuthService.AuthorizeAsync(cancellationToken);
+        GmailOAuthAuthorizationResult authorization = await gmailOAuthService.AuthorizeAsync(
+            GmailOAuthConstants.ModifyScope,
+            cancellationToken);
         if (!authorization.IsSuccess || authorization.Session is not GmailOAuthSession session)
         {
             return MailAccountProvisioningResult.Failure(
