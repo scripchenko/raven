@@ -19,6 +19,7 @@ namespace UnifiedMessenger.App.Views;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
+    private readonly MailInboxViewModel _mailInboxViewModel;
     private readonly SettingsViewModel _settingsViewModel;
     private readonly IWebViewSessionManager _webViewSessionManager;
     private readonly IWebViewStartupPrimeCoordinator _startupPrimeCoordinator;
@@ -30,17 +31,31 @@ public partial class MainWindow : Window
     private readonly ITaskbarActivityIndicator _taskbarActivityIndicator;
     private readonly IMailProviderFactory _mailProviderFactory;
     private readonly IMailAccountProvisioningService _mailAccountProvisioningService;
+    private readonly IMailMessageHtmlRenderer _mailMessageHtmlRenderer;
+    private readonly MailRendererWindowLifecycleCoordinator _mailRendererWindowLifecycle;
+    private readonly IRemoteMailImageLoader _remoteMailImageLoader;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly SemaphoreSlim _deferredPrimeGate = new(1, 1);
     private readonly HashSet<Guid> _deferredPrimeServiceIds = [];
     private CancellationTokenSource? _selectionCancellation;
+    private CancellationTokenSource? _mailRendererCancellation;
+    private CancellationTokenSource? _remoteImageLoadCancellation;
+    private IReadOnlyDictionary<string, MailImageContent> _loadedRemoteImages =
+        new Dictionary<string, MailImageContent>(StringComparer.Ordinal);
+    private readonly Dictionary<RemoteImageCacheKey, IReadOnlyDictionary<string, MailImageContent>>
+        _sessionRemoteImages = [];
+    private Guid? _remoteImageAccountId;
+    private string? _remoteImageMessageKey;
     private HwndSource? _windowSource;
     private IntPtr _mainWindowHandle;
     private bool _isRuntimeAvailable;
     private bool _startupPrimeCompleted;
+    private bool _restoreMailRendererAfterInteractiveMove;
+    private long _mailRendererVersion;
 
     public MainWindow(
         MainWindowViewModel viewModel,
+        MailInboxViewModel mailInboxViewModel,
         SettingsViewModel settingsViewModel,
         IWebViewSessionManager webViewSessionManager,
         IWebViewStartupPrimeCoordinator startupPrimeCoordinator,
@@ -51,9 +66,12 @@ public partial class MainWindow : Window
         IWindowActivationService windowActivationService,
         ITaskbarActivityIndicator taskbarActivityIndicator,
         IMailProviderFactory mailProviderFactory,
-        IMailAccountProvisioningService mailAccountProvisioningService)
+        IMailAccountProvisioningService mailAccountProvisioningService,
+        IMailMessageHtmlRenderer mailMessageHtmlRenderer,
+        IRemoteMailImageLoader remoteMailImageLoader)
     {
         _viewModel = viewModel;
+        _mailInboxViewModel = mailInboxViewModel;
         _settingsViewModel = settingsViewModel;
         _webViewSessionManager = webViewSessionManager;
         _startupPrimeCoordinator = startupPrimeCoordinator;
@@ -65,10 +83,14 @@ public partial class MainWindow : Window
         _taskbarActivityIndicator = taskbarActivityIndicator;
         _mailProviderFactory = mailProviderFactory;
         _mailAccountProvisioningService = mailAccountProvisioningService;
+        _mailMessageHtmlRenderer = mailMessageHtmlRenderer;
+        _mailRendererWindowLifecycle = new MailRendererWindowLifecycleCoordinator(mailMessageHtmlRenderer);
+        _remoteMailImageLoader = remoteMailImageLoader;
         DataContext = viewModel;
 
         InitializeComponent();
         SettingsContent.DataContext = settingsViewModel;
+        MailInboxContent.DataContext = mailInboxViewModel;
         _windowActivationService.Attach(
             this,
             () => _viewModel.IsSettingsOpen ? null : _viewModel.SelectedService?.Id,
@@ -82,7 +104,10 @@ public partial class MainWindow : Window
         StateChanged += OnWindowStateChanged;
         IsVisibleChanged += OnWindowVisibilityChanged;
         WebViewContainer.SizeChanged += OnWebViewContainerSizeChanged;
+        MailInboxContent.HtmlRendererSurface.SizeChanged += OnMailRendererSurfaceSizeChanged;
+        MailInboxContent.ShowRemoteImagesRequested += OnShowRemoteImagesRequested;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _mailInboxViewModel.PropertyChanged += OnMailInboxViewModelPropertyChanged;
         _viewModel.SelectedServiceChanged += OnSelectedServiceChanged;
         _settingsViewModel.RenameAccountRequested += OnSettingsRenameAccountRequested;
         _settingsViewModel.AccountEnabledChangeRequested += OnSettingsAccountEnabledChangeRequested;
@@ -103,7 +128,10 @@ public partial class MainWindow : Window
         StateChanged -= OnWindowStateChanged;
         IsVisibleChanged -= OnWindowVisibilityChanged;
         WebViewContainer.SizeChanged -= OnWebViewContainerSizeChanged;
+        MailInboxContent.HtmlRendererSurface.SizeChanged -= OnMailRendererSurfaceSizeChanged;
+        MailInboxContent.ShowRemoteImagesRequested -= OnShowRemoteImagesRequested;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _mailInboxViewModel.PropertyChanged -= OnMailInboxViewModelPropertyChanged;
         _viewModel.SelectedServiceChanged -= OnSelectedServiceChanged;
         _settingsViewModel.RenameAccountRequested -= OnSettingsRenameAccountRequested;
         _settingsViewModel.AccountEnabledChangeRequested -= OnSettingsAccountEnabledChangeRequested;
@@ -116,11 +144,21 @@ public partial class MainWindow : Window
         _selectionCancellation?.Cancel();
         _selectionCancellation?.Dispose();
         _selectionCancellation = null;
+        _mailRendererCancellation?.Cancel();
+        _mailRendererCancellation?.Dispose();
+        _mailRendererCancellation = null;
+        _remoteImageLoadCancellation?.Cancel();
+        _remoteImageLoadCancellation?.Dispose();
+        _remoteImageLoadCancellation = null;
+        _loadedRemoteImages = new Dictionary<string, MailImageContent>(StringComparer.Ordinal);
+        _sessionRemoteImages.Clear();
         _lifetimeCancellation.Cancel();
 
         _windowSource?.RemoveHook(WindowMessageHook);
         _windowSource = null;
         _webViewSessionManager.ReleaseAllSessions();
+        _mailMessageHtmlRenderer.BeginShutdown();
+        _mailInboxViewModel.Dispose();
         _lifetimeCancellation.Dispose();
         _windowActivationService.Detach(this);
         _taskbarActivityIndicator.Detach(this);
@@ -176,6 +214,9 @@ public partial class MainWindow : Window
         if (_startupPrimeCompleted)
         {
             UpdateDirectSurface(moveFocus: false);
+            await _mailInboxViewModel.ActivateAsync(
+                _viewModel.SelectedMailAccount,
+                _lifetimeCancellation.Token);
             return;
         }
 
@@ -184,20 +225,39 @@ public partial class MainWindow : Window
         if (!runtimeInfo.IsAvailable)
         {
             ShowMissingRuntimeDialog();
+            await _mailInboxViewModel.ActivateAsync(
+                _viewModel.SelectedMailAccount,
+                _lifetimeCancellation.Token);
             return;
         }
 
         _isRuntimeAvailable = true;
         await ShowSelectedServiceAsync();
+        await _mailInboxViewModel.ActivateAsync(
+            _viewModel.SelectedMailAccount,
+            _lifetimeCancellation.Token);
     }
 
     private async void OnSelectedServiceChanged(object? sender, EventArgs eventArgs)
     {
         try
         {
+            Task mailActivation = _mailInboxViewModel.ActivateAsync(
+                _viewModel.SelectedMailAccount,
+                _lifetimeCancellation.Token);
+            if (_viewModel.SelectedService is not null)
+            {
+                _mailRendererWindowLifecycle.Deactivate(clearContent: true);
+            }
+            else
+            {
+                UpdateMailRendererSurface();
+            }
+
             _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
             await _viewModel.PersistSelectionAsync();
             await ShowSelectedServiceAsync();
+            await mailActivation;
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
@@ -220,6 +280,7 @@ public partial class MainWindow : Window
             || eventArgs.PropertyName == nameof(MainWindowViewModel.WebViewStatus))
         {
             UpdateDirectSurface(moveFocus: false);
+            UpdateMailRendererSurface();
             if (eventArgs.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen)
                 && !_viewModel.IsSettingsOpen)
             {
@@ -231,6 +292,18 @@ public partial class MainWindow : Window
                 }
             }
         }
+    }
+
+    private async void OnMailInboxViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName is not nameof(MailInboxViewModel.SelectedMessageContent)
+            and not nameof(MailInboxViewModel.ActiveAccount)
+            and not nameof(MailInboxViewModel.IsMessageLoading))
+        {
+            return;
+        }
+
+        await RefreshMailRendererContentAsync();
     }
 
     private async Task InitializeSelectedServiceAfterSettingsAsync()
@@ -297,15 +370,21 @@ public partial class MainWindow : Window
         _windowSource?.AddHook(WindowMessageHook);
     }
 
-    private void OnWindowLocationChanged(object? sender, EventArgs eventArgs) =>
+    private void OnWindowLocationChanged(object? sender, EventArgs eventArgs)
+    {
         _webViewSessionManager.NotifyParentWindowPositionChanged();
+    }
 
-    private void OnWindowStateChanged(object? sender, EventArgs eventArgs) =>
+    private void OnWindowStateChanged(object? sender, EventArgs eventArgs)
+    {
         UpdateDirectSurface(moveFocus: false);
+        UpdateMailRendererSurface();
+    }
 
     private async void OnWindowVisibilityChanged(object sender, DependencyPropertyChangedEventArgs eventArgs)
     {
         UpdateDirectSurface(moveFocus: false);
+        UpdateMailRendererSurface();
         if (!IsVisible && !_lifetimeCancellation.IsCancellationRequested)
         {
             await PrimeDeferredServicesWhileHiddenAsync(_lifetimeCancellation.Token);
@@ -314,6 +393,9 @@ public partial class MainWindow : Window
 
     private void OnWebViewContainerSizeChanged(object sender, SizeChangedEventArgs eventArgs) =>
         UpdateDirectSurface(moveFocus: false);
+
+    private void OnMailRendererSurfaceSizeChanged(object sender, SizeChangedEventArgs eventArgs) =>
+        UpdateMailRendererSurface();
 
     private IntPtr WindowMessageHook(
         IntPtr hwnd,
@@ -324,10 +406,31 @@ public partial class MainWindow : Window
     {
         const int WindowPositionChanged = 0x0047;
         const int DpiChanged = 0x02E0;
+        const int EnterSizeMove = 0x0231;
+        const int ExitSizeMove = 0x0232;
+        if (message == EnterSizeMove)
+        {
+            _restoreMailRendererAfterInteractiveMove =
+                _mailRendererWindowLifecycle.ReleaseForInteractiveMove();
+        }
+        else if (message == ExitSizeMove && _restoreMailRendererAfterInteractiveMove)
+        {
+            _restoreMailRendererAfterInteractiveMove = false;
+            _ = RefreshMailRendererContentAsync();
+        }
+
         if (message is WindowPositionChanged or DpiChanged)
         {
             _webViewSessionManager.NotifyParentWindowPositionChanged();
-            Dispatcher.BeginInvoke(() => UpdateDirectSurface(moveFocus: false));
+            _mailRendererWindowLifecycle.NotifyParentWindowPositionChanged();
+            Dispatcher.BeginInvoke(() =>
+            {
+                UpdateDirectSurface(moveFocus: false);
+                if (message == DpiChanged)
+                {
+                    UpdateMailRendererSurface();
+                }
+            });
         }
 
         return IntPtr.Zero;
@@ -526,6 +629,10 @@ public partial class MainWindow : Window
         try
         {
             await _viewModel.SetMailAccountEnabledAsync(account, isEnabled);
+            if (_viewModel.SelectedMailAccount?.Id == account.Id)
+            {
+                await _mailInboxViewModel.ActivateAsync(account, _lifetimeCancellation.Token);
+            }
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
@@ -632,6 +739,14 @@ public partial class MainWindow : Window
         try
         {
             await _mailAccountProvisioningService.DeleteAsync(account.Id, _lifetimeCancellation.Token);
+            _mailInboxViewModel.RemoveAccount(account.Id);
+            foreach (RemoteImageCacheKey key in _sessionRemoteImages.Keys
+                .Where(key => key.AccountId == account.Id)
+                .ToArray())
+            {
+                _sessionRemoteImages.Remove(key);
+            }
+
             _viewModel.RemoveMailAccountFromNavigation(account);
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -798,11 +913,190 @@ public partial class MainWindow : Window
         }
     }
 
-    private Rectangle GetDirectWebViewBounds()
+    private async Task RefreshMailRendererContentAsync()
     {
-        System.Windows.Point screenTopLeft = WebViewContainer.PointToScreen(new System.Windows.Point(0, 0));
-        System.Windows.Point screenBottomRight = WebViewContainer.PointToScreen(
-            new System.Windows.Point(WebViewContainer.ActualWidth, WebViewContainer.ActualHeight));
+        long version = ++_mailRendererVersion;
+        _mailRendererCancellation?.Cancel();
+        _mailRendererCancellation?.Dispose();
+        _mailRendererCancellation = null;
+
+        MailMessageContent? content = _mailInboxViewModel.SelectedMessageContent;
+        MailAccount? account = _mailInboxViewModel.ActiveAccount;
+        ResetRemoteImagesWhenSelectionChanges(account?.Id, content?.MessageKey);
+        if (!_isRuntimeAvailable
+            || _mailInboxViewModel.IsMessageLoading
+            || content?.BodyKind is not MailMessageBodyKind.SanitizedHtml
+            || _mailInboxViewModel.ActiveAccount is null
+            || _viewModel.SelectedMailAccount?.Id != _mailInboxViewModel.ActiveAccount.Id)
+        {
+            _mailMessageHtmlRenderer.Hide(clearContent: true);
+            return;
+        }
+
+        CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token);
+        _mailRendererCancellation = cancellation;
+        try
+        {
+            await Dispatcher.InvokeAsync(
+                () => ServiceWorkspace.UpdateLayout(),
+                DispatcherPriority.Loaded,
+                cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (MailInboxContent.HtmlRendererSurface.ActualWidth <= 0
+                || MailInboxContent.HtmlRendererSurface.ActualHeight <= 0)
+            {
+                return;
+            }
+
+            Rectangle bounds = GetElementClientBounds(MailInboxContent.HtmlRendererSurface);
+            await _mailMessageHtmlRenderer.ShowAsync(
+                _mainWindowHandle,
+                bounds,
+                content,
+                _loadedRemoteImages,
+                ShouldShowMailRenderer(),
+                cancellation.Token);
+
+            if (version != _mailRendererVersion
+                || !ReferenceEquals(content, _mailInboxViewModel.SelectedMessageContent))
+            {
+                _mailMessageHtmlRenderer.Hide(clearContent: true);
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // A newer account/message selection or shutdown owns the renderer.
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            _mailMessageHtmlRenderer.Hide(clearContent: true);
+        }
+        finally
+        {
+            if (ReferenceEquals(_mailRendererCancellation, cancellation))
+            {
+                _mailRendererCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private async void OnShowRemoteImagesRequested(object? sender, EventArgs eventArgs)
+    {
+        MailAccount? account = _mailInboxViewModel.ActiveAccount;
+        MailMessageContent? content = _mailInboxViewModel.SelectedMessageContent;
+        if (account is null
+            || content?.BodyKind is not MailMessageBodyKind.SanitizedHtml
+            || !content.HasRemoteImages
+            || _viewModel.SelectedMailAccount?.Id != account.Id)
+        {
+            return;
+        }
+
+        ResetRemoteImagesWhenSelectionChanges(account.Id, content.MessageKey);
+        _remoteImageLoadCancellation?.Cancel();
+        _remoteImageLoadCancellation?.Dispose();
+        CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token);
+        _remoteImageLoadCancellation = cancellation;
+        _mailInboxViewModel.SetRemoteImageLoading(true);
+
+        try
+        {
+            IReadOnlyDictionary<string, MailImageContent> images = await _remoteMailImageLoader.LoadAsync(
+                content.RemoteImages,
+                cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (!IsCurrentRemoteImageMessage(account.Id, content.MessageKey)
+                || !ReferenceEquals(content, _mailInboxViewModel.SelectedMessageContent))
+            {
+                return;
+            }
+
+            _loadedRemoteImages = images;
+            _sessionRemoteImages[new RemoteImageCacheKey(account.Id, content.MessageKey)] = images;
+            _mailInboxViewModel.MarkRemoteImagesShown();
+            await RefreshMailRendererContentAsync();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Another message selection or shutdown owns remote-image consent.
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            // Keep the banner available so the user can explicitly retry.
+        }
+        finally
+        {
+            if (ReferenceEquals(_remoteImageLoadCancellation, cancellation))
+            {
+                _remoteImageLoadCancellation = null;
+                cancellation.Dispose();
+                if (IsCurrentRemoteImageMessage(account.Id, content.MessageKey))
+                {
+                    _mailInboxViewModel.SetRemoteImageLoading(false);
+                }
+            }
+        }
+    }
+
+    private void ResetRemoteImagesWhenSelectionChanges(Guid? accountId, string? messageKey)
+    {
+        if (_remoteImageAccountId == accountId
+            && string.Equals(_remoteImageMessageKey, messageKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _remoteImageLoadCancellation?.Cancel();
+        _remoteImageLoadCancellation?.Dispose();
+        _remoteImageLoadCancellation = null;
+        _loadedRemoteImages = accountId is Guid currentAccountId
+            && !string.IsNullOrWhiteSpace(messageKey)
+            && _sessionRemoteImages.TryGetValue(
+                new RemoteImageCacheKey(currentAccountId, messageKey),
+                out IReadOnlyDictionary<string, MailImageContent>? cachedImages)
+                ? cachedImages
+                : new Dictionary<string, MailImageContent>(StringComparer.Ordinal);
+        _remoteImageAccountId = accountId;
+        _remoteImageMessageKey = messageKey;
+    }
+
+    private bool IsCurrentRemoteImageMessage(Guid accountId, string messageKey) =>
+        _remoteImageAccountId == accountId
+        && string.Equals(_remoteImageMessageKey, messageKey, StringComparison.Ordinal);
+
+    private readonly record struct RemoteImageCacheKey(Guid AccountId, string MessageKey);
+
+    private void UpdateMailRendererSurface()
+    {
+        _mailRendererWindowLifecycle.UpdateSurface(
+            ShouldShowMailRenderer(),
+            () => MailInboxContent.HtmlRendererSurface.ActualWidth <= 0
+                || MailInboxContent.HtmlRendererSurface.ActualHeight <= 0
+                    ? null
+                    : GetElementClientBounds(MailInboxContent.HtmlRendererSurface));
+    }
+
+    private bool ShouldShowMailRenderer() =>
+        MailRendererVisibilityPolicy.ShouldShow(
+            IsVisible,
+            WindowState == WindowState.Minimized,
+            _viewModel.IsSettingsOpen,
+            _viewModel.SelectedService is not null,
+            _mailInboxViewModel.ActiveAccount is { IsEnabled: true }
+                && _viewModel.SelectedMailAccount?.Id == _mailInboxViewModel.ActiveAccount.Id,
+            _mailInboxViewModel.SelectedMessageContent?.BodyKind);
+
+    private Rectangle GetDirectWebViewBounds()
+        => GetElementClientBounds(WebViewContainer);
+
+    private Rectangle GetElementClientBounds(FrameworkElement element)
+    {
+        System.Windows.Point screenTopLeft = element.PointToScreen(new System.Windows.Point(0, 0));
+        System.Windows.Point screenBottomRight = element.PointToScreen(
+            new System.Windows.Point(element.ActualWidth, element.ActualHeight));
         NativePoint topLeft = new((int)Math.Round(screenTopLeft.X), (int)Math.Round(screenTopLeft.Y));
         NativePoint bottomRight = new((int)Math.Round(screenBottomRight.X), (int)Math.Round(screenBottomRight.Y));
         if (!ScreenToClient(_mainWindowHandle, ref topLeft)

@@ -9,7 +9,7 @@ using UnifiedMessenger.App.Services.Security;
 namespace UnifiedMessenger.App.Services.WebView;
 
 public sealed class WebViewSessionManager(
-    IAppPaths appPaths,
+    ICoreWebView2EnvironmentProvider environmentProvider,
     IBuiltInServiceCatalog serviceCatalog,
     NavigationPolicy navigationPolicy,
     WebNavigationService webNavigationService,
@@ -29,7 +29,6 @@ public sealed class WebViewSessionManager(
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly Dictionary<Guid, SessionEntry> _sessions = [];
-    private Task<CoreWebView2Environment>? _environmentTask;
     private SessionEntry? _activeSession;
     private int _initialNavigationCount;
     private bool _shutdownStarted;
@@ -204,7 +203,7 @@ public sealed class WebViewSessionManager(
             session.ProcessFailureDetected = false;
             Publish(session, WebViewSessionStatus.Initializing);
 
-            CoreWebView2Environment environment = await GetEnvironmentAsync();
+            CoreWebView2Environment environment = await environmentProvider.GetAsync();
             cancellationToken.ThrowIfCancellationRequested();
             CoreWebView2ControllerOptions options = environment.CreateCoreWebView2ControllerOptions();
             options.ProfileName = session.ServiceInstance.ProfileName;
@@ -281,15 +280,6 @@ public sealed class WebViewSessionManager(
         {
             _initializationGate.Release();
         }
-    }
-
-    private Task<CoreWebView2Environment> GetEnvironmentAsync()
-    {
-        Directory.CreateDirectory(appPaths.WebViewDataFolder);
-        return _environmentTask ??= CoreWebView2Environment.CreateAsync(
-            browserExecutableFolder: null,
-            userDataFolder: appPaths.WebViewDataFolder,
-            options: null);
     }
 
     private void SetActiveSession(SessionEntry session, Rectangle bounds, bool isVisible, bool moveFocus)

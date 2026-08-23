@@ -217,6 +217,17 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailProvider, GenericImapMailProvider>();
         services.AddSingleton<IMailProviderFactory, MailProviderFactory>();
         services.AddSingleton<IMailAccountProvisioningService, MailAccountProvisioningService>();
+        services.AddSingleton<IMailHtmlSanitizer, MailHtmlSanitizer>();
+        services.AddSingleton<IMailContentExtractor, MailContentExtractor>();
+        services.AddSingleton<IMailHtmlDocumentBuilder, MailHtmlDocumentBuilder>();
+        services.AddSingleton<IRemoteMailImageHttpClient, RemoteMailImageHttpClient>();
+        services.AddSingleton<IRemoteMailImageUriValidator, RemoteMailImageUriValidator>();
+        services.AddSingleton<IRemoteMailImageLoader, RemoteMailImageLoader>();
+        services.AddSingleton<IGmailApiReadClient, GmailApiReadClient>();
+        services.AddSingleton<IImapInboxClient, MailKitImapInboxClient>();
+        services.AddSingleton<IMailReadProvider, GmailMailReadProvider>();
+        services.AddSingleton<IMailReadProvider, ImapMailReadProvider>();
+        services.AddSingleton<IMailReadProviderFactory, MailReadProviderFactory>();
         services.AddSingleton<INotificationSoundPlayer, WindowsNotificationSoundPlayer>();
         services.AddSingleton<INotificationPermissionPrompt, WpfNotificationPermissionPrompt>();
         services.AddSingleton<INotificationPermissionCoordinator, NotificationPermissionCoordinator>();
@@ -226,9 +237,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IApplicationExitCoordinator, ApplicationExitCoordinator>();
         services.AddSingleton<IWebViewRuntimeService, WebViewRuntimeService>();
         services.AddSingleton<IExternalBrowserService, ExternalBrowserService>();
+        services.AddSingleton<MailRendererNavigationPolicy>();
+        services.AddSingleton<MailRendererNavigationCoordinator>();
+        services.AddSingleton<IMailMessageHtmlRenderer, MailMessageHtmlRenderer>();
         services.AddSingleton<WebNavigationService>();
         services.AddSingleton<WebNewWindowNavigationService>();
         services.AddSingleton<IWebViewProfileCleaner, WebViewProfileCleaner>();
+        services.AddSingleton<ICoreWebView2EnvironmentProvider, CoreWebView2EnvironmentProvider>();
         services.AddSingleton<WebViewSessionManager>();
         services.AddSingleton<IWebViewSessionManager>(provider =>
             provider.GetRequiredService<WebViewSessionManager>());
@@ -237,6 +252,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IWindowActivationService, WpfWindowActivationService>();
         services.AddSingleton<IWebNotificationCoordinator, WebNotificationCoordinator>();
         services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton<MailInboxViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<IWebViewEventCoordinator, WebViewEventCoordinator>();
         services.AddSingleton<IApplicationTrayCoordinator, ApplicationTrayCoordinator>();

@@ -1,0 +1,90 @@
+namespace UnifiedMessenger.App.Models;
+
+public sealed record MailMessageSummary(
+    string MessageKey,
+    string Subject,
+    string FromDisplayName,
+    string FromAddress,
+    DateTimeOffset ReceivedAt,
+    string Preview,
+    bool IsUnread)
+{
+    public string SenderDisplay => string.IsNullOrWhiteSpace(FromDisplayName)
+        ? FromAddress
+        : FromDisplayName;
+
+    public string DisplayDate
+    {
+        get
+        {
+            DateTime local = ReceivedAt.ToLocalTime().DateTime;
+            DateTime today = DateTime.Today;
+            if (local.Date == today)
+            {
+                return local.ToString("HH:mm", System.Globalization.CultureInfo.CurrentCulture);
+            }
+
+            if (local.Date >= today.AddDays(-6))
+            {
+                return local.ToString("d MMM", System.Globalization.CultureInfo.CurrentCulture);
+            }
+
+            return local.ToString("dd.MM.yyyy", System.Globalization.CultureInfo.CurrentCulture);
+        }
+    }
+}
+
+public enum MailMessageBodyKind
+{
+    PlainText,
+    SanitizedHtml
+}
+
+public sealed record MailRemoteImageReference(
+    string ImageId,
+    Uri SourceUri);
+
+public sealed record MailImageContent(
+    string ContentType,
+    ReadOnlyMemory<byte> Bytes)
+{
+    public string ToDataUri() =>
+        $"data:{ContentType};base64,{Convert.ToBase64String(Bytes.Span)}";
+}
+
+public sealed record MailMessageContent(
+    string MessageKey,
+    string Subject,
+    string FromDisplayName,
+    string FromAddress,
+    string To,
+    DateTimeOffset ReceivedAt,
+    MailMessageBodyKind BodyKind,
+    string BodyContent,
+    IReadOnlyList<MailRemoteImageReference> RemoteImages,
+    bool IsUnread,
+    bool HasAttachments)
+{
+    public DateTime ReceivedAtLocal => ReceivedAt.ToLocalTime().DateTime;
+
+    public string SenderDisplay => string.IsNullOrWhiteSpace(FromDisplayName)
+        ? FromAddress
+        : FromDisplayName;
+
+    public string PlainTextContent => BodyKind is MailMessageBodyKind.PlainText
+        ? BodyContent
+        : string.Empty;
+
+    public string SanitizedHtmlContent => BodyKind is MailMessageBodyKind.SanitizedHtml
+        ? BodyContent
+        : string.Empty;
+
+    public bool HasRemoteImages => RemoteImages.Count > 0;
+}
+
+public sealed record MailPage<T>(
+    IReadOnlyList<T> Items,
+    string? ContinuationToken)
+{
+    public bool HasMore => !string.IsNullOrWhiteSpace(ContinuationToken);
+}
