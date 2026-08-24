@@ -60,6 +60,41 @@ public sealed record MailReplyMetadata(
     internal string? ProviderThreadId { get; init; }
 }
 
+public sealed record MailAttachmentInfo(
+    string AttachmentKey,
+    string FileName,
+    string ContentType,
+    long Size,
+    bool IsInline,
+    bool IsDownloadable)
+{
+    public string DisplaySize => MailAttachmentSizeFormatter.Format(Size);
+}
+
+public static class MailAttachmentSizeFormatter
+{
+    public static string Format(long bytes)
+    {
+        if (bytes < 0)
+        {
+            return "—";
+        }
+
+        string[] units = ["Б", "КБ", "МБ", "ГБ"];
+        double value = bytes;
+        int unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return unit == 0
+            ? $"{bytes} {units[unit]}"
+            : $"{value:0.#} {units[unit]}";
+    }
+}
+
 public sealed record MailMessageContent(
     string MessageKey,
     string Subject,
@@ -90,6 +125,8 @@ public sealed record MailMessageContent(
         : string.Empty;
 
     public bool HasRemoteImages => RemoteImages.Count > 0;
+
+    public IReadOnlyList<MailAttachmentInfo> Attachments { get; init; } = [];
 }
 
 public sealed record MailPage<T>(

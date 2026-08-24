@@ -15,7 +15,8 @@ namespace UnifiedMessenger.App.Services.Mail;
 internal sealed class GmailMailSendProvider(
     IMailCredentialStore credentialStore,
     IGmailApiSendClient apiClient,
-    IMailMimeMessageFactory mimeMessageFactory) : IMailSendProvider
+    IMailMimeMessageFactory mimeMessageFactory,
+    IMailOutgoingAttachmentMaterializer? attachmentMaterializer = null) : IMailSendProvider
 {
     public bool Supports(MailProviderType providerType) => providerType is MailProviderType.Gmail;
 
@@ -67,9 +68,17 @@ internal sealed class GmailMailSendProvider(
 
         try
         {
-            MailMimeSubmission submission = mimeMessageFactory.Create(account, request);
-            using MemoryStream stream = new();
+            IReadOnlyList<MaterializedMailAttachment> attachments = request.Attachments.Count == 0
+                ? []
+                : attachmentMaterializer is not null
+                    ? await attachmentMaterializer.MaterializeAsync(account, request.Attachments, cancellationToken)
+                    : throw new MailAttachmentException(
+                        MailAttachmentFailureKind.Unavailable,
+                        "Вложения недоступны для отправки.");
+            MailMimeSubmission submission = mimeMessageFactory.Create(account, request, attachments);
+            using MailSizeLimitedMemoryStream stream = new(MailAttachmentLimits.GmailMaximumRawMessageBytes);
             await submission.Message.WriteToAsync(stream, cancellationToken);
+            MailAttachmentLimits.ValidateGmailRawMessageSize(stream.Length);
             GmailApiSendReceipt receipt = await apiClient.SendAsync(
                 credential,
                 account.Id,
@@ -85,6 +94,14 @@ internal sealed class GmailMailSendProvider(
         catch (MailSubmissionException exception)
         {
             return MailSendResult.Failure(exception.FailureKind, exception.UserMessage);
+        }
+        catch (MailAttachmentException exception)
+        {
+            return MailSendResult.Failure(
+                exception.FailureKind is MailAttachmentFailureKind.MessageTooLarge
+                    ? MailSendFailureKind.MessageTooLarge
+                    : MailSendFailureKind.AttachmentUnavailable,
+                exception.UserMessage);
         }
     }
 }

@@ -110,9 +110,11 @@ internal static class GmailSystemFolders
 internal sealed class GmailMailReadProvider(
     IMailCredentialStore credentialStore,
     IGmailApiReadClient apiClient,
-    IMailContentExtractor contentExtractor) : IMailReadProvider, IMailMessageStateProvider
+    IMailContentExtractor contentExtractor,
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider
 {
     private const string MessageKeyPrefix = "gmail:";
+    private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
 
     public bool Supports(MailProviderType providerType) => providerType == MailProviderType.Gmail;
 
@@ -193,6 +195,10 @@ internal sealed class GmailMailReadProvider(
             using MemoryStream stream = new(raw.RawMime, writable: false);
             MimeMessage message = await MimeMessage.LoadAsync(stream, cancellationToken);
             MailMessageContent content = contentExtractor.Extract(messageKey, message, raw.IsUnread);
+            if (content.Attachments.Count > 0)
+            {
+                _sourceCache.Set(account.Id, messageKey, message, raw.RawMime.LongLength);
+            }
             if (!string.IsNullOrWhiteSpace(raw.ThreadId))
             {
                 MailReplyMetadata metadata = content.ReplyMetadata
@@ -214,6 +220,49 @@ internal sealed class GmailMailReadProvider(
             throw new MailReadException(
                 MailReadFailureKind.InvalidMessage,
                 "Не удалось безопасно прочитать содержимое письма.");
+        }
+    }
+
+    public async Task<MailAttachmentContent> GetAsync(
+        MailAccount account,
+        string messageKey,
+        string attachmentKey,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            ValidateAccount(account, pageSize: 1);
+            if (_sourceCache.TryGet(account.Id, messageKey, out MimeMessage? cached) && cached is not null)
+            {
+                return MailMimeAttachmentCatalog.GetContent(cached, attachmentKey, cancellationToken);
+            }
+
+            string messageId = ParseMessageKey(messageKey);
+            MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+            GmailApiRawMessage raw = await apiClient.GetRawMessageAsync(
+                credential,
+                account.Id,
+                messageId,
+                cancellationToken);
+            using MemoryStream stream = new(raw.RawMime, writable: false);
+            MimeMessage message = await MimeMessage.LoadAsync(stream, cancellationToken);
+            _sourceCache.Set(account.Id, messageKey, message, raw.RawMime.LongLength);
+            return MailMimeAttachmentCatalog.GetContent(message, attachmentKey, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (MailAttachmentException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is MailReadException or IOException or FormatException)
+        {
+            throw new MailAttachmentException(
+                MailAttachmentFailureKind.ProviderFailure,
+                "Не удалось загрузить вложение.",
+                exception);
         }
     }
 

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
@@ -15,7 +16,7 @@ public sealed class MailComposeDraft : ObservableObject
     private string _textBody = string.Empty;
     private bool _areCopyFieldsVisible;
 
-    internal MailComposeDraft(MailComposeTemplate template)
+    internal MailComposeDraft(MailComposeTemplate template, Guid accountId)
     {
         _to = template.To;
         _cc = template.Cc;
@@ -24,6 +25,13 @@ public sealed class MailComposeDraft : ObservableObject
         _textBody = template.TextBody;
         _areCopyFieldsVisible = !string.IsNullOrWhiteSpace(_cc) || !string.IsNullOrWhiteSpace(_bcc);
         ReplyContext = template.ReplyContext;
+        foreach (MailForwardAttachmentOffer offer in template.ForwardAttachments)
+        {
+            Attachments.Add(new MailComposeAttachmentItem(
+                OutgoingMailAttachment.FromSource(accountId, offer.MessageKey, offer.Attachment),
+                isForwardedSource: true,
+                isSelected: false));
+        }
     }
 
     public string To
@@ -64,15 +72,82 @@ public sealed class MailComposeDraft : ObservableObject
 
     internal MailReplyContext? ReplyContext { get; }
 
+    public ObservableCollection<MailComposeAttachmentItem> Attachments { get; } = [];
+
+    public bool HasAttachments => Attachments.Count > 0;
+
     public bool HasUserContent =>
         !string.IsNullOrWhiteSpace(To)
         || !string.IsNullOrWhiteSpace(Cc)
         || !string.IsNullOrWhiteSpace(Bcc)
         || !string.IsNullOrWhiteSpace(Subject)
-        || !string.IsNullOrWhiteSpace(TextBody);
+        || !string.IsNullOrWhiteSpace(TextBody)
+        || Attachments.Any(item => item.IsIncluded);
 
     internal MailComposeInput Snapshot() =>
-        new(To, Cc, Bcc, Subject, TextBody, ReplyContext);
+        new MailComposeInput(To, Cc, Bcc, Subject, TextBody, ReplyContext)
+        {
+            Attachments = Attachments
+                .Where(item => item.IsIncluded)
+                .Select(item => item.Attachment)
+                .ToArray()
+        };
+
+    internal void AddLocalAttachments(IEnumerable<OutgoingMailAttachment> attachments)
+    {
+        foreach (OutgoingMailAttachment attachment in attachments)
+        {
+            Attachments.Add(new MailComposeAttachmentItem(
+                attachment,
+                isForwardedSource: false,
+                isSelected: true));
+        }
+
+        OnPropertyChanged(nameof(HasAttachments));
+        OnPropertyChanged(nameof(HasUserContent));
+    }
+
+    internal void RemoveAttachment(MailComposeAttachmentItem item)
+    {
+        Attachments.Remove(item);
+        OnPropertyChanged(nameof(HasAttachments));
+        OnPropertyChanged(nameof(HasUserContent));
+    }
+}
+
+public sealed class MailComposeAttachmentItem : ObservableObject
+{
+    private bool _isSelected;
+
+    internal MailComposeAttachmentItem(
+        OutgoingMailAttachment attachment,
+        bool isForwardedSource,
+        bool isSelected)
+    {
+        Attachment = attachment;
+        IsForwardedSource = isForwardedSource;
+        _isSelected = isSelected;
+    }
+
+    internal OutgoingMailAttachment Attachment { get; }
+    public string FileName => Attachment.FileName;
+    public string DisplaySize => MailAttachmentSizeFormatter.Format(Attachment.Size);
+    public bool IsForwardedSource { get; }
+    public bool IsLocalFile => !IsForwardedSource;
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (SetProperty(ref _isSelected, value))
+            {
+                OnPropertyChanged(nameof(IsIncluded));
+            }
+        }
+    }
+
+    public bool IsIncluded => !IsForwardedSource || IsSelected;
 }
 
 public sealed class MailSentEventArgs(Guid accountId, bool sentCopySaved) : EventArgs
@@ -87,6 +162,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     private readonly IMailComposeRequestFactory _requestFactory;
     private readonly IMailComposePreparationService _preparationService;
     private readonly IMailComposeConfirmationService _confirmationService;
+    private readonly IMailAttachmentDialogService? _attachmentDialogService;
     private readonly Dictionary<Guid, MailComposeDraft> _drafts = [];
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private MailAccount? _activeAccount;
@@ -101,18 +177,22 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         IMailSendProviderFactory providerFactory,
         IMailComposeRequestFactory requestFactory,
         IMailComposePreparationService preparationService,
-        IMailComposeConfirmationService confirmationService)
+        IMailComposeConfirmationService confirmationService,
+        IMailAttachmentDialogService? attachmentDialogService = null)
     {
         _providerFactory = providerFactory;
         _requestFactory = requestFactory;
         _preparationService = preparationService;
         _confirmationService = confirmationService;
+        _attachmentDialogService = attachmentDialogService;
         NewMessageCommand = new RelayCommand(StartNewMessage, CanStartNewMessage);
         RevealCopyFieldsCommand = new RelayCommand(RevealCopyFields, CanRevealCopyFields);
         ReplyCommand = new AsyncRelayCommand<MailMessageContent>(StartReplyAsync, CanPrepareFromMessage);
         ForwardCommand = new AsyncRelayCommand<MailMessageContent>(StartForwardAsync, CanPrepareFromMessage);
         SendCommand = new AsyncRelayCommand(SendAsync, CanSend);
         CancelCommand = new AsyncRelayCommand(CancelAsync, CanCancel);
+        AttachFilesCommand = new RelayCommand(AttachFiles, CanAttachFiles);
+        RemoveAttachmentCommand = new RelayCommand<MailComposeAttachmentItem>(RemoveAttachment, CanRemoveAttachment);
     }
 
     public event EventHandler<MailSentEventArgs>? Sent;
@@ -123,6 +203,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand<MailMessageContent> ForwardCommand { get; }
     public IAsyncRelayCommand SendCommand { get; }
     public IAsyncRelayCommand CancelCommand { get; }
+    public IRelayCommand AttachFilesCommand { get; }
+    public IRelayCommand<MailComposeAttachmentItem> RemoveAttachmentCommand { get; }
 
     public MailAccount? ActiveAccount
     {
@@ -235,7 +317,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 string.Empty,
                 string.Empty,
                 string.Empty,
-                string.Empty));
+                string.Empty), account.Id);
             _drafts.Add(account.Id, draft);
         }
 
@@ -280,7 +362,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             return;
         }
 
-        MailComposeDraft draft = new(template);
+        MailComposeDraft draft = new(template, account.Id);
         _drafts[account.Id] = draft;
         Draft = draft;
         ErrorMessage = null;
@@ -323,6 +405,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
 
             if (string.IsNullOrWhiteSpace(request.Subject)
                 && string.IsNullOrWhiteSpace(request.TextBody)
+                && request.Attachments.Count == 0
                 && !await _confirmationService.ConfirmEmptyMessageAsync(_lifetimeCancellation.Token))
             {
                 return;
@@ -376,6 +459,42 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void AttachFiles()
+    {
+        if (Draft is not MailComposeDraft draft || _attachmentDialogService is null || IsSending)
+        {
+            return;
+        }
+
+        try
+        {
+            IReadOnlyList<OutgoingMailAttachment> attachments = _attachmentDialogService.SelectOutgoingAttachments();
+            draft.AddLocalAttachments(attachments);
+            ErrorMessage = null;
+        }
+        catch (MailAttachmentException exception)
+        {
+            ErrorMessage = exception.UserMessage;
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or System.Security.SecurityException
+                or ArgumentException
+                or NotSupportedException)
+        {
+            ErrorMessage = "Не удалось прочитать выбранный файл.";
+        }
+    }
+
+    private void RemoveAttachment(MailComposeAttachmentItem? item)
+    {
+        if (Draft is not null && item is not null && !IsSending)
+        {
+            Draft.RemoveAttachment(item);
+        }
+    }
+
     private async Task CancelAsync()
     {
         if (ActiveAccount is not MailAccount account || Draft is not MailComposeDraft draft || IsSending)
@@ -399,6 +518,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     private bool CanPrepareFromMessage(MailMessageContent? source) => ActiveAccount is not null && source is not null && !IsSending;
     private bool CanSend() => IsOpen && !IsSending;
     private bool CanCancel() => IsOpen && !IsSending;
+    private bool CanAttachFiles() => IsOpen && !IsSending && _attachmentDialogService is not null;
+    private bool CanRemoveAttachment(MailComposeAttachmentItem? item) => IsOpen && !IsSending && item is not null;
 
     private void NotifyCommandStates()
     {
@@ -408,6 +529,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         ForwardCommand.NotifyCanExecuteChanged();
         SendCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
+        AttachFilesCommand.NotifyCanExecuteChanged();
+        RemoveAttachmentCommand.NotifyCanExecuteChanged();
     }
 
     private void NotifyOpenState()

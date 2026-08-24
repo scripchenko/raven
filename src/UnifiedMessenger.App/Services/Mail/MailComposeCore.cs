@@ -1,3 +1,4 @@
+using System.Text;
 using MimeKit;
 using MimeKit.Utils;
 using UnifiedMessenger.App.Models;
@@ -31,7 +32,10 @@ public sealed class MailComposeRequestFactory : IMailComposeRequestFactory
             bcc,
             input.Subject.Trim(),
             NormalizeBody(input.TextBody),
-            input.ReplyContext);
+            input.ReplyContext)
+        {
+            Attachments = input.Attachments.ToArray()
+        };
     }
 
     internal static IReadOnlyList<MailAddress> ParseAddresses(string? value, string failureMessage)
@@ -96,7 +100,10 @@ public sealed class MailComposeRequestFactory : IMailComposeRequestFactory
 
 internal sealed class MailMimeMessageFactory(TimeProvider timeProvider) : IMailMimeMessageFactory
 {
-    public MailMimeSubmission Create(MailAccount account, MailComposeRequest request)
+    public MailMimeSubmission Create(
+        MailAccount account,
+        MailComposeRequest request,
+        IReadOnlyList<MaterializedMailAttachment>? attachments = null)
     {
         ArgumentNullException.ThrowIfNull(account);
         ArgumentNullException.ThrowIfNull(request);
@@ -109,18 +116,14 @@ internal sealed class MailMimeMessageFactory(TimeProvider timeProvider) : IMailM
         MailboxAddress[] to = request.To.Select(CreateMailbox).ToArray();
         MailboxAddress[] cc = request.Cc.Select(CreateMailbox).ToArray();
         MailboxAddress[] bcc = request.Bcc.Select(CreateMailbox).ToArray();
+        MaterializedMailAttachment[] materialized = attachments?.ToArray() ?? [];
         MimeMessage message = new()
         {
             Date = timeProvider.GetUtcNow(),
             MessageId = MimeUtils.GenerateMessageId(),
-            Subject = request.Subject,
-            Body = new TextPart("plain")
-            {
-                Text = request.TextBody,
-                ContentTransferEncoding = ContentEncoding.QuotedPrintable
-            }
+            Subject = request.Subject
         };
-        ((TextPart)message.Body).ContentType.Charset = "utf-8";
+        message.Body = CreateBody(request.TextBody, materialized);
         message.From.Add(sender);
         message.To.AddRange(to);
         message.Cc.AddRange(cc);
@@ -128,6 +131,48 @@ internal sealed class MailMimeMessageFactory(TimeProvider timeProvider) : IMailM
         ApplyReplyContext(message, request.ReplyContext);
 
         return new MailMimeSubmission(message, sender, [.. to, .. cc, .. bcc]);
+    }
+
+    private static MimeEntity CreateBody(
+        string textBody,
+        IReadOnlyList<MaterializedMailAttachment> attachments)
+    {
+        TextPart text = new("plain")
+        {
+            Text = textBody,
+            ContentTransferEncoding = ContentEncoding.QuotedPrintable
+        };
+        text.ContentType.Charset = "utf-8";
+        if (attachments.Count == 0)
+        {
+            return text;
+        }
+
+        BodyBuilder builder = new()
+        {
+            TextBody = textBody,
+            BodyEncoding = Encoding.UTF8
+        };
+        foreach (MaterializedMailAttachment attachment in attachments)
+        {
+            ContentType contentType;
+            try
+            {
+                contentType = ContentType.Parse(attachment.ContentType);
+            }
+            catch (ParseException)
+            {
+                contentType = new ContentType("application", "octet-stream");
+            }
+
+            MimeEntity entity = builder.Attachments.Add(
+                MailAttachmentFileName.Sanitize(attachment.FileName),
+                attachment.Bytes.ToArray(),
+                contentType);
+            entity.ContentDisposition = new ContentDisposition(ContentDisposition.Attachment);
+        }
+
+        return builder.ToMessageBody();
     }
 
     private static void ApplyReplyContext(MimeMessage message, MailReplyContext? context)

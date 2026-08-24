@@ -49,6 +49,7 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
             safePlainText = bodyContent;
         }
 
+        IReadOnlyList<MailAttachmentInfo> attachments = MailMimeAttachmentCatalog.Extract(message);
         (string displayName, string address) = GetPrimaryMailbox(message.From);
         return new MailMessageContent(
             messageKey,
@@ -61,7 +62,7 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
             bodyContent,
             remoteImages,
             isUnread,
-            message.Attachments.Any(),
+            attachments.Count > 0,
             safePlainText,
             new MailReplyMetadata(
                 FormatAddresses(message.ReplyTo),
@@ -71,7 +72,10 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
                     .Where(value => value is not null)
                     .Select(value => value!)
                     .Distinct(StringComparer.Ordinal)
-                    .ToArray()));
+                    .ToArray()))
+        {
+            Attachments = attachments
+        };
     }
 
     internal static (string DisplayName, string Address) GetPrimaryMailbox(InternetAddressList? addresses)

@@ -92,9 +92,11 @@ internal sealed class ImapMailReadProvider(
     IMailCredentialStore credentialStore,
     IMailProviderFactory providerFactory,
     IImapInboxClient inboxClient,
-    IMailContentExtractor contentExtractor) : IMailReadProvider, IMailMessageStateProvider
+    IMailContentExtractor contentExtractor,
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider
 {
     private const string MessageKeyPrefix = "imap:";
+    private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
 
     public bool Supports(MailProviderType providerType) =>
         providerType is MailProviderType.Yandex or MailProviderType.MailRu or MailProviderType.GenericImap;
@@ -178,7 +180,73 @@ internal sealed class ImapMailReadProvider(
             uniqueId,
             uidValidity,
             cancellationToken);
-        return contentExtractor.Extract(messageKey, result.Message, result.IsUnread);
+        MailMessageContent content = contentExtractor.Extract(messageKey, result.Message, result.IsUnread);
+        if (content.Attachments.Count > 0)
+        {
+            _sourceCache.Set(
+                account.Id,
+                messageKey,
+                result.Message,
+                MailMimeAttachmentCatalog.EstimateEncodedSize(result.Message));
+        }
+
+        return content;
+    }
+
+    public async Task<MailAttachmentContent> GetAsync(
+        MailAccount account,
+        string messageKey,
+        string attachmentKey,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            MailServerSettings server = ResolveImapSettings(account, pageSize: 1);
+            if (_sourceCache.TryGet(account.Id, messageKey, out MimeMessage? cached) && cached is not null)
+            {
+                return MailMimeAttachmentCatalog.GetContent(cached, attachmentKey, cancellationToken);
+            }
+
+            MailFolderKind folderKind = ParseFolderKind(messageKey);
+            MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+            ImapFolderDescriptor folder = (await inboxClient.GetFoldersAsync(
+                    server,
+                    credential.Secret,
+                    cancellationToken))
+                .FirstOrDefault(item => item.Kind == folderKind)
+                ?? throw new MailReadException(
+                    MailReadFailureKind.FolderUnavailable,
+                    "Исходная папка больше недоступна.");
+            (uint uidValidity, uint uniqueId) = ParseMessageKey(folderKind, messageKey);
+            ImapMessageData result = await inboxClient.GetMessageAsync(
+                server,
+                credential.Secret,
+                folder,
+                uniqueId,
+                uidValidity,
+                cancellationToken);
+            _sourceCache.Set(
+                account.Id,
+                messageKey,
+                result.Message,
+                MailMimeAttachmentCatalog.EstimateEncodedSize(result.Message));
+            return MailMimeAttachmentCatalog.GetContent(result.Message, attachmentKey, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (MailAttachmentException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is MailReadException or IOException or FormatException)
+        {
+            throw new MailAttachmentException(
+                MailAttachmentFailureKind.ProviderFailure,
+                "Не удалось загрузить вложение.",
+                exception);
+        }
     }
 
     public Task<MailReadStateCapability> GetReadStateCapabilityAsync(
@@ -304,6 +372,27 @@ internal sealed class ImapMailReadProvider(
 
         return (uidValidity, uid);
     }
+
+    private static MailFolderKind ParseFolderKind(string messageKey)
+    {
+        if (string.IsNullOrWhiteSpace(messageKey)
+            || !messageKey.StartsWith(MessageKeyPrefix, StringComparison.Ordinal))
+        {
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Письмо больше недоступно.");
+        }
+
+        ReadOnlySpan<char> value = messageKey.AsSpan(MessageKeyPrefix.Length);
+        int separator = value.IndexOf(':');
+        if (separator <= 0
+            || !int.TryParse(value[..separator], NumberStyles.None, CultureInfo.InvariantCulture, out int kind)
+            || !Enum.IsDefined((MailFolderKind)kind))
+        {
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Письмо больше недоступно.");
+        }
+
+        return (MailFolderKind)kind;
+    }
+
 }
 
 internal sealed class MailKitImapInboxClient : IImapInboxClient

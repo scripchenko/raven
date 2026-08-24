@@ -14,6 +14,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public const int RemoteImageConsentCacheCapacity = 20;
 
     private readonly IMailReadProviderFactory _providerFactory;
+    private readonly IMailAttachmentSaveService? _attachmentSaveService;
+    private readonly MailMessageSourceCache? _messageSourceCache;
     private readonly Dictionary<FolderStateKey, FolderState> _folderStates = [];
     private readonly Dictionary<Guid, AccountFolderState> _accountFolderStates = [];
     private readonly BoundedLruCache<MessageBodyCacheKey, MailMessageContent> _messageBodyCache =
@@ -24,6 +26,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _listCancellation;
     private CancellationTokenSource? _messageCancellation;
     private CancellationTokenSource? _mutationCancellation;
+    private CancellationTokenSource? _attachmentCancellation;
     private MailAccount? _activeAccount;
     private MailFolder? _selectedFolder;
     private MailMessageSummary? _selectedMessageSummary;
@@ -37,6 +40,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private string? _messageErrorMessage;
     private string? _readStateErrorMessage;
     private string? _authorizationMessage;
+    private string? _attachmentStatusMessage;
+    private bool _isAttachmentSaving;
     private MailReadFailureKind? _failureKind;
     private MailReadStateCapability _readStateCapability = MailReadStateCapability.Unsupported;
     private string? _continuationToken;
@@ -47,9 +52,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     public MailInboxViewModel(
         IMailReadProviderFactory providerFactory,
-        MailComposeViewModel? composeViewModel = null)
+        MailComposeViewModel? composeViewModel = null,
+        IMailAttachmentSaveService? attachmentSaveService = null,
+        MailMessageSourceCache? messageSourceCache = null)
     {
         _providerFactory = providerFactory;
+        _attachmentSaveService = attachmentSaveService;
+        _messageSourceCache = messageSourceCache;
         Compose = composeViewModel ?? MailComposeViewModel.CreateUnavailable();
         Compose.PropertyChanged += OnComposePropertyChanged;
         Compose.Sent += OnMailSent;
@@ -59,6 +68,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         RetryMessageCommand = new AsyncRelayCommand(RetryMessageAsync, CanRetryMessage);
         SetReadStateCommand = new AsyncRelayCommand(SetReadStateAsync, CanSetReadState);
         AuthorizeGmailCommand = new AsyncRelayCommand(AuthorizeGmailAsync, CanAuthorizeGmail);
+        SaveAttachmentCommand = new AsyncRelayCommand<MailAttachmentInfo>(SaveAttachmentAsync, CanSaveAttachment);
     }
 
     public ObservableCollection<MailFolder> Folders { get; } = [];
@@ -71,6 +81,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand RetryMessageCommand { get; }
     public IAsyncRelayCommand SetReadStateCommand { get; }
     public IAsyncRelayCommand AuthorizeGmailCommand { get; }
+    public IAsyncRelayCommand<MailAttachmentInfo> SaveAttachmentCommand { get; }
 
     internal Task CurrentMessageLoadTask { get; private set; } = Task.CompletedTask;
     internal Task CurrentFolderLoadTask { get; private set; } = Task.CompletedTask;
@@ -131,6 +142,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
             FolderState state = GetState(ActiveAccount.Id, SelectedFolder.Key);
             state.SelectedMessageKey = value?.MessageKey;
+            CancelAttachmentOperation();
+            AttachmentStatusMessage = null;
             CancelMessageOperation();
             IsMessageLoading = false;
             if (value is null)
@@ -163,10 +176,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             {
                 IsRemoteImageLoading = false;
                 OnPropertyChanged(nameof(HasSelectedContent));
+                OnPropertyChanged(nameof(HasAttachments));
                 OnPropertyChanged(nameof(IsSelectedMessagePlainText));
                 OnPropertyChanged(nameof(IsSelectedMessageHtml));
                 RaiseRemoteImageConsentStateChanged();
                 RaiseReadStateChanged();
+                SaveAttachmentCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -326,11 +341,37 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public bool IsEmpty => HasLoaded && !IsListLoading && !HasMessages && !HasListError;
     public bool HasSelectedMessage => SelectedMessageSummary is not null;
     public bool HasSelectedContent => SelectedMessageContent is not null;
+    public bool HasAttachments => SelectedMessageContent?.Attachments.Count > 0;
     public bool IsSelectedMessagePlainText => SelectedMessageContent?.BodyKind is MailMessageBodyKind.PlainText;
     public bool IsSelectedMessageHtml => SelectedMessageContent?.BodyKind is MailMessageBodyKind.SanitizedHtml;
     public bool ShowRemoteImagesBanner => SelectedMessageContent?.HasRemoteImages == true && !AreRemoteImagesShown;
     public bool CanShowRemoteImages => ShowRemoteImagesBanner && !IsRemoteImageLoading;
     public string RemoteImagesButtonText => IsRemoteImageLoading ? "Загружаем…" : "Показать";
+    public bool IsAttachmentSaving
+    {
+        get => _isAttachmentSaving;
+        private set
+        {
+            if (SetProperty(ref _isAttachmentSaving, value))
+            {
+                SaveAttachmentCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public string? AttachmentStatusMessage
+    {
+        get => _attachmentStatusMessage;
+        private set
+        {
+            if (SetProperty(ref _attachmentStatusMessage, value))
+            {
+                OnPropertyChanged(nameof(HasAttachmentStatus));
+            }
+        }
+    }
+
+    public bool HasAttachmentStatus => !string.IsNullOrWhiteSpace(AttachmentStatusMessage);
     public bool ShowMessagePlaceholder => !HasSelectedContent && !IsMessageLoading && !HasMessageError;
     public bool ShowReadStateAction =>
         HasSelectedContent
@@ -464,6 +505,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
         _remoteImageConsents.RemoveWhere(key => key.AccountId == accountId);
         _messageBodyCache.RemoveWhere(key => key.AccountId == accountId);
+        _messageSourceCache?.RemoveAccount(accountId);
         Compose.RemoveAccount(accountId);
         if (ActiveAccount?.Id == accountId)
         {
@@ -488,6 +530,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         _accountFolderStates.Clear();
         _messageBodyCache.Clear();
         _remoteImageConsents.Clear();
+        _messageSourceCache?.Clear();
     }
 
     private async Task LoadFoldersAsync(
@@ -1155,6 +1198,65 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private bool CanRetryMessage() => IsActive && HasMessageError && !IsMessageLoading;
     private bool CanSetReadState() => CanChangeReadState;
     private bool CanAuthorizeGmail() => RequiresGmailAuthorization && !IsReadStateChanging && _providerFactory.GmailScopeUpgradeService is not null;
+    private bool CanSaveAttachment(MailAttachmentInfo? attachment) =>
+        _attachmentSaveService is not null
+        && attachment is { IsDownloadable: true }
+        && ActiveAccount is not null
+        && SelectedMessageContent is not null
+        && !IsAttachmentSaving;
+
+    private async Task SaveAttachmentAsync(MailAttachmentInfo? attachment)
+    {
+        if (!CanSaveAttachment(attachment)
+            || attachment is null
+            || ActiveAccount is not MailAccount account
+            || SelectedMessageContent is not MailMessageContent content
+            || _attachmentSaveService is null)
+        {
+            return;
+        }
+
+        CancelAttachmentOperation();
+        CancellationTokenSource operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(GetActivationToken());
+        _attachmentCancellation = operationCancellation;
+        CancellationToken cancellationToken = operationCancellation.Token;
+        Guid accountId = account.Id;
+        string messageKey = content.MessageKey;
+        IsAttachmentSaving = true;
+        AttachmentStatusMessage = null;
+        try
+        {
+            MailAttachmentSaveResult result = await _attachmentSaveService.SaveAsync(
+                account,
+                messageKey,
+                attachment,
+                cancellationToken);
+            if (cancellationToken.IsCancellationRequested
+                || ActiveAccount?.Id != accountId
+                || !string.Equals(SelectedMessageContent?.MessageKey, messageKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            AttachmentStatusMessage = result.Outcome is MailAttachmentSaveOutcome.Canceled
+                ? null
+                : result.UserMessage;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Selection/account changes cancel the stale save without surfacing an error to the user.
+        }
+        finally
+        {
+            if (ReferenceEquals(_attachmentCancellation, operationCancellation))
+            {
+                operationCancellation.Dispose();
+                _attachmentCancellation = null;
+            }
+
+            IsAttachmentSaving = false;
+        }
+    }
 
     private void RaiseListStateChanged()
     {
@@ -1177,6 +1279,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ReadStateAuthorizationText));
         SetReadStateCommand.NotifyCanExecuteChanged();
         AuthorizeGmailCommand.NotifyCanExecuteChanged();
+        SaveAttachmentCommand.NotifyCanExecuteChanged();
     }
 
     private void NotifyCommandStates()
@@ -1213,6 +1316,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         CancelListOperation();
         CancelMessageOperation();
         CancelMutationOperation();
+        CancelAttachmentOperation();
         _activationCancellation?.Cancel();
         _activationCancellation?.Dispose();
         _activationCancellation = null;
@@ -1237,6 +1341,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         _mutationCancellation?.Cancel();
         _mutationCancellation?.Dispose();
         _mutationCancellation = null;
+    }
+
+    private void CancelAttachmentOperation()
+    {
+        _attachmentCancellation?.Cancel();
+        _attachmentCancellation?.Dispose();
+        _attachmentCancellation = null;
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);

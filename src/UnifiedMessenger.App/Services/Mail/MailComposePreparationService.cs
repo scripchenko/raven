@@ -58,7 +58,13 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
             string.Empty,
             string.Empty,
             NormalizeForwardSubject(source.Subject),
-            BuildForwardBody(source));
+            BuildForwardBody(source))
+        {
+            ForwardAttachments = source.Attachments
+                .Where(attachment => attachment.IsDownloadable && !attachment.IsInline)
+                .Select(attachment => new MailForwardAttachmentOffer(source.MessageKey, attachment))
+                .ToArray()
+        };
     }
 
     internal static string NormalizeReplySubject(string? subject)

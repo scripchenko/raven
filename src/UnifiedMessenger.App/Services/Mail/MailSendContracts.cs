@@ -17,6 +17,8 @@ public enum MailSendFailureKind
     MessageRejected,
     PolicyRejected,
     ProtocolRejected,
+    AttachmentUnavailable,
+    MessageTooLarge,
     Ambiguous,
     CanceledBeforeSubmission
 }
@@ -60,6 +62,7 @@ public sealed record MailComposeRequest(
     MailReplyContext? ReplyContext = null)
 {
     public int RecipientCount => To.Count + Cc.Count + Bcc.Count;
+    public IReadOnlyList<OutgoingMailAttachment> Attachments { get; init; } = [];
 }
 
 public sealed record MailComposeInput(
@@ -68,7 +71,14 @@ public sealed record MailComposeInput(
     string Bcc,
     string Subject,
     string TextBody,
-    MailReplyContext? ReplyContext = null);
+    MailReplyContext? ReplyContext = null)
+{
+    public IReadOnlyList<OutgoingMailAttachment> Attachments { get; init; } = [];
+}
+
+public sealed record MailForwardAttachmentOffer(
+    string MessageKey,
+    MailAttachmentInfo Attachment);
 
 public sealed record MailComposeTemplate(
     string To,
@@ -76,7 +86,10 @@ public sealed record MailComposeTemplate(
     string Bcc,
     string Subject,
     string TextBody,
-    MailReplyContext? ReplyContext = null);
+    MailReplyContext? ReplyContext = null)
+{
+    public IReadOnlyList<MailForwardAttachmentOffer> ForwardAttachments { get; init; } = [];
+}
 
 public sealed record MailSendResult(
     MailSendOutcome Outcome,
@@ -153,7 +166,10 @@ internal sealed record MailMimeSubmission(
 
 internal interface IMailMimeMessageFactory
 {
-    MailMimeSubmission Create(MailAccount account, MailComposeRequest request);
+    MailMimeSubmission Create(
+        MailAccount account,
+        MailComposeRequest request,
+        IReadOnlyList<MaterializedMailAttachment>? attachments = null);
 }
 
 internal sealed record GmailApiSendReceipt(string? MessageId, string? ThreadId);
