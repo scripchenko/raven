@@ -1465,6 +1465,51 @@ public sealed class Stage73UnifiedInboxTests
     }
 
     [Fact]
+    public void EnteringCompose_ReleasesNativeMailRendererInputSurfaceOnce()
+    {
+        RecordingMailRenderer renderer = new() { IsInitialized = true, IsVisible = true };
+        MailRendererWindowLifecycleCoordinator coordinator = new(renderer);
+
+        coordinator.SetComposeActive(isActive: true);
+        coordinator.SetComposeActive(isActive: true);
+
+        Assert.False(renderer.IsInitialized);
+        Assert.False(renderer.IsVisible);
+        Assert.Equal(1, renderer.ReleaseCalls);
+    }
+
+    [Fact]
+    public void EnteringCompose_InvalidatesRendererEvenWhileControllerIsNotYetInitialized()
+    {
+        RecordingMailRenderer renderer = new() { IsInitialized = false, IsVisible = false };
+        MailRendererWindowLifecycleCoordinator coordinator = new(renderer);
+
+        coordinator.SetComposeActive(isActive: true);
+
+        Assert.Equal(1, renderer.ReleaseCalls);
+    }
+
+    [Fact]
+    public void LeavingCompose_AllowsMailRendererToBeRestoredLazily()
+    {
+        System.Drawing.Rectangle bounds = new(14, 28, 960, 640);
+        RecordingMailRenderer renderer = new() { IsInitialized = true, IsVisible = true };
+        MailRendererWindowLifecycleCoordinator coordinator = new(renderer);
+        coordinator.SetComposeActive(isActive: true);
+        renderer.IsInitialized = true;
+
+        coordinator.UpdateSurface(shouldShow: true, () => bounds);
+        Assert.Equal(0, renderer.LayoutCalls);
+
+        coordinator.SetComposeActive(isActive: false);
+        coordinator.UpdateSurface(shouldShow: true, () => bounds);
+
+        Assert.True(renderer.IsVisible);
+        Assert.Equal(1, renderer.LayoutCalls);
+        Assert.Equal(bounds, renderer.LastBounds);
+    }
+
+    [Fact]
     public void WebToMail_RestoresCurrentBoundsAndVisibility()
     {
         System.Drawing.Rectangle currentBounds = new(14, 28, 960, 640);

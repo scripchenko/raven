@@ -229,6 +229,18 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailReadProvider, GmailMailReadProvider>();
         services.AddSingleton<IMailReadProvider, ImapMailReadProvider>();
         services.AddSingleton<IMailReadProviderFactory, MailReadProviderFactory>();
+        services.AddSingleton<IMailComposeRequestFactory, MailComposeRequestFactory>();
+        services.AddSingleton<IMailComposePreparationService, MailComposePreparationService>();
+        services.AddSingleton<IMailComposeConfirmationService, WpfMailComposeConfirmationService>();
+        services.AddSingleton<IMailMimeMessageFactory, MailMimeMessageFactory>();
+        services.AddSingleton<IGmailApiSendClient, GmailApiSendClient>();
+        services.AddSingleton<ISmtpClientSessionFactory, MailKitSmtpClientSessionFactory>();
+        services.AddSingleton<ISmtpSubmissionClient, MailKitSmtpSubmissionClient>();
+        services.AddSingleton<IImapSentCopySessionFactory, MailKitImapSentCopySessionFactory>();
+        services.AddSingleton<IImapSentCopyClient, MailKitImapSentCopyClient>();
+        services.AddSingleton<IMailSendProvider, GmailMailSendProvider>();
+        services.AddSingleton<IMailSendProvider, SmtpMailSendProvider>();
+        services.AddSingleton<IMailSendProviderFactory, MailSendProviderFactory>();
         services.AddSingleton<INotificationSoundPlayer, WindowsNotificationSoundPlayer>();
         services.AddSingleton<INotificationPermissionPrompt, WpfNotificationPermissionPrompt>();
         services.AddSingleton<INotificationPermissionCoordinator, NotificationPermissionCoordinator>();
@@ -253,6 +265,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IWindowActivationService, WpfWindowActivationService>();
         services.AddSingleton<IWebNotificationCoordinator, WebNotificationCoordinator>();
         services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton<MailComposeViewModel>();
         services.AddSingleton<MailInboxViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<IWebViewEventCoordinator, WebViewEventCoordinator>();

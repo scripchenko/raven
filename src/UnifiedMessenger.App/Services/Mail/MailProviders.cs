@@ -73,7 +73,8 @@ public sealed class YandexMailProvider(IMailConnectionValidator validator) : Pas
             | MailProviderCapabilities.IdentityValidation
             | MailProviderCapabilities.PasswordAuthentication
             | MailProviderCapabilities.MessageListing
-            | MailProviderCapabilities.MessageReading,
+            | MailProviderCapabilities.MessageReading
+            | MailProviderCapabilities.Sending,
         "Используйте пароль приложения Яндекса, а не основной пароль аккаунта.");
 
     public override MailConnectionSettings CreateConnectionSettings(
@@ -93,7 +94,8 @@ public sealed class MailRuMailProvider(IMailConnectionValidator validator) : Pas
             | MailProviderCapabilities.IdentityValidation
             | MailProviderCapabilities.PasswordAuthentication
             | MailProviderCapabilities.MessageListing
-            | MailProviderCapabilities.MessageReading,
+            | MailProviderCapabilities.MessageReading
+            | MailProviderCapabilities.Sending,
         "Используйте пароль для внешнего приложения Mail.ru.");
 
     public override MailConnectionSettings CreateConnectionSettings(
@@ -113,7 +115,8 @@ public sealed class GenericImapMailProvider(IMailConnectionValidator validator) 
             | MailProviderCapabilities.IdentityValidation
             | MailProviderCapabilities.PasswordAuthentication
             | MailProviderCapabilities.MessageListing
-            | MailProviderCapabilities.MessageReading,
+            | MailProviderCapabilities.MessageReading
+            | MailProviderCapabilities.Sending,
         "Укажите параметры IMAP и SMTP, выданные вашим почтовым провайдером.");
 
     public override MailConnectionSettings? CreateConnectionSettings(
@@ -148,7 +151,8 @@ public sealed class GmailApiProvider : IMailProvider
         MailProviderCapabilities.OAuthAuthentication
             | MailProviderCapabilities.IdentityValidation
             | MailProviderCapabilities.MessageListing
-            | MailProviderCapabilities.MessageReading,
+            | MailProviderCapabilities.MessageReading
+            | MailProviderCapabilities.Sending,
         "Авторизация откроется в системном браузере. Пароль Google в UnifiedMessenger не вводится.");
 
     public Task<MailConnectionValidationResult> ValidateAsync(

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
@@ -44,9 +45,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private bool _isReadStateMetadataUpdate;
     private bool _disposed;
 
-    public MailInboxViewModel(IMailReadProviderFactory providerFactory)
+    public MailInboxViewModel(
+        IMailReadProviderFactory providerFactory,
+        MailComposeViewModel? composeViewModel = null)
     {
         _providerFactory = providerFactory;
+        Compose = composeViewModel ?? MailComposeViewModel.CreateUnavailable();
+        Compose.PropertyChanged += OnComposePropertyChanged;
+        Compose.Sent += OnMailSent;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, CanRefresh);
         LoadMoreCommand = new AsyncRelayCommand(LoadMoreAsync, CanLoadMore);
         RetryCommand = new AsyncRelayCommand(RetryAsync, CanRetry);
@@ -57,6 +63,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<MailFolder> Folders { get; } = [];
     public ObservableCollection<MailMessageSummary> Messages { get; } = [];
+    public MailComposeViewModel Compose { get; }
 
     public IAsyncRelayCommand RefreshCommand { get; }
     public IAsyncRelayCommand LoadMoreCommand { get; }
@@ -307,6 +314,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     }
 
     public bool IsActive => ActiveAccount is { IsEnabled: true };
+    public bool IsComposeOpen => Compose.IsOpen;
     public bool HasFolders => Folders.Count > 0;
     public bool HasMessages => Messages.Count > 0;
     public bool HasMore => !string.IsNullOrWhiteSpace(ContinuationToken);
@@ -405,6 +413,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         long version = ++_viewVersion;
         _activationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         ActiveAccount = account;
+        Compose.ActivateAccount(account);
         IsListLoading = false;
         IsMessageLoading = false;
         ReadStateErrorMessage = null;
@@ -455,6 +464,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
         _remoteImageConsents.RemoveWhere(key => key.AccountId == accountId);
         _messageBodyCache.RemoveWhere(key => key.AccountId == accountId);
+        Compose.RemoveAccount(accountId);
         if (ActiveAccount?.Id == accountId)
         {
             ActiveAccount = null;
@@ -471,6 +481,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         CancelActivation();
+        Compose.PropertyChanged -= OnComposePropertyChanged;
+        Compose.Sent -= OnMailSent;
+        Compose.Dispose();
         _folderStates.Clear();
         _accountFolderStates.Clear();
         _messageBodyCache.Clear();
@@ -1079,6 +1092,42 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         return state;
     }
 
+    internal bool IsFolderStateStale(Guid accountId, MailFolderKind kind)
+    {
+        AccountFolderState account = GetAccountFolderState(accountId);
+        MailFolder? folder = account.Folders.FirstOrDefault(item => item.Kind == kind);
+        return folder is not null && !GetState(accountId, folder.Key).HasLoaded;
+    }
+
+    private void OnComposePropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName is nameof(MailComposeViewModel.IsOpen)
+            or nameof(MailComposeViewModel.IsClosed)
+            or nameof(MailComposeViewModel.Draft))
+        {
+            OnPropertyChanged(nameof(IsComposeOpen));
+        }
+    }
+
+    private void OnMailSent(object? sender, MailSentEventArgs eventArgs)
+    {
+        if (!eventArgs.SentCopySaved)
+        {
+            return;
+        }
+
+        if (!_accountFolderStates.TryGetValue(eventArgs.AccountId, out AccountFolderState? accountState))
+        {
+            return;
+        }
+
+        MailFolder? sentFolder = accountState.Folders.FirstOrDefault(folder => folder.Kind is MailFolderKind.Sent);
+        if (sentFolder is not null)
+        {
+            GetState(eventArgs.AccountId, sentFolder.Key).MarkStale();
+        }
+    }
+
     private AccountFolderState GetAccountFolderState(Guid accountId)
     {
         if (!_accountFolderStates.TryGetValue(accountId, out AccountFolderState? state))
@@ -1220,6 +1269,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
         public void PrepareRefresh()
         {
+            ContinuationToken = null;
+            ListErrorMessage = null;
+            FailureKind = null;
+        }
+
+        public void MarkStale()
+        {
+            HasLoaded = false;
             ContinuationToken = null;
             ListErrorMessage = null;
             FailureKind = null;

@@ -297,6 +297,11 @@ public partial class MainWindow : Window
 
     private async void OnMailInboxViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
+        if (eventArgs.PropertyName == nameof(MailInboxViewModel.IsComposeOpen))
+        {
+            _mailRendererWindowLifecycle.SetComposeActive(_mailInboxViewModel.IsComposeOpen);
+        }
+
         if (!ShouldRefreshMailRendererContent(_mailInboxViewModel, eventArgs.PropertyName))
         {
             return;
@@ -311,7 +316,9 @@ public partial class MainWindow : Window
         propertyName switch
         {
             nameof(MailInboxViewModel.SelectedMessageContent) => !viewModel.IsReadStateMetadataUpdate,
-            nameof(MailInboxViewModel.ActiveAccount) or nameof(MailInboxViewModel.IsMessageLoading) => true,
+            nameof(MailInboxViewModel.ActiveAccount)
+                or nameof(MailInboxViewModel.IsMessageLoading)
+                or nameof(MailInboxViewModel.IsComposeOpen) => true,
             _ => false
         };
 
@@ -929,6 +936,7 @@ public partial class MainWindow : Window
         ResetRemoteImagesWhenSelectionChanges(account?.Id, content?.MessageKey);
         if (!_isRuntimeAvailable
             || _mailInboxViewModel.IsMessageLoading
+            || _mailInboxViewModel.IsComposeOpen
             || content?.BodyKind is not MailMessageBodyKind.SanitizedHtml
             || _mailInboxViewModel.ActiveAccount is null
             || _viewModel.SelectedMailAccount?.Id != _mailInboxViewModel.ActiveAccount.Id)
@@ -1099,7 +1107,9 @@ public partial class MainWindow : Window
             _viewModel.SelectedService is not null,
             _mailInboxViewModel.ActiveAccount is { IsEnabled: true }
                 && _viewModel.SelectedMailAccount?.Id == _mailInboxViewModel.ActiveAccount.Id,
-            _mailInboxViewModel.SelectedMessageContent?.BodyKind);
+            _mailInboxViewModel.IsComposeOpen
+                ? null
+                : _mailInboxViewModel.SelectedMessageContent?.BodyKind);
 
     private Rectangle GetDirectWebViewBounds()
         => GetElementClientBounds(WebViewContainer);

@@ -17,6 +17,7 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
         string? htmlBody = message.HtmlBody;
         MailMessageBodyKind bodyKind;
         string bodyContent;
+        string safePlainText;
         IReadOnlyList<MailRemoteImageReference> remoteImages;
         if (!string.IsNullOrWhiteSpace(htmlBody))
         {
@@ -28,6 +29,12 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
             {
                 bodyContent = $"<p>{EmptyBodyText}</p>";
             }
+
+            safePlainText = NormalizePlainText(message.TextBody);
+            if (string.IsNullOrWhiteSpace(safePlainText))
+            {
+                safePlainText = ExtractSafePlainText(bodyContent);
+            }
         }
         else
         {
@@ -38,6 +45,8 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
             {
                 bodyContent = EmptyBodyText;
             }
+
+            safePlainText = bodyContent;
         }
 
         (string displayName, string address) = GetPrimaryMailbox(message.From);
@@ -52,7 +61,17 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
             bodyContent,
             remoteImages,
             isUnread,
-            message.Attachments.Any());
+            message.Attachments.Any(),
+            safePlainText,
+            new MailReplyMetadata(
+                FormatAddresses(message.ReplyTo),
+                NormalizeMessageId(message.MessageId),
+                message.References
+                    .Select(NormalizeMessageId)
+                    .Where(value => value is not null)
+                    .Select(value => value!)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray()));
     }
 
     internal static (string DisplayName, string Address) GetPrimaryMailbox(InternetAddressList? addresses)
@@ -149,5 +168,69 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
         }
 
         return output.ToString().Trim();
+    }
+
+    internal static string ExtractSafePlainText(string sanitizedHtml)
+    {
+        if (string.IsNullOrWhiteSpace(sanitizedHtml))
+        {
+            return string.Empty;
+        }
+
+        HtmlAgilityPack.HtmlDocument document = new();
+        document.LoadHtml(sanitizedHtml);
+        StringBuilder output = new(sanitizedHtml.Length);
+        AppendVisibleText(document.DocumentNode, output);
+        return NormalizePlainText(HtmlEntity.DeEntitize(output.ToString()));
+    }
+
+    private static void AppendVisibleText(HtmlNode node, StringBuilder output)
+    {
+        if (node.NodeType is HtmlNodeType.Comment
+            || node.Name is "script" or "style" or "head" or "noscript")
+        {
+            return;
+        }
+
+        if (node.NodeType is HtmlNodeType.Text)
+        {
+            output.Append(node.InnerText);
+            return;
+        }
+
+        bool isListItem = node.Name is "li";
+        bool isBreak = node.Name is "br";
+        bool isBlock = node.Name is "p" or "div" or "section" or "article" or "header" or "footer"
+            or "table" or "tr" or "ul" or "ol" or "blockquote" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6";
+        if (isBreak)
+        {
+            output.AppendLine();
+            return;
+        }
+
+        if (isListItem)
+        {
+            output.Append("• ");
+        }
+
+        foreach (HtmlNode child in node.ChildNodes)
+        {
+            AppendVisibleText(child, output);
+        }
+
+        if (isListItem)
+        {
+            output.AppendLine();
+        }
+        else if (isBlock)
+        {
+            output.AppendLine().AppendLine();
+        }
+    }
+
+    private static string? NormalizeMessageId(string? value)
+    {
+        string normalized = value?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 }

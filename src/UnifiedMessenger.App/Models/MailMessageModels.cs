@@ -52,6 +52,14 @@ public sealed record MailImageContent(
         $"data:{ContentType};base64,{Convert.ToBase64String(Bytes.Span)}";
 }
 
+public sealed record MailReplyMetadata(
+    string ReplyTo,
+    string? MessageId,
+    IReadOnlyList<string> References)
+{
+    internal string? ProviderThreadId { get; init; }
+}
+
 public sealed record MailMessageContent(
     string MessageKey,
     string Subject,
@@ -63,7 +71,9 @@ public sealed record MailMessageContent(
     string BodyContent,
     IReadOnlyList<MailRemoteImageReference> RemoteImages,
     bool IsUnread,
-    bool HasAttachments)
+    bool HasAttachments,
+    string SafePlainTextContent = "",
+    MailReplyMetadata? ReplyMetadata = null)
 {
     public DateTime ReceivedAtLocal => ReceivedAt.ToLocalTime().DateTime;
 

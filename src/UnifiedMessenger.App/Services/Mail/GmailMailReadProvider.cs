@@ -26,7 +26,7 @@ internal sealed record GmailApiInboxPage(
     IReadOnlyList<GmailApiSummaryData> Items,
     string? NextPageToken);
 
-internal sealed record GmailApiRawMessage(byte[] RawMime, bool IsUnread);
+internal sealed record GmailApiRawMessage(byte[] RawMime, bool IsUnread, string? ThreadId = null);
 
 internal interface IGmailApiReadClient
 {
@@ -192,7 +192,18 @@ internal sealed class GmailMailReadProvider(
         {
             using MemoryStream stream = new(raw.RawMime, writable: false);
             MimeMessage message = await MimeMessage.LoadAsync(stream, cancellationToken);
-            return contentExtractor.Extract(messageKey, message, raw.IsUnread);
+            MailMessageContent content = contentExtractor.Extract(messageKey, message, raw.IsUnread);
+            if (!string.IsNullOrWhiteSpace(raw.ThreadId))
+            {
+                MailReplyMetadata metadata = content.ReplyMetadata
+                    ?? new MailReplyMetadata(string.Empty, null, []);
+                content = content with
+                {
+                    ReplyMetadata = metadata with { ProviderThreadId = raw.ThreadId }
+                };
+            }
+
+            return content;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -429,7 +440,8 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
 
             return new GmailApiRawMessage(
                 DecodeBase64Url(response.Raw),
-                response.LabelIds?.Contains(GmailSystemFolders.Unread, StringComparer.Ordinal) == true);
+                response.LabelIds?.Contains(GmailSystemFolders.Unread, StringComparer.Ordinal) == true,
+                response.ThreadId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
