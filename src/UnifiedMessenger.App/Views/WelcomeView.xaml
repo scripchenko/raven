@@ -34,7 +34,7 @@
                                HorizontalAlignment="Center"
                                FontSize="30"
                                FontWeight="SemiBold"
-                               Text="Добро пожаловать в UnifiedMessenger" />
+                               Text="Добро пожаловать в Lantern" />
                     <TextBlock MaxWidth="620"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}"

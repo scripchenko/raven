@@ -24,7 +24,7 @@
                        TextWrapping="Wrap" />
             <TextBlock Margin="0,14,0,0"
                        Foreground="{DynamicResource TextSecondaryBrush}"
-                       Text="Откройте официальную страницу Microsoft, установите Evergreen Runtime и снова запустите UnifiedMessenger."
+                       Text="Откройте официальную страницу Microsoft, установите Evergreen Runtime и снова запустите Lantern."
                        TextWrapping="Wrap" />
         </StackPanel>
 

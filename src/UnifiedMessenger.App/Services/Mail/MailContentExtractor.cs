@@ -74,7 +74,8 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
                     .Distinct(StringComparer.Ordinal)
                     .ToArray()))
         {
-            Attachments = attachments
+            Attachments = attachments,
+            HasUnambiguousFromAddress = message.From.Count == 1 && message.From[0] is MailboxAddress
         };
     }
 

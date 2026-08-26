@@ -1,5 +1,4 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using System.Globalization;
 using System.Text.Json.Serialization;
 
 namespace UnifiedMessenger.App.Models;
@@ -35,6 +34,7 @@ public sealed partial class ServiceInstance : ObservableObject
 
     private int? _unreadCount;
     private bool _hasUnreadActivity;
+    private int _lanternUnviewedActivityCount;
 
     [ObservableProperty]
     private DateTimeOffset? _lastOpenedAt;
@@ -49,7 +49,7 @@ public sealed partial class ServiceInstance : ObservableObject
             {
                 OnPropertyChanged(nameof(UnreadBadgeText));
                 OnPropertyChanged(nameof(ShowUnreadBadge));
-                OnPropertyChanged(nameof(ShowUnreadDot));
+                OnPropertyChanged(nameof(SidebarBadgeCount));
             }
         }
     }
@@ -63,28 +63,46 @@ public sealed partial class ServiceInstance : ObservableObject
             if (SetProperty(ref _hasUnreadActivity, value))
             {
                 OnPropertyChanged(nameof(ShowUnreadBadge));
-                OnPropertyChanged(nameof(ShowUnreadDot));
+                OnPropertyChanged(nameof(UnreadBadgeText));
+                OnPropertyChanged(nameof(SidebarBadgeCount));
             }
         }
     }
 
     [JsonIgnore]
-    public string? UnreadBadgeText => UnreadCount is > 99
-        ? "99+"
-        : UnreadCount is > 0
-            ? UnreadCount.Value.ToString(CultureInfo.InvariantCulture)
-            : null;
+    public int LanternUnviewedActivityCount
+    {
+        get => _lanternUnviewedActivityCount;
+        set
+        {
+            int normalized = Math.Max(0, value);
+            if (SetProperty(ref _lanternUnviewedActivityCount, normalized))
+            {
+                OnPropertyChanged(nameof(UnreadBadgeText));
+                OnPropertyChanged(nameof(ShowUnreadBadge));
+                OnPropertyChanged(nameof(SidebarBadgeCount));
+            }
+        }
+    }
 
     [JsonIgnore]
-    public bool ShowUnreadBadge => IsEnabled && UnreadCount is > 0;
+    public int SidebarBadgeCount => UnreadCount is > 0
+        ? UnreadCount.Value
+        : LanternUnviewedActivityCount > 0
+            ? LanternUnviewedActivityCount
+            : HasUnreadActivity
+                ? 1
+                : 0;
 
     [JsonIgnore]
-    public bool ShowUnreadDot => IsEnabled && HasUnreadActivity && UnreadCount is not > 0;
+    public string? UnreadBadgeText => SidebarBadgeFormatter.Format(SidebarBadgeCount);
+
+    [JsonIgnore]
+    public bool ShowUnreadBadge => IsEnabled && SidebarBadgeCount > 0;
 
     partial void OnIsEnabledChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowUnreadBadge));
-        OnPropertyChanged(nameof(ShowUnreadDot));
     }
 }
 

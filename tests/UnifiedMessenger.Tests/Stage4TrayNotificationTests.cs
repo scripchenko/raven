@@ -373,7 +373,7 @@ public sealed class Stage4TrayNotificationTests
     }
 
     [Fact]
-    public void NotificationActivity_DoesNotInventCount()
+    public void NotificationActivity_UsesSeparateLocalUnviewedEventCount()
     {
         ServiceActivityCoordinator coordinator = new();
         ServiceInstance service = CreateService(ServiceType.Max);
@@ -382,7 +382,9 @@ public sealed class Stage4TrayNotificationTests
 
         Assert.True(service.HasUnreadActivity);
         Assert.Null(service.UnreadCount);
-        Assert.True(service.ShowUnreadDot);
+        Assert.Equal(1, service.LanternUnviewedActivityCount);
+        Assert.Equal("1", service.UnreadBadgeText);
+        Assert.True(service.ShowUnreadBadge);
     }
 
     [Fact]
@@ -512,7 +514,8 @@ public sealed class Stage4TrayNotificationTests
         coordinator.UpdateFromDocumentTitle(service, "(0) Telegram", markActivity: false);
 
         Assert.True(service.HasUnreadActivity);
-        Assert.True(service.ShowUnreadDot);
+        Assert.Equal(1, service.LanternUnviewedActivityCount);
+        Assert.True(service.ShowUnreadBadge);
     }
 
     [Fact]
@@ -525,7 +528,6 @@ public sealed class Stage4TrayNotificationTests
         service.IsEnabled = false;
 
         Assert.False(service.ShowUnreadBadge);
-        Assert.False(service.ShowUnreadDot);
     }
 
     [Fact]
@@ -541,7 +543,7 @@ public sealed class Stage4TrayNotificationTests
 
         string tooltip = coordinator.CreateTrayToolTip([first, second]);
 
-        Assert.Equal("UnifiedMessenger — 5 непрочитанных", tooltip);
+        Assert.Equal("Lantern — 5 непрочитанных", tooltip);
     }
 
     [Fact]
@@ -553,7 +555,7 @@ public sealed class Stage4TrayNotificationTests
 
         string tooltip = coordinator.CreateTrayToolTip([service]);
 
-        Assert.Equal("UnifiedMessenger — есть новые события", tooltip);
+        Assert.Equal("Lantern — есть новые события", tooltip);
     }
 
     [Fact]

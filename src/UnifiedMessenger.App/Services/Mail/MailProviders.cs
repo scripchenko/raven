@@ -153,7 +153,7 @@ public sealed class GmailApiProvider : IMailProvider
             | MailProviderCapabilities.MessageListing
             | MailProviderCapabilities.MessageReading
             | MailProviderCapabilities.Sending,
-        "Авторизация откроется в системном браузере. Пароль Google в UnifiedMessenger не вводится.");
+        "Авторизация откроется в системном браузере. Пароль Google в Lantern не вводится.");
 
     public Task<MailConnectionValidationResult> ValidateAsync(
         MailAccountConnectionRequest request,

@@ -16,7 +16,10 @@ internal sealed record ImapSummaryData(
     string FromAddress,
     DateTimeOffset ReceivedAt,
     bool IsUnread,
-    uint UidValidity = 0);
+    uint UidValidity = 0)
+{
+    public MailMessageAttachmentSummary AttachmentSummary { get; init; } = MailMessageAttachmentSummary.Empty;
+}
 
 internal sealed record ImapInboxPageData(IReadOnlyList<ImapSummaryData> Items, string? NextCursor);
 internal sealed record ImapMessageData(MimeMessage Message, bool IsUnread);
@@ -24,6 +27,12 @@ internal sealed record ImapFolderDescriptor(MailFolderKind Kind, string FullName
 
 internal interface IImapInboxClient
 {
+    Task<int> GetInboxUnreadCountAsync(
+        MailServerSettings server,
+        string secret,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(0);
+
     Task<ImapInboxPageData> GetInboxPageAsync(
         MailServerSettings server,
         string secret,
@@ -93,13 +102,22 @@ internal sealed class ImapMailReadProvider(
     IMailProviderFactory providerFactory,
     IImapInboxClient inboxClient,
     IMailContentExtractor contentExtractor,
-    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider
 {
     private const string MessageKeyPrefix = "imap:";
     private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
 
     public bool Supports(MailProviderType providerType) =>
         providerType is MailProviderType.Yandex or MailProviderType.MailRu or MailProviderType.GenericImap;
+
+    public async Task<int> GetInboxUnreadCountAsync(
+        MailAccount account,
+        CancellationToken cancellationToken = default)
+    {
+        MailServerSettings server = ResolveImapSettings(account, pageSize: 1);
+        MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+        return await inboxClient.GetInboxUnreadCountAsync(server, credential.Secret, cancellationToken);
+    }
 
     public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
         MailAccount account,
@@ -291,7 +309,10 @@ internal sealed class ImapMailReadProvider(
             item.FromAddress,
             item.ReceivedAt,
             string.Empty,
-            item.IsUnread);
+            item.IsUnread)
+        {
+            AttachmentSummary = item.AttachmentSummary
+        };
 
     internal static MailMessageSummary MapSummary(ImapSummaryData item) =>
         new(
@@ -301,7 +322,10 @@ internal sealed class ImapMailReadProvider(
             item.FromAddress,
             item.ReceivedAt,
             string.Empty,
-            item.IsUnread);
+            item.IsUnread)
+        {
+            AttachmentSummary = item.AttachmentSummary
+        };
 
     internal static string CreateMessageKey(MailFolderKind folderKind, uint uidValidity, uint uniqueId) =>
         $"{MessageKeyPrefix}{(int)folderKind}:{uidValidity.ToString(CultureInfo.InvariantCulture)}:{uniqueId.ToString(CultureInfo.InvariantCulture)}";
@@ -401,6 +425,37 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
     internal static FolderAccess InboxAccess => FolderAccess.ReadOnly;
     internal static FolderAccess MutationAccess => FolderAccess.ReadWrite;
 
+    public async Task<int> GetInboxUnreadCountAsync(
+        MailServerSettings server,
+        string secret,
+        CancellationToken cancellationToken = default)
+    {
+        using ImapClient client = new();
+        try
+        {
+            await ConnectAndAuthenticateAsync(client, server, secret, cancellationToken);
+            IMailFolder inbox = client.Inbox;
+            await inbox.StatusAsync(StatusItems.Unread, cancellationToken);
+            return Math.Max(0, inbox.Unread);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (MailKit.Security.AuthenticationException)
+        {
+            throw new MailReadException(MailReadFailureKind.AuthenticationFailed, "Не удалось войти в почту. Проверьте пароль приложения.");
+        }
+        catch (Exception exception) when (IsExpectedConnectionException(exception))
+        {
+            throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось получить число непрочитанных писем.");
+        }
+        finally
+        {
+            await DisconnectQuietlyAsync(client);
+        }
+    }
+
     public Task<ImapInboxPageData> GetInboxPageAsync(
         MailServerSettings server,
         string secret,
@@ -499,7 +554,11 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             IList<IMessageSummary> fetched = await mailFolder.FetchAsync(
                 startIndex,
                 endIndex,
-                MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.InternalDate | MessageSummaryItems.Flags,
+                MessageSummaryItems.UniqueId
+                    | MessageSummaryItems.Envelope
+                    | MessageSummaryItems.InternalDate
+                    | MessageSummaryItems.Flags
+                    | MessageSummaryItems.BodyStructure,
                 cancellationToken);
             ImapSummaryData[] summaries = fetched
                 .Where(summary => summary.UniqueId.IsValid)
@@ -682,7 +741,22 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             address,
             summary.InternalDate ?? summary.Envelope?.Date ?? DateTimeOffset.MinValue,
             summary.Flags?.HasFlag(MessageFlags.Seen) != true,
-            uidValidity);
+            uidValidity)
+        {
+            AttachmentSummary = GetAttachmentSummary(summary.Attachments)
+        };
+    }
+
+    internal static MailMessageAttachmentSummary GetAttachmentSummary(IEnumerable<BodyPartBasic>? attachments)
+    {
+        IEnumerable<MailAttachmentPreviewItem> previews = (attachments ?? [])
+            .Where(part => string.IsNullOrWhiteSpace(part.ContentId))
+            .Select(part => new MailAttachmentPreviewItem(
+                MailAttachmentFileName.Sanitize(part.FileName),
+                part.ContentType?.MimeType ?? "application/octet-stream",
+                part.Octets >= 0 ? part.Octets : null));
+
+        return MailMessageAttachmentSummary.Create(previews);
     }
 
     private static void EnsureUidValidity(IMailFolder folder, uint expectedUidValidity)

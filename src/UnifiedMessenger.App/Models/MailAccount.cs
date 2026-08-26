@@ -35,10 +35,35 @@ public sealed partial class MailAccount : ObservableObject
     [ObservableProperty]
     private int _sortOrder;
 
+    private int? _inboxUnreadCount;
+
     [JsonIgnore]
     public string DisplayLabel => string.IsNullOrWhiteSpace(DisplayName) ? EmailAddress : DisplayName;
+
+    [JsonIgnore]
+    public int? InboxUnreadCount
+    {
+        get => _inboxUnreadCount;
+        set
+        {
+            int? normalized = value is null ? null : Math.Max(0, value.Value);
+            if (SetProperty(ref _inboxUnreadCount, normalized))
+            {
+                OnPropertyChanged(nameof(UnreadBadgeText));
+                OnPropertyChanged(nameof(ShowUnreadBadge));
+            }
+        }
+    }
+
+    [JsonIgnore]
+    public string? UnreadBadgeText => SidebarBadgeFormatter.Format(InboxUnreadCount ?? 0);
+
+    [JsonIgnore]
+    public bool ShowUnreadBadge => IsEnabled && InboxUnreadCount is > 0;
 
     partial void OnDisplayNameChanged(string? value) => OnPropertyChanged(nameof(DisplayLabel));
 
     partial void OnEmailAddressChanged(string value) => OnPropertyChanged(nameof(DisplayLabel));
+
+    partial void OnIsEnabledChanged(bool value) => OnPropertyChanged(nameof(ShowUnreadBadge));
 }

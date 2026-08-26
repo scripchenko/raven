@@ -126,7 +126,7 @@
                                     <TextBlock FontWeight="SemiBold" Text="Закрывать окно в трей" />
                                     <TextBlock Margin="0,6,0,0"
                                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="Если выключено, крестик полностью завершает UnifiedMessenger."
+                                               Text="Если выключено, крестик полностью завершает Lantern."
                                                TextWrapping="Wrap" />
                                 </StackPanel>
                                 <CheckBox Grid.Column="1"
@@ -383,7 +383,7 @@
                                    Text="О программе" />
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <StackPanel>
-                                <TextBlock FontSize="25" FontWeight="SemiBold" Text="UnifiedMessenger" />
+                                <TextBlock FontSize="25" FontWeight="SemiBold" Text="Lantern" />
                                 <TextBlock Margin="0,6,0,0"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
                                            Text="{Binding ApplicationVersion, StringFormat=Версия {0}}" />

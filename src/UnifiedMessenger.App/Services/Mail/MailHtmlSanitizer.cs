@@ -74,6 +74,8 @@ public sealed class MailHtmlSanitizer : IMailHtmlSanitizer
         HtmlAgilityPack.HtmlDocument source = new();
         source.LoadHtml(html);
         NormalizeResponsiveImages(source);
+        InlineSafeEmbeddedPresentationColors(source);
+        NormalizeLegacyPresentationColors(source);
         NormalizePresentationStyles(source);
         List<MailRemoteImageReference> remoteImages = [];
         int inlineImageCount = PrepareImageSources(source, message, remoteImages);
@@ -138,6 +140,332 @@ public sealed class MailHtmlSanitizer : IMailHtmlSanitizer
         }
     }
 
+    private static void InlineSafeEmbeddedPresentationColors(HtmlAgilityPack.HtmlDocument document)
+    {
+        HtmlNode[] styleNodes = document.DocumentNode.SelectNodes("//style")?.ToArray() ?? [];
+        if (styleNodes.Length == 0)
+        {
+            return;
+        }
+
+        HtmlNode[] elements = document.DocumentNode
+            .Descendants()
+            .Where(node => node.NodeType is HtmlNodeType.Element && node.Name is not "style")
+            .ToArray();
+        Dictionary<HtmlNode, Dictionary<string, AppliedStaticColor>> safeStyles = [];
+        int sourceOrder = 0;
+        foreach (HtmlNode styleNode in styleNodes)
+        {
+            string css = HtmlEntity.DeEntitize(styleNode.InnerText);
+            ICssStyleSheet? styleSheet;
+            try
+            {
+                styleSheet = StyleParser.ParseStyleSheet(css);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (ICssStyleRule rule in EnumerateApplicableStyleRules(styleSheet.Rules))
+            {
+                IReadOnlyList<StaticColorDeclaration> safeDeclarations =
+                    ExtractSafeStaticColorDeclarations(rule.Style);
+                if (safeDeclarations.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (string selectorText in rule.SelectorText.Split(','))
+                {
+                    if (!TryParsePresentationSelector(selectorText, out PresentationSelector selector))
+                    {
+                        continue;
+                    }
+
+                    foreach (HtmlNode element in elements.Where(selector.Matches))
+                    {
+                        if (!safeStyles.TryGetValue(
+                            element,
+                            out Dictionary<string, AppliedStaticColor>? declarations))
+                        {
+                            declarations = new Dictionary<string, AppliedStaticColor>(StringComparer.OrdinalIgnoreCase);
+                            safeStyles[element] = declarations;
+                        }
+
+                        foreach (StaticColorDeclaration declaration in safeDeclarations)
+                        {
+                            AppliedStaticColor candidate = new(
+                                declaration.Value,
+                                declaration.Important,
+                                selector.Specificity,
+                                sourceOrder);
+                            if (!declarations.TryGetValue(declaration.PropertyName, out AppliedStaticColor current)
+                                || candidate.HasPrecedenceOver(current))
+                            {
+                                declarations[declaration.PropertyName] = candidate;
+                            }
+                        }
+                    }
+                }
+
+                sourceOrder++;
+            }
+        }
+
+        foreach ((HtmlNode node, Dictionary<string, AppliedStaticColor> declarations) in safeStyles)
+        {
+            string inlineStyle = node.GetAttributeValue("style", string.Empty);
+            string embeddedStyle = string.Join(
+                ';',
+                declarations.Select(pair =>
+                    $"{pair.Key}:{pair.Value.Value}" + (pair.Value.Important ? " !important" : string.Empty)));
+            node.SetAttributeValue(
+                "style",
+                string.IsNullOrWhiteSpace(inlineStyle)
+                    ? embeddedStyle
+                    : $"{embeddedStyle};{inlineStyle}");
+        }
+    }
+
+    private static IEnumerable<ICssStyleRule> EnumerateApplicableStyleRules(ICssRuleList rules)
+    {
+        foreach (ICssRule rule in rules)
+        {
+            if (rule is ICssStyleRule styleRule)
+            {
+                yield return styleRule;
+                continue;
+            }
+
+            if (rule is ICssMediaRule mediaRule
+                && IsUnconditionalScreenMedia(mediaRule.Media.MediaText))
+            {
+                foreach (ICssStyleRule nested in EnumerateApplicableStyleRules(mediaRule.Rules))
+                {
+                    yield return nested;
+                }
+            }
+        }
+    }
+
+    private static bool IsUnconditionalScreenMedia(string mediaText)
+    {
+        string normalized = mediaText.Trim();
+        return string.Equals(normalized, "all", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "screen", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void NormalizeLegacyPresentationColors(HtmlAgilityPack.HtmlDocument document)
+    {
+        foreach (HtmlNode node in document.DocumentNode.SelectNodes("//*[@bgcolor]")?.ToArray() ?? [])
+        {
+            string legacyColor = HtmlEntity.DeEntitize(node.GetAttributeValue("bgcolor", string.Empty)).Trim();
+            string safeColor = NormalizeStaticCssValue("background-color", legacyColor);
+            if (!string.IsNullOrWhiteSpace(safeColor))
+            {
+                string inlineStyle = node.GetAttributeValue("style", string.Empty);
+                node.SetAttributeValue(
+                    "style",
+                    string.IsNullOrWhiteSpace(inlineStyle)
+                        ? $"background-color:{safeColor}"
+                        : $"background-color:{safeColor};{inlineStyle}");
+            }
+
+            node.Attributes.Remove("bgcolor");
+        }
+    }
+
+    private static IReadOnlyList<StaticColorDeclaration> ExtractSafeStaticColorDeclarations(
+        ICssStyleDeclaration source)
+    {
+        List<StaticColorDeclaration> declarations = [];
+        AddSafeStaticColor(source, declarations, "background-color");
+        AddSafeStaticColor(source, declarations, "color");
+        AddSafeStaticColor(source, declarations, "border-color");
+        AddSafeStaticColor(source, declarations, "border-top-color");
+        AddSafeStaticColor(source, declarations, "border-right-color");
+        AddSafeStaticColor(source, declarations, "border-bottom-color");
+        AddSafeStaticColor(source, declarations, "border-left-color");
+        return declarations;
+    }
+
+    private static void AddSafeStaticColor(
+        ICssStyleDeclaration source,
+        ICollection<StaticColorDeclaration> target,
+        string propertyName)
+    {
+        if (source.GetProperty(propertyName) is null)
+        {
+            return;
+        }
+
+        string value = NormalizeStaticCssValue(propertyName, source.GetPropertyValue(propertyName));
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            target.Add(new StaticColorDeclaration(propertyName, value, IsImportant(source, propertyName)));
+        }
+    }
+
+    private static bool IsImportant(ICssStyleDeclaration declaration, string propertyName) =>
+        string.Equals(
+            declaration.GetPropertyPriority(propertyName),
+            "important",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeStaticCssValue(string propertyName, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || ContainsDynamicOrExternalCss(value))
+        {
+            return string.Empty;
+        }
+
+        ICssStyleDeclaration? declaration = StyleParser.ParseDeclaration($"{propertyName}:{value};");
+        return declaration?.GetPropertyValue(propertyName)?.Trim() ?? string.Empty;
+    }
+
+    private static bool ContainsDynamicOrExternalCss(string value) =>
+        value.Contains("url(", StringComparison.OrdinalIgnoreCase)
+        || value.Contains("image-set(", StringComparison.OrdinalIgnoreCase)
+        || value.Contains("expression(", StringComparison.OrdinalIgnoreCase)
+        || value.Contains("javascript:", StringComparison.OrdinalIgnoreCase)
+        || value.Contains("var(", StringComparison.OrdinalIgnoreCase)
+        || value.Contains("@import", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryParsePresentationSelector(string selectorText, out PresentationSelector selector)
+    {
+        selector = default;
+        string value = selectorText.Trim();
+        if (string.IsNullOrWhiteSpace(value)
+            || value.Any(character => character is '+' or '~' or '[' or ']' or ':' or '*'))
+        {
+            return false;
+        }
+
+        List<SimplePresentationSelector> segments = [];
+        List<PresentationCombinator> combinators = [];
+        int index = 0;
+        while (index < value.Length)
+        {
+            int segmentStart = index;
+            while (index < value.Length && !char.IsWhiteSpace(value[index]) && value[index] != '>')
+            {
+                index++;
+            }
+
+            if (segmentStart == index
+                || !TryParseSimpleSelectorSegment(
+                    value[segmentStart..index],
+                    out SimplePresentationSelector segment))
+            {
+                return false;
+            }
+
+            segments.Add(segment);
+            bool hadWhitespace = false;
+            while (index < value.Length && char.IsWhiteSpace(value[index]))
+            {
+                hadWhitespace = true;
+                index++;
+            }
+
+            if (index >= value.Length)
+            {
+                break;
+            }
+
+            if (value[index] == '>')
+            {
+                combinators.Add(PresentationCombinator.Child);
+                index++;
+                while (index < value.Length && char.IsWhiteSpace(value[index]))
+                {
+                    index++;
+                }
+            }
+            else if (hadWhitespace)
+            {
+                combinators.Add(PresentationCombinator.Descendant);
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        if (segments.Count == 0 || combinators.Count != segments.Count - 1)
+        {
+            return false;
+        }
+
+        selector = new PresentationSelector(segments.ToArray(), combinators.ToArray());
+        return true;
+    }
+
+    private static bool TryParseSimpleSelectorSegment(
+        string value,
+        out SimplePresentationSelector selector)
+    {
+        selector = default;
+        int index = 0;
+        string? tagName = null;
+        string? id = null;
+        List<string> classes = [];
+        if (value[0] is not '.' and not '#')
+        {
+            tagName = ReadCssIdentifier(value, ref index);
+            if (string.IsNullOrWhiteSpace(tagName))
+            {
+                return false;
+            }
+        }
+
+        while (index < value.Length)
+        {
+            char prefix = value[index++];
+            if (prefix is not '.' and not '#')
+            {
+                return false;
+            }
+
+            string identifier = ReadCssIdentifier(value, ref index);
+            if (string.IsNullOrWhiteSpace(identifier))
+            {
+                return false;
+            }
+
+            if (prefix == '#')
+            {
+                if (id is not null)
+                {
+                    return false;
+                }
+
+                id = identifier;
+            }
+            else
+            {
+                classes.Add(identifier);
+            }
+        }
+
+        selector = new SimplePresentationSelector(tagName, id, classes.ToArray());
+        return tagName is not null || id is not null || classes.Count > 0;
+    }
+
+    private static string ReadCssIdentifier(string value, ref int index)
+    {
+        int start = index;
+        while (index < value.Length
+            && (char.IsLetterOrDigit(value[index]) || value[index] is '-' or '_'))
+        {
+            index++;
+        }
+
+        return value[start..index];
+    }
+
     private static void NormalizePresentationStyles(HtmlAgilityPack.HtmlDocument document)
     {
         foreach (HtmlNode node in document.DocumentNode.SelectNodes("//*[@style]")?.ToArray() ?? [])
@@ -148,14 +476,15 @@ public sealed class MailHtmlSanitizer : IMailHtmlSanitizer
                 continue;
             }
 
-            ICssProperty? backgroundProperty = declaration.GetProperty("background");
-            if (backgroundProperty is null)
+            if (!IsExpandedBackgroundShorthand(declaration))
             {
                 continue;
             }
 
-            string backgroundColor = ExtractBackgroundColor(declaration.GetPropertyValue("background"));
-            string priority = declaration.GetPropertyPriority("background") ?? string.Empty;
+            string backgroundColor = NormalizeStaticCssValue(
+                "background-color",
+                declaration.GetPropertyValue("background-color"));
+            string priority = declaration.GetPropertyPriority("background-color") ?? string.Empty;
             declaration.RemoveProperty("background");
             string normalizedStyle = declaration.CssText;
             if (!string.IsNullOrWhiteSpace(backgroundColor))
@@ -170,10 +499,113 @@ public sealed class MailHtmlSanitizer : IMailHtmlSanitizer
         }
     }
 
-    private static string ExtractBackgroundColor(string parsedBackground)
+    private static bool IsExpandedBackgroundShorthand(ICssStyleDeclaration declaration) =>
+        declaration.GetProperty("background-color") is not null
+        && declaration.GetProperty("background-position-x") is not null
+        && declaration.GetProperty("background-position-y") is not null;
+
+    private readonly record struct PresentationSelector(
+        IReadOnlyList<SimplePresentationSelector> Segments,
+        IReadOnlyList<PresentationCombinator> Combinators)
     {
-        ICssStyleDeclaration? colorDeclaration = StyleParser.ParseDeclaration($"color:{parsedBackground};");
-        return colorDeclaration?.GetPropertyValue("color") ?? string.Empty;
+        public int Specificity => Segments.Sum(segment => segment.Specificity);
+
+        public bool Matches(HtmlNode node)
+        {
+            int segmentIndex = Segments.Count - 1;
+            if (!Segments[segmentIndex].Matches(node))
+            {
+                return false;
+            }
+
+            HtmlNode? current = node;
+            while (segmentIndex > 0)
+            {
+                PresentationCombinator combinator = Combinators[segmentIndex - 1];
+                segmentIndex--;
+                if (combinator is PresentationCombinator.Child)
+                {
+                    current = current?.ParentNode;
+                    if (current is null || !Segments[segmentIndex].Matches(current))
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                current = current?.ParentNode;
+                while (current is not null && !Segments[segmentIndex].Matches(current))
+                {
+                    current = current.ParentNode;
+                }
+
+                if (current is null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    private readonly record struct SimplePresentationSelector(
+        string? TagName,
+        string? Id,
+        IReadOnlyList<string> Classes)
+    {
+        public int Specificity => (Id is null ? 0 : 100) + (Classes.Count * 10) + (TagName is null ? 0 : 1);
+
+        public bool Matches(HtmlNode node)
+        {
+            if (TagName is not null && !string.Equals(node.Name, TagName, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (Id is not null
+                && !string.Equals(node.GetAttributeValue("id", string.Empty), Id, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (Classes.Count == 0)
+            {
+                return true;
+            }
+
+            HashSet<string> elementClasses = node
+                .GetAttributeValue("class", string.Empty)
+                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .ToHashSet(StringComparer.Ordinal);
+            return Classes.All(elementClasses.Contains);
+        }
+    }
+
+    private readonly record struct StaticColorDeclaration(
+        string PropertyName,
+        string Value,
+        bool Important);
+
+    private readonly record struct AppliedStaticColor(
+        string Value,
+        bool Important,
+        int Specificity,
+        int SourceOrder)
+    {
+        public bool HasPrecedenceOver(AppliedStaticColor other) =>
+            Important != other.Important
+                ? Important
+                : Specificity != other.Specificity
+                    ? Specificity > other.Specificity
+                    : SourceOrder >= other.SourceOrder;
+    }
+
+    private enum PresentationCombinator
+    {
+        Descendant,
+        Child
     }
 
     private static string SelectImageSource(HtmlNode node)

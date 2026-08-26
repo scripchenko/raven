@@ -168,6 +168,48 @@ public sealed class Stage74MailMessageCacheTests
         Assert.False(rendererRefreshDecisions[0]);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ManualReadStateMutation_PreservesPrintBodySelectionAndRendererReadiness(
+        bool initiallyUnread)
+    {
+        CountingReadProvider provider = new([MailFolderCatalog.Inbox()])
+        {
+            ReturnBodyKind = MailMessageBodyKind.SanitizedHtml
+        };
+        provider.SetPage(MailFolderCatalog.Inbox(), [Summary("printable", initiallyUnread)]);
+        using MailInboxViewModel viewModel = CreateViewModel(provider);
+        MailAccount account = Account(MailProviderType.Gmail, 1);
+        await viewModel.ActivateAsync(account);
+        await OpenAsync(viewModel, "printable");
+        viewModel.SetPrintAvailable(isAvailable: true);
+        int rendererRefreshRequests = 0;
+        viewModel.PropertyChanged += (_, eventArgs) =>
+        {
+            if (MainWindow.ShouldRefreshMailRendererContent(viewModel, eventArgs.PropertyName))
+            {
+                rendererRefreshRequests++;
+            }
+        };
+
+        Assert.True(viewModel.CanPrintMessage);
+        await viewModel.SetReadStateCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.CanPrintMessage);
+        Assert.Equal("printable", viewModel.SelectedMessageSummary?.MessageKey);
+        Assert.Equal("printable", viewModel.SelectedMessageContent?.MessageKey);
+        Assert.Equal(1, provider.FetchCount(account.Id, "printable"));
+        Assert.Equal(0, rendererRefreshRequests);
+
+        viewModel.BackToMessageListCommand.Execute(null);
+        Assert.False(viewModel.CanPrintMessage);
+
+        viewModel.OpenMessageCommand.Execute(viewModel.SelectedMessageSummary);
+        Assert.True(viewModel.CanPrintMessage);
+        Assert.Equal(1, provider.FetchCount(account.Id, "printable"));
+    }
+
     [Fact]
     public async Task ReadStateMutation_PreservesRemoteImageConsent()
     {

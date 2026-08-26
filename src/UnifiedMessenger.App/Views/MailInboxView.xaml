@@ -1,109 +1,307 @@
 <UserControl x:Class="UnifiedMessenger.App.Views.MailInboxView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:models="clr-namespace:UnifiedMessenger.App.Models"
              Background="{DynamicResource WindowBackgroundBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+
+        <Geometry x:Key="MailFolderInboxGeometry">M2,3 L16,3 16,15 2,15 Z M2,10 L6,10 7.5,12 10.5,12 12,10 16,10</Geometry>
+        <Geometry x:Key="MailFolderSentGeometry">M2,9 L16,2 11,16 8,10 Z M8,10 L16,2</Geometry>
+        <Geometry x:Key="MailFolderDraftGeometry">M4,2 L11,2 15,6 15,16 4,16 Z M11,2 L11,6 15,6 M7,9 L12,9 M7,12 L12,12</Geometry>
+        <Geometry x:Key="MailFolderSpamGeometry">M9,2 L17,16 1,16 Z M9,7 L9,11 M9,13 L9,14</Geometry>
+        <Geometry x:Key="MailFolderTrashGeometry">M4,5 L14,5 13,16 5,16 Z M3,5 L15,5 M6,5 L6,3 12,3 12,5 M7,8 L7,13 M11,8 L11,13</Geometry>
+
+        <Style x:Key="MailFolderItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="FolderBackground"
+                                Padding="12,8"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="10">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="FolderBackground" Property="Background" Value="#FFEAF2FF" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="FolderBackground" Property="Background" Value="#FFDDEAFF" />
+                                <Setter Property="Foreground" Value="#FF2356B8" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MailMessageButtonStyle" TargetType="Button">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="MessageButtonBackground"
+                                Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Stretch" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="MessageButtonBackground" Property="Background" Value="#FFF4F6F8" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="MessageButtonBackground" Property="Background" Value="#FFE2ECFC" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MailSecondaryButtonStyle" TargetType="Button">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="SecondaryBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SecondaryBorder" Property="Background" Value="#FFF3F6FA" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MailDetailToolbarButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Padding" Value="8" />
+            <Setter Property="Foreground" Value="#FF34445A" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ToolbarButtonBackground"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="20">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ToolbarButtonBackground" Property="Background" Value="#FFF0F3F7" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ToolbarButtonBackground" Property="Background" Value="#FFE2E8F0" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="ToolbarButtonBackground" Property="BorderBrush" Value="#FF2D7DFF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MailToolbarIconViewboxStyle" TargetType="Viewbox">
+            <Setter Property="Width" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="StretchDirection" Value="Both" />
+        </Style>
+
+        <Style x:Key="MailComposeButtonStyle" TargetType="Button">
+            <Setter Property="MinHeight" Value="46" />
+            <Setter Property="Padding" Value="16,0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Foreground" Value="#FF245BB5" />
+            <Setter Property="Background" Value="#FFE7F0FF" />
+            <Setter Property="BorderBrush" Value="#FFD5E3F8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ComposeBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="16">
+                            <StackPanel HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal">
+                                <Path Width="18"
+                                      Height="18"
+                                      Margin="0,0,10,0"
+                                      Data="M3,14 L4,10 12,2 16,6 8,14 Z M10,4 L14,8"
+                                      Fill="Transparent"
+                                      Stroke="{TemplateBinding Foreground}"
+                                      StrokeLineJoin="Round"
+                                      StrokeThickness="1.6" />
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ComposeBorder" Property="Background" Value="#FFDCEAFF" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ComposeBorder" Property="Background" Value="#FFCFE1FC" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Grid Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="82" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="218" />
+            <ColumnDefinition Width="1" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <Border Grid.Row="0"
-                Padding="22,12"
-                Background="{DynamicResource SurfaceBrush}"
-                BorderBrush="{DynamicResource DividerBrush}"
-                BorderThickness="0,0,0,1">
+        <Border x:Name="MailNavigationPanel"
+                Grid.Column="0"
+                Padding="14,18"
+                Background="#FFF8FAFC">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontSize="18"
-                                   FontWeight="SemiBold"
-                                   Text="{Binding SelectedFolder.DisplayName, TargetNullValue=Почта}" />
-                        <Border Margin="10,0,0,0"
-                                Padding="8,2"
-                                Background="{DynamicResource AccentSoftBrush}"
-                                CornerRadius="8">
-                            <TextBlock FontSize="12"
-                                       Foreground="{DynamicResource AccentBrush}"
-                                       Text="{Binding ProviderDisplayName}" />
-                        </Border>
-                    </StackPanel>
-                    <TextBlock Margin="0,5,0,0"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="{Binding EmailAddress}" />
-                </StackPanel>
-                <StackPanel Grid.Column="1"
-                            VerticalAlignment="Center"
-                            Orientation="Horizontal">
-                    <TextBlock Margin="0,0,14,0"
-                               VerticalAlignment="Center"
-                               Foreground="#FF237A3B"
-                               Text="{Binding Compose.StatusMessage}"
-                               Visibility="{Binding Compose.HasStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Margin="0,0,10,0"
-                            Command="{Binding Compose.NewMessageCommand}"
-                            Content="Написать"
-                            Style="{StaticResource PrimaryButtonStyle}" />
-                    <Button Command="{Binding RefreshCommand}"
-                            Content="Обновить"
-                            Style="{StaticResource PrimaryButtonStyle}" />
-                </StackPanel>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Button
+                        HorizontalAlignment="Stretch"
+                        Command="{Binding Compose.NewMessageCommand}"
+                        Content="Написать"
+                        FontSize="14"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource MailComposeButtonStyle}" />
+
+                <ListBox Grid.Row="1"
+                         Margin="0,16,0,0"
+                         ItemsSource="{Binding Folders}"
+                         SelectedItem="{Binding SelectedFolder, Mode=TwoWay}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         HorizontalContentAlignment="Stretch"
+                         ItemContainerStyle="{StaticResource MailFolderItemStyle}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="24" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="FolderIcon"
+                                      Width="18"
+                                      Height="18"
+                                      HorizontalAlignment="Left"
+                                      VerticalAlignment="Center"
+                                      Data="{StaticResource MailFolderInboxGeometry}"
+                                      Fill="Transparent"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                      StrokeLineJoin="Round"
+                                      StrokeThickness="1.4"
+                                      Stretch="Uniform" />
+                                <TextBlock Grid.Column="1"
+                                           VerticalAlignment="Center"
+                                           FontSize="14"
+                                           Text="{Binding DisplayName}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Sent}">
+                                    <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderSentGeometry}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Drafts}">
+                                    <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderDraftGeometry}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Spam}">
+                                    <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderSpamGeometry}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Trash}">
+                                    <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderTrashGeometry}" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1"
-              Visibility="{Binding Compose.IsClosed, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="156" MinWidth="130" MaxWidth="170" />
-                <ColumnDefinition Width="1" />
-                <ColumnDefinition Width="360" MinWidth="300" MaxWidth="410" />
-                <ColumnDefinition Width="1" />
-                <ColumnDefinition Width="*" MinWidth="330" />
-            </Grid.ColumnDefinitions>
+        <Border Grid.Column="1" Background="{DynamicResource DividerBrush}" />
 
-            <ListBox Grid.Column="0"
-                     Padding="8,12"
-                     ItemsSource="{Binding Folders}"
-                     SelectedItem="{Binding SelectedFolder, Mode=TwoWay}"
-                     Background="{DynamicResource SurfaceBrush}"
-                     BorderThickness="0"
-                     HorizontalContentAlignment="Stretch">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="Margin" Value="0,2" />
-                    </Style>
-                </ListBox.ItemContainerStyle>
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <TextBlock Padding="10,9"
-                                   Text="{Binding DisplayName}"
-                                   TextTrimming="CharacterEllipsis" />
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-
-            <Border Grid.Column="1" Background="{DynamicResource DividerBrush}" />
-
-            <Grid Grid.Column="2" Background="{DynamicResource SurfaceBrush}">
+        <Grid Grid.Column="2" Background="{DynamicResource SurfaceBrush}">
+            <Grid x:Name="MessageListSurface"
+                  Visibility="{Binding IsMessageListVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="44" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <ListBox Grid.Row="0"
+                <Border Padding="18,0"
+                        Background="White"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="0,0,0,1">
+                    <Button Width="34"
+                            Height="34"
+                            HorizontalAlignment="Left"
+                            AutomationProperties.Name="Обновить"
+                            Command="{Binding RefreshCommand}"
+                            Content="↻"
+                            FontSize="18"
+                            Style="{StaticResource ToolbarButtonStyle}"
+                            ToolTip="Обновить" />
+                </Border>
+
+                <ListBox Grid.Row="1"
                          ItemsSource="{Binding Messages}"
-                         SelectedItem="{Binding SelectedMessageSummary, Mode=TwoWay}"
+                         Background="White"
                          BorderThickness="0"
+                         HorizontalContentAlignment="Stretch"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          Visibility="{Binding HasMessages, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <ListBox.ItemContainerStyle>
@@ -111,53 +309,164 @@
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                             <Setter Property="Padding" Value="0" />
                             <Setter Property="BorderThickness" Value="0" />
+                            <Setter Property="Focusable" Value="False" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <ContentPresenter />
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
                         </Style>
                     </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Border Padding="16,13"
-                                    BorderBrush="{DynamicResource DividerBrush}"
-                                    BorderThickness="0,0,0,1">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBlock x:Name="SenderText"
-                                               Margin="0,0,10,0"
-                                               FontWeight="Normal"
-                                               Text="{Binding SenderDisplay}"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="1"
-                                               FontSize="12"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="{Binding DisplayDate}" />
-                                    <TextBlock x:Name="SubjectText"
-                                               Grid.Row="1"
-                                               Grid.ColumnSpan="2"
-                                               Margin="0,5,0,0"
-                                               FontWeight="Normal"
-                                               Text="{Binding Subject}"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Row="2"
-                                               Grid.ColumnSpan="2"
-                                               Margin="0,5,0,0"
-                                               FontSize="12"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"
-                                               MaxHeight="36"
-                                               Text="{Binding Preview}"
-                                               TextTrimming="CharacterEllipsis"
-                                               TextWrapping="Wrap" />
-                                </Grid>
-                            </Border>
+                            <Button x:Name="MessageButton"
+                                    Command="{Binding DataContext.OpenMessageCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                    CommandParameter="{Binding}"
+                                    Style="{StaticResource MailMessageButtonStyle}">
+                                <Border x:Name="MessageRow"
+                                        MinHeight="46"
+                                        Padding="20,7"
+                                        Background="Transparent"
+                                        BorderBrush="{DynamicResource DividerBrush}"
+                                        BorderThickness="0,0,0,1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="180" MinWidth="140" />
+                                            <ColumnDefinition Width="*" MinWidth="180" />
+                                            <ColumnDefinition Width="78" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="SenderText"
+                                                   Margin="0,0,18,0"
+                                                   VerticalAlignment="Center"
+                                                   FontSize="14.5"
+                                                   FontWeight="Normal"
+                                                   Text="{Binding SenderDisplay}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <Grid Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" MaxWidth="320" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="SubjectText"
+                                                           FontSize="14.5"
+                                                           FontWeight="Normal"
+                                                           Text="{Binding Subject}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1"
+                                                           Margin="8,0,0,0"
+                                                           FontSize="14"
+                                                           Foreground="#FF5F6368"
+                                                           Text="{Binding Preview, StringFormat=— {0}}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </Grid>
+                                            <StackPanel Grid.Row="1"
+                                                        Margin="0,6,0,0"
+                                                        Orientation="Horizontal"
+                                                        Visibility="{Binding HasAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <ItemsControl ItemsSource="{Binding AttachmentPreviewItems}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <StackPanel Orientation="Horizontal" />
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border Height="26"
+                                                                    MaxWidth="164"
+                                                                    Margin="0,0,5,0"
+                                                                    Padding="5,0,8,0"
+                                                                    Background="#FFF8FAFC"
+                                                                    BorderBrush="#FFD5DAE1"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="7"
+                                                                    ToolTip="{Binding DisplayFileName}">
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <Border x:Name="AttachmentTypeBadge"
+                                                                            Width="28"
+                                                                            Height="18"
+                                                                            VerticalAlignment="Center"
+                                                                            Background="#FFE7EBF0"
+                                                                            CornerRadius="4">
+                                                                        <TextBlock x:Name="AttachmentTypeText"
+                                                                                   HorizontalAlignment="Center"
+                                                                                   VerticalAlignment="Center"
+                                                                                   FontSize="8.5"
+                                                                                   FontWeight="Bold"
+                                                                                   Foreground="#FF5F6875"
+                                                                                   Text="{Binding TypeLabel}" />
+                                                                    </Border>
+                                                                    <TextBlock MaxWidth="112"
+                                                                               Margin="6,0,0,0"
+                                                                               VerticalAlignment="Center"
+                                                                               FontSize="12.5"
+                                                                               Foreground="#FF3C4043"
+                                                                               Text="{Binding DisplayFileName}"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                            </Border>
+                                                            <DataTemplate.Triggers>
+                                                                <DataTrigger Binding="{Binding VisualType}" Value="{x:Static models:MailAttachmentVisualType.Pdf}">
+                                                                    <Setter TargetName="AttachmentTypeBadge" Property="Background" Value="#FFFCE8E6" />
+                                                                    <Setter TargetName="AttachmentTypeText" Property="Foreground" Value="#FFC5221F" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding VisualType}" Value="{x:Static models:MailAttachmentVisualType.Image}">
+                                                                    <Setter TargetName="AttachmentTypeBadge" Property="Background" Value="#FFE2F4EF" />
+                                                                    <Setter TargetName="AttachmentTypeText" Property="Foreground" Value="#FF13795B" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding VisualType}" Value="{x:Static models:MailAttachmentVisualType.Document}">
+                                                                    <Setter TargetName="AttachmentTypeBadge" Property="Background" Value="#FFE4EEFF" />
+                                                                    <Setter TargetName="AttachmentTypeText" Property="Foreground" Value="#FF245BB5" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding VisualType}" Value="{x:Static models:MailAttachmentVisualType.Spreadsheet}">
+                                                                    <Setter TargetName="AttachmentTypeBadge" Property="Background" Value="#FFE3F3E8" />
+                                                                    <Setter TargetName="AttachmentTypeText" Property="Foreground" Value="#FF188038" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding VisualType}" Value="{x:Static models:MailAttachmentVisualType.Archive}">
+                                                                    <Setter TargetName="AttachmentTypeBadge" Property="Background" Value="#FFFFEFCB" />
+                                                                    <Setter TargetName="AttachmentTypeText" Property="Foreground" Value="#FFA15C00" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding VisualType}" Value="{x:Static models:MailAttachmentVisualType.Text}">
+                                                                    <Setter TargetName="AttachmentTypeBadge" Property="Background" Value="#FFE9EEF5" />
+                                                                    <Setter TargetName="AttachmentTypeText" Property="Foreground" Value="#FF53657D" />
+                                                                </DataTrigger>
+                                                            </DataTemplate.Triggers>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                                <Border Height="26"
+                                                        Padding="8,0"
+                                                        Background="#FFE7EEF8"
+                                                        BorderBrush="#FFD2DCEB"
+                                                        BorderThickness="1"
+                                                        CornerRadius="7"
+                                                        Visibility="{Binding HasMoreAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock VerticalAlignment="Center"
+                                                               FontSize="12.5"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               Text="{Binding RemainingAttachmentText}" />
+                                                </Border>
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Grid.Column="2"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Right"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   Text="{Binding DisplayDate}" />
+                                    </Grid>
+                                </Border>
+                            </Button>
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsUnread}" Value="True">
+                                    <Setter TargetName="MessageButton" Property="Background" Value="#FFF2F6FC" />
                                     <Setter TargetName="SenderText" Property="FontWeight" Value="SemiBold" />
                                     <Setter TargetName="SubjectText" Property="FontWeight" Value="SemiBold" />
                                 </DataTrigger>
@@ -166,10 +475,10 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
 
-                <StackPanel Grid.Row="1"
-                            Margin="14,10"
+                <StackPanel Grid.Row="2"
+                            Margin="18,10"
                             HorizontalAlignment="Center">
-                    <TextBlock MaxWidth="340"
+                    <TextBlock MaxWidth="560"
                                Margin="0,0,0,8"
                                Foreground="#FFB42318"
                                Text="{Binding ListErrorMessage}"
@@ -192,7 +501,7 @@
                     </TextBlock>
                     <Button Command="{Binding LoadMoreCommand}"
                             Content="Загрузить ещё"
-                            Style="{StaticResource PrimaryButtonStyle}"
+                            Style="{StaticResource MailSecondaryButtonStyle}"
                             Visibility="{Binding HasMore, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ProgressBar Width="180"
                                  Height="3"
@@ -201,19 +510,19 @@
                                  Visibility="{Binding IsListLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </StackPanel>
 
-                <Grid Grid.RowSpan="2"
-                      Background="{DynamicResource SurfaceBrush}"
+                <Grid Grid.Row="1"
+                      Background="White"
                       Visibility="{Binding IsInitialLoading, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <ProgressBar Width="200" Height="4" IsIndeterminate="True" />
-                        <TextBlock Margin="0,16,0,0"
+                        <ProgressBar Width="180" Height="4" IsIndeterminate="True" />
+                        <TextBlock Margin="0,14,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
                                    Text="Загружаем почту…" />
                     </StackPanel>
                 </Grid>
 
-                <Grid Grid.RowSpan="2"
-                      Background="{DynamicResource SurfaceBrush}"
+                <Grid Grid.Row="1"
+                      Background="White"
                       Visibility="{Binding IsEmpty, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <TextBlock HorizontalAlignment="Center"
                                VerticalAlignment="Center"
@@ -221,461 +530,538 @@
                                Text="В этой папке пока нет писем." />
                 </Grid>
 
-                <Grid Grid.RowSpan="2"
-                      Background="{DynamicResource SurfaceBrush}"
+                <Grid Grid.Row="1"
+                      Background="White"
                       Visibility="{Binding HasBlockingListError, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <StackPanel MaxWidth="320" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel MaxWidth="380" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <TextBlock HorizontalAlignment="Center"
                                    FontSize="19"
                                    FontWeight="SemiBold"
                                    Text="{Binding ErrorTitle}"
                                    TextAlignment="Center" />
-                        <TextBlock Margin="0,10,0,18"
+                        <TextBlock Margin="0,9,0,16"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
                                    Text="{Binding ListErrorMessage}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap" />
-                        <Button HorizontalAlignment="Center"
-                                Command="{Binding RetryCommand}"
+                        <Button Command="{Binding RetryCommand}"
                                 Content="Повторить"
                                 Style="{StaticResource PrimaryButtonStyle}" />
                     </StackPanel>
                 </Grid>
             </Grid>
 
-            <Border Grid.Column="3" Background="{DynamicResource DividerBrush}" />
+            <Grid x:Name="MessageDetailSurface"
+                  Background="White"
+                  Visibility="{Binding IsMessageDetailVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="56" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-            <Grid Grid.Column="4" Background="{DynamicResource WindowBackgroundBrush}">
-                <Grid Visibility="{Binding HasSelectedContent, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Border Padding="30,24,30,20"
-                            Background="{DynamicResource SurfaceBrush}"
-                            BorderBrush="{DynamicResource DividerBrush}"
-                            BorderThickness="0,0,0,1">
-                        <StackPanel>
-                            <TextBlock FontSize="24"
-                                       FontWeight="SemiBold"
-                                       LineHeight="32"
-                                       Text="{Binding SelectedMessageContent.Subject}"
-                                       TextWrapping="Wrap" />
-                            <Grid Margin="0,18,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock FontSize="15"
-                                               FontWeight="SemiBold"
-                                               Text="{Binding SelectedMessageContent.SenderDisplay}"
-                                               TextWrapping="Wrap" />
-                                    <TextBlock Margin="0,3,0,0"
-                                               FontSize="13"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="{Binding SelectedMessageContent.FromAddress}"
-                                               TextWrapping="Wrap" />
-                                    <TextBlock Margin="0,4,0,0"
-                                               FontSize="13"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="{Binding EmailAddress, StringFormat=кому: {0}}"
-                                               TextWrapping="Wrap" />
-                                </StackPanel>
-                                <TextBlock Grid.Column="1"
-                                           Margin="18,1,0,0"
-                                           FontSize="13"
-                                           Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="{Binding SelectedMessageContent.ReceivedAtLocal, StringFormat={}{0:G}}" />
-                            </Grid>
-                            <StackPanel Margin="0,14,0,0"
-                                        Visibility="{Binding HasAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Margin="0,0,0,7"
-                                           FontSize="14"
-                                           FontWeight="SemiBold"
-                                           Text="Вложения" />
-                                <ItemsControl ItemsSource="{Binding SelectedMessageContent.Attachments}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Border Margin="0,0,0,6"
-                                                    Padding="10,7"
-                                                    Background="#FFF5F7FA"
-                                                    CornerRadius="8">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel>
-                                                        <TextBlock FontWeight="SemiBold"
-                                                                   Text="{Binding FileName}"
-                                                                   TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Margin="0,2,0,0"
-                                                                   FontSize="11"
-                                                                   Foreground="{DynamicResource TextSecondaryBrush}">
-                                                            <Run Text="{Binding DisplaySize, Mode=OneWay}" />
-                                                            <Run Text=" · " />
-                                                            <Run Text="{Binding ContentType, Mode=OneWay}" />
-                                                        </TextBlock>
-                                                    </StackPanel>
-                                                    <Button Grid.Column="2"
-                                                            Margin="12,0,0,0"
-                                                            Padding="12,6"
-                                                            Command="{Binding DataContext.SaveAttachmentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                            CommandParameter="{Binding}"
-                                                            Content="Сохранить" />
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                                <TextBlock Margin="0,2,0,0"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="{Binding AttachmentStatusMessage}"
-                                           TextWrapping="Wrap"
-                                           Visibility="{Binding HasAttachmentStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,14,0,0">
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Margin="0,0,8,0"
-                                            Padding="14,7"
-                                            Command="{Binding Compose.ReplyCommand}"
-                                            CommandParameter="{Binding SelectedMessageContent}"
-                                            Content="Ответить"
-                                            Style="{StaticResource PrimaryButtonStyle}" />
-                                    <Button Margin="0,0,8,0"
-                                            Padding="14,7"
-                                            Command="{Binding Compose.ForwardCommand}"
-                                            CommandParameter="{Binding SelectedMessageContent}"
-                                            Content="Переслать"
-                                            Style="{StaticResource PrimaryButtonStyle}" />
-                                    <Button Padding="14,7"
-                                            Command="{Binding SetReadStateCommand}"
-                                            Content="{Binding ReadStateActionText}"
-                                            IsEnabled="{Binding CanChangeReadState}"
-                                            Style="{StaticResource PrimaryButtonStyle}"
-                                            Visibility="{Binding ShowReadStateAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                </StackPanel>
-                                <StackPanel Visibility="{Binding RequiresGmailAuthorization, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <TextBlock MaxWidth="520"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="{Binding ReadStateAuthorizationText}"
-                                               TextWrapping="Wrap" />
-                                    <Button Margin="0,8,0,0"
-                                            HorizontalAlignment="Left"
-                                            Padding="14,7"
-                                            Command="{Binding AuthorizeGmailCommand}"
-                                            Content="Разрешить"
-                                            Style="{StaticResource PrimaryButtonStyle}" />
-                                </StackPanel>
-                                <TextBlock Margin="0,8,0,0"
-                                           Foreground="#FFB42318"
-                                           Text="{Binding ReadStateErrorMessage}"
-                                           TextWrapping="Wrap"
-                                           Visibility="{Binding HasReadStateError, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Row="1"
-                            Padding="18,10"
-                            Background="#FFFFF4CE"
-                            BorderBrush="#FFE6C45C"
-                            BorderThickness="0,0,0,1"
-                            Visibility="{Binding ShowRemoteImagesBanner, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <Grid>
+                <Border Padding="18,0"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="0,0,0,1">
+                    <StackPanel HorizontalAlignment="Left" Orientation="Horizontal">
+                        <Button HorizontalAlignment="Left"
+                                AutomationProperties.Name="Назад к списку"
+                                Command="{Binding BackToMessageListCommand}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Назад к списку">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="M20,12 L5,12 M11,6 L5,12 L11,18"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeStartLineCap="Round"
+                                          StrokeThickness="1.8" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="{Binding ReadStateActionText}"
+                                Command="{Binding SetReadStateCommand}"
+                                IsEnabled="{Binding CanChangeReadState}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="{Binding ReadStateActionText}"
+                                Visibility="{Binding ShowReadStateAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeStartLineCap="Round"
+                                          StrokeThickness="1.65">
+                                        <Path.Style>
+                                            <Style TargetType="Path">
+                                                <Setter Property="Data" Value="M3.5,6.5 L20.5,6.5 L20.5,17.5 L3.5,17.5 Z M4,7 L12,13 L20,7" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SelectedMessageSummary.IsUnread}" Value="True">
+                                                        <Setter Property="Data" Value="M3.5,10 L12,4 L20.5,10 L20.5,19.5 L3.5,19.5 Z M4,10 L12,16 L20,10" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Path.Style>
+                                    </Path>
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="Ответить"
+                                Command="{Binding Compose.ReplyCommand}"
+                                CommandParameter="{Binding SelectedMessageContent}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Ответить">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="M10,6.5 L4,12 L10,17.5 M5,12 L13,12 C17.5,12 20,14.5 20,19"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeStartLineCap="Round"
+                                          StrokeThickness="1.8" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="Переслать"
+                                Command="{Binding Compose.ForwardCommand}"
+                                CommandParameter="{Binding SelectedMessageContent}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Переслать">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="M14,6.5 L20,12 L14,17.5 M19,12 L11,12 C6.5,12 4,14.5 4,19"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeStartLineCap="Round"
+                                          StrokeThickness="1.8" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="Распечатать письмо"
+                                Click="Print_Click"
+                                IsEnabled="{Binding CanPrintMessage}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Распечатать письмо"
+                                Visibility="{Binding ShowPrintAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="M6.5,9 L6.5,4 L17.5,4 L17.5,9 M6.5,17 L4,17 L4,10 L20,10 L20,17 L17.5,17 M6.5,14.5 L17.5,14.5 L17.5,21 L6.5,21 Z M17,12 L18,12"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeStartLineCap="Round"
+                                          StrokeThickness="1.7" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1"
+                        Padding="28,20,28,16"
+                        Background="White"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="0,0,0,1"
+                        Visibility="{Binding HasSelectedContent, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock FontSize="23"
+                                   FontWeight="SemiBold"
+                                   LineHeight="31"
+                                   Text="{Binding SelectedMessageContent.Subject}"
+                                   TextWrapping="Wrap" />
+                        <Grid Margin="0,14,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock VerticalAlignment="Center"
-                                       Foreground="#FF5C4800"
-                                       Text="Внешние изображения заблокированы для защиты конфиденциальности."
-                                       TextWrapping="Wrap" />
+                            <StackPanel>
+                                <TextBlock FontSize="15"
+                                           FontWeight="SemiBold"
+                                           Text="{Binding SelectedMessageContent.SenderDisplay}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Margin="0,3,0,0"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding SelectedMessageContent.FromAddress}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Margin="0,3,0,0"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding SelectedMessageContent.To, StringFormat=Кому: {0}}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="1"
+                                       Margin="18,1,0,0"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="{Binding SelectedMessageDisplayDate}" />
+                        </Grid>
+
+                        <StackPanel Margin="0,13,0,0"
+                                    Visibility="{Binding HasAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Margin="0,0,0,7"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Text="Вложения" />
+                            <ItemsControl ItemsSource="{Binding SelectedMessageContent.Attachments}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="0,0,0,6"
+                                                Padding="10,7"
+                                                Background="#FFF5F7FA"
+                                                CornerRadius="8">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock FontWeight="SemiBold"
+                                                               Text="{Binding FileName}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Margin="0,2,0,0"
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}">
+                                                        <Run Text="{Binding DisplaySize, Mode=OneWay}" />
+                                                        <Run Text=" · " />
+                                                        <Run Text="{Binding ContentType, Mode=OneWay}" />
+                                                    </TextBlock>
+                                                </StackPanel>
+                                                <Button Grid.Column="1"
+                                                        Margin="12,0,0,0"
+                                                        Command="{Binding DataContext.SaveAttachmentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                        CommandParameter="{Binding}"
+                                                        Content="Сохранить"
+                                                        Style="{StaticResource MailSecondaryButtonStyle}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Margin="0,2,0,0"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="{Binding AttachmentStatusMessage}"
+                                       TextWrapping="Wrap"
+                                       Visibility="{Binding HasAttachmentStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </StackPanel>
+
+                        <StackPanel Margin="0,13,0,0">
+                            <StackPanel Margin="0,10,0,0"
+                                        Visibility="{Binding RequiresGmailAuthorization, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock MaxWidth="620"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding ReadStateAuthorizationText}"
+                                           TextWrapping="Wrap" />
+                                <Button Margin="0,8,0,0"
+                                        HorizontalAlignment="Left"
+                                        Command="{Binding AuthorizeGmailCommand}"
+                                        Content="Разрешить"
+                                        Style="{StaticResource PrimaryButtonStyle}" />
+                            </StackPanel>
+                            <TextBlock Margin="0,8,0,0"
+                                       Foreground="#FFB42318"
+                                       Text="{Binding ReadStateErrorMessage}"
+                                       TextWrapping="Wrap"
+                                       Visibility="{Binding HasReadStateError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="2"
+                        Padding="18,10"
+                        Background="#FFFFF4CE"
+                        BorderBrush="#FFE6C45C"
+                        BorderThickness="0,0,0,1"
+                        Visibility="{Binding ShowRemoteImagesBanner, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock VerticalAlignment="Center"
+                                   Foreground="#FF5C4800"
+                                   Text="{Binding RemoteImagesBannerText}"
+                                   TextWrapping="Wrap" />
+                        <WrapPanel Margin="0,8,0,0" Orientation="Horizontal">
                             <Button x:Name="ShowRemoteImagesButton"
-                                    Grid.Column="1"
-                                    Margin="16,0,0,0"
+                                    Margin="0,0,8,4"
                                     Padding="18,8"
-                                    HorizontalAlignment="Right"
                                     HorizontalContentAlignment="Center"
-                                    VerticalAlignment="Center"
                                     VerticalContentAlignment="Center"
                                     Click="ShowRemoteImages_Click"
                                     Content="{Binding RemoteImagesButtonText}"
                                     IsEnabled="{Binding CanShowRemoteImages}"
-                                    Style="{StaticResource PrimaryButtonStyle}">
-                                <Button.Template>
-                                    <ControlTemplate TargetType="{x:Type Button}">
-                                        <Border Padding="{TemplateBinding Padding}"
-                                                Background="{TemplateBinding Background}"
-                                                CornerRadius="10">
-                                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
-                                        </Border>
-                                    </ControlTemplate>
-                                </Button.Template>
-                            </Button>
-                        </Grid>
-                    </Border>
-                    <Grid Grid.Row="2" Background="White">
-                        <TextBox Padding="30,26,30,44"
-                                 AcceptsReturn="True"
-                                 Background="White"
-                                 BorderThickness="0"
-                                 FontFamily="Segoe UI"
-                                 FontSize="15"
-                                 IsReadOnly="True"
-                                 Text="{Binding SelectedMessageContent.PlainTextContent, Mode=OneWay}"
-                                 TextWrapping="Wrap"
-                                 VerticalScrollBarVisibility="Auto"
-                                 Visibility="{Binding IsSelectedMessagePlainText, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <Border x:Name="MailHtmlRendererSurface"
-                                Background="White"
-                                Visibility="{Binding IsSelectedMessageHtml, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    </Grid>
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Visibility="{Binding ShowOneTimeRemoteImagesAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Margin="0,0,8,4"
+                                    Padding="14,8"
+                                    Click="AlwaysShowRemoteImagesFromSender_Click"
+                                    Content="Всегда показывать от этого отправителя"
+                                    IsEnabled="{Binding CanAlwaysShowRemoteImagesFromSender}"
+                                    Style="{StaticResource MailSecondaryButtonStyle}"
+                                    Visibility="{Binding ShowAlwaysRemoteImagesFromSenderAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Margin="0,0,8,4"
+                                    Padding="14,8"
+                                    Click="RevokeRemoteImagesFromSender_Click"
+                                    Content="Не показывать автоматически от этого отправителя"
+                                    Style="{StaticResource MailSecondaryButtonStyle}"
+                                    Visibility="{Binding ShowRevokeRemoteImagesFromSenderAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <Grid Grid.Row="3" Background="White">
+                    <TextBox Padding="28,24,28,40"
+                             AcceptsReturn="True"
+                             Background="White"
+                             BorderThickness="0"
+                             FontFamily="Segoe UI"
+                             FontSize="15"
+                             IsReadOnly="True"
+                             Text="{Binding SelectedMessageContent.PlainTextContent, Mode=OneWay}"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Visibility="{Binding IsSelectedMessagePlainText, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Border x:Name="MailHtmlRendererSurface"
+                            Background="White"
+                            Visibility="{Binding ShouldDisplayHtmlRenderer, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <StackPanel HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="{Binding IsMessageLoading, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ProgressBar Width="180" Height="4" IsIndeterminate="True" />
+                        <TextBlock Margin="0,14,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Загружаем письмо…" />
+                    </StackPanel>
+
+                    <StackPanel MaxWidth="380"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="{Binding HasMessageError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock FontSize="19"
+                                   FontWeight="SemiBold"
+                                   Text="Не удалось открыть письмо"
+                                   TextAlignment="Center" />
+                        <TextBlock Margin="0,9,0,16"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="{Binding MessageErrorMessage}"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                        <Button Command="{Binding RetryMessageCommand}"
+                                Content="Повторить"
+                                Style="{StaticResource PrimaryButtonStyle}" />
+                    </StackPanel>
                 </Grid>
-
-                <StackPanel HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Visibility="{Binding ShowMessagePlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <TextBlock FontSize="22" FontWeight="SemiBold" Text="Выберите письмо" />
-                    <TextBlock Margin="0,8,0,0"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="Содержимое откроется здесь в безопасном режиме." />
-                </StackPanel>
-
-                <StackPanel HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Visibility="{Binding IsMessageLoading, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <ProgressBar Width="200" Height="4" IsIndeterminate="True" />
-                    <TextBlock Margin="0,16,0,0"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="Загружаем письмо…" />
-                </StackPanel>
-
-                <StackPanel MaxWidth="380"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Visibility="{Binding HasMessageError, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <TextBlock FontSize="19"
-                               FontWeight="SemiBold"
-                               Text="Не удалось открыть письмо"
-                               TextAlignment="Center" />
-                    <TextBlock Margin="0,10,0,18"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="{Binding MessageErrorMessage}"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap" />
-                    <Button HorizontalAlignment="Center"
-                            Command="{Binding RetryMessageCommand}"
-                            Content="Повторить"
-                            Style="{StaticResource PrimaryButtonStyle}" />
-                </StackPanel>
             </Grid>
-        </Grid>
 
-        <Grid x:Name="ComposeSurface"
-              Grid.Row="1"
-              Margin="34,26"
-              IsEnabled="{Binding Compose.CanEdit}"
-              IsVisibleChanged="ComposeSurface_IsVisibleChanged"
-              Visibility="{Binding Compose.IsOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <Border MaxWidth="980"
-                    Padding="30"
-                    HorizontalAlignment="Stretch"
-                    Background="{DynamicResource SurfaceBrush}"
-                    BorderBrush="{DynamicResource DividerBrush}"
-                    BorderThickness="1"
-                    CornerRadius="18">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="90" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <TextBlock Grid.ColumnSpan="3"
-                               Margin="0,0,0,18"
-                               FontSize="24"
-                               FontWeight="SemiBold"
-                               Text="Новое письмо" />
-
-                    <TextBlock Grid.Row="1"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="От:" />
-                    <TextBox Grid.Row="1"
-                             Grid.Column="1"
-                              Grid.ColumnSpan="2"
-                              Padding="10,7"
-                              IsReadOnly="True"
-                              IsTabStop="False"
-                              Text="{Binding Compose.FromAddress, Mode=OneWay}" />
-
-                    <TextBlock Grid.Row="2"
-                               Margin="0,12,0,0"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="Кому:" />
-                    <TextBox x:Name="ComposeToTextBox"
-                             Grid.Row="2"
-                             Grid.Column="1"
-                             Margin="0,12,0,0"
-                             Padding="10,7"
-                             TabIndex="1"
-                             Text="{Binding Compose.Draft.To, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                    <Button Grid.Row="2"
-                            Grid.Column="2"
-                            Margin="10,12,0,0"
-                            Padding="12,7"
-                            Command="{Binding Compose.RevealCopyFieldsCommand}"
-                            IsTabStop="False"
-                            Content="Копия / Скрытая"
-                            Style="{StaticResource PrimaryButtonStyle}" />
-
-                    <Grid Grid.Row="3"
-                          Grid.ColumnSpan="3"
-                          Margin="0,10,0,0"
-                          Visibility="{Binding Compose.Draft.AreCopyFieldsVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid x:Name="ComposeSurface"
+                  Margin="28,22"
+                  IsEnabled="{Binding Compose.CanEdit}"
+                  IsVisibleChanged="ComposeSurface_IsVisibleChanged"
+                  Visibility="{Binding Compose.IsOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Border MaxWidth="940"
+                        Padding="30"
+                        HorizontalAlignment="Stretch"
+                        Background="White"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="1"
+                        CornerRadius="18">
+                    <Grid>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="90" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock VerticalAlignment="Center"
-                                   Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Копия:" />
-                        <TextBox Grid.Column="1"
-                                 Padding="10,7"
-                                 TabIndex="2"
-                                 Text="{Binding Compose.Draft.Cc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.ColumnSpan="3"
+                                   Margin="0,0,0,18"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Text="Новое письмо" />
+
                         <TextBlock Grid.Row="1"
-                                   Margin="0,8,0,0"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Скрытая:" />
+                                   Text="От:" />
                         <TextBox Grid.Row="1"
                                  Grid.Column="1"
-                                 Margin="0,8,0,0"
+                                 Grid.ColumnSpan="2"
                                  Padding="10,7"
-                                 TabIndex="3"
-                                 Text="{Binding Compose.Draft.Bcc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                    </Grid>
+                                 IsReadOnly="True"
+                                 IsTabStop="False"
+                                 Text="{Binding Compose.FromAddress, Mode=OneWay}" />
 
-                    <Grid Grid.Row="4"
-                          Grid.ColumnSpan="3"
-                          Margin="0,14,0,0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <TextBox x:Name="ComposeSubjectTextBox"
-                                 Padding="10,8"
-                                 TabIndex="4"
-                                 Text="{Binding Compose.Draft.Subject, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="Тема" />
-                        <TextBox x:Name="ComposeBodyTextBox"
-                                 Grid.Row="1"
-                                 MinHeight="250"
+                        <TextBlock Grid.Row="2"
+                                   Margin="0,12,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="Кому:" />
+                        <TextBox x:Name="ComposeToTextBox"
+                                 Grid.Row="2"
+                                 Grid.Column="1"
                                  Margin="0,12,0,0"
-                                 Padding="12"
-                                 AcceptsReturn="True"
-                                 AcceptsTab="False"
-                                 SpellCheck.IsEnabled="True"
-                                 TabIndex="5"
-                                 Text="{Binding Compose.Draft.TextBody, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 TextWrapping="Wrap"
-                                 VerticalScrollBarVisibility="Auto" />
-                        <StackPanel Grid.Row="2" Margin="0,12,0,0">
-                            <Button HorizontalAlignment="Left"
-                                    Padding="14,7"
-                                    Command="{Binding Compose.AttachFilesCommand}"
-                                    Content="Прикрепить файл" />
-                            <ScrollViewer MaxHeight="150"
-                                          Margin="0,8,0,0"
-                                          VerticalScrollBarVisibility="Auto">
-                                <ItemsControl ItemsSource="{Binding Compose.Draft.Attachments}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Border Margin="0,0,0,6"
-                                                    Padding="10,7"
-                                                    Background="#FFF5F7FA"
-                                                    CornerRadius="8">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <CheckBox VerticalAlignment="Center"
-                                                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                              Visibility="{Binding IsForwardedSource, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                    <TextBlock Grid.Column="1"
-                                                               Margin="8,0,0,0"
-                                                               VerticalAlignment="Center"
-                                                               TextTrimming="CharacterEllipsis">
-                                                        <Run Text="📎 " />
-                                                        <Run Text="{Binding FileName, Mode=OneWay}" />
-                                                        <Run Text="  " />
-                                                        <Run Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding DisplaySize, Mode=OneWay}" />
-                                                    </TextBlock>
-                                                    <Button Grid.Column="2"
-                                                            Margin="10,0,0,0"
-                                                            Padding="8,3"
-                                                            Command="{Binding DataContext.Compose.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                            CommandParameter="{Binding}"
-                                                            Content="×"
-                                                            ToolTip="Удалить вложение" />
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </ScrollViewer>
+                                 Padding="10,7"
+                                 TabIndex="1"
+                                 Text="{Binding Compose.Draft.To, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <Button Grid.Row="2"
+                                Grid.Column="2"
+                                Margin="10,12,0,0"
+                                Command="{Binding Compose.RevealCopyFieldsCommand}"
+                                Content="Копия / Скрытая"
+                                IsTabStop="False"
+                                Style="{StaticResource MailSecondaryButtonStyle}" />
+
+                        <Grid Grid.Row="3"
+                              Grid.ColumnSpan="3"
+                              Margin="0,10,0,0"
+                              Visibility="{Binding Compose.Draft.AreCopyFieldsVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="Копия:" />
+                            <TextBox Grid.Column="1"
+                                     Padding="10,7"
+                                     TabIndex="2"
+                                     Text="{Binding Compose.Draft.Cc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Grid.Row="1"
+                                       Margin="0,8,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="Скрытая:" />
+                            <TextBox Grid.Row="1"
+                                     Grid.Column="1"
+                                     Margin="0,8,0,0"
+                                     Padding="10,7"
+                                     TabIndex="3"
+                                     Text="{Binding Compose.Draft.Bcc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </Grid>
+
+                        <Grid Grid.Row="4"
+                              Grid.ColumnSpan="3"
+                              Margin="0,14,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBox x:Name="ComposeSubjectTextBox"
+                                     Padding="10,8"
+                                     TabIndex="4"
+                                     Text="{Binding Compose.Draft.Subject, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="Тема" />
+                            <TextBox x:Name="ComposeBodyTextBox"
+                                     Grid.Row="1"
+                                     MinHeight="230"
+                                     Margin="0,12,0,0"
+                                     Padding="12"
+                                     AcceptsReturn="True"
+                                     AcceptsTab="False"
+                                     SpellCheck.IsEnabled="True"
+                                     TabIndex="5"
+                                     Text="{Binding Compose.Draft.TextBody, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto" />
+                            <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                                <Button HorizontalAlignment="Left"
+                                        Command="{Binding Compose.AttachFilesCommand}"
+                                        Content="Прикрепить файл"
+                                        Style="{StaticResource MailSecondaryButtonStyle}" />
+                                <ScrollViewer MaxHeight="130"
+                                              Margin="0,8,0,0"
+                                              VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding Compose.Draft.Attachments}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Margin="0,0,0,6"
+                                                        Padding="10,7"
+                                                        Background="#FFF5F7FA"
+                                                        CornerRadius="8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <CheckBox VerticalAlignment="Center"
+                                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                  Visibility="{Binding IsForwardedSource, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Margin="8,0,0,0"
+                                                                   VerticalAlignment="Center"
+                                                                   TextTrimming="CharacterEllipsis">
+                                                            <Run Text="📎 " />
+                                                            <Run Text="{Binding FileName, Mode=OneWay}" />
+                                                            <Run Text="  " />
+                                                            <Run Foreground="{DynamicResource TextSecondaryBrush}" Text="{Binding DisplaySize, Mode=OneWay}" />
+                                                        </TextBlock>
+                                                        <Button Grid.Column="2"
+                                                                Width="30"
+                                                                Height="30"
+                                                                Margin="10,0,0,0"
+                                                                Command="{Binding DataContext.Compose.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                CommandParameter="{Binding}"
+                                                                Content="×"
+                                                                ToolTip="Удалить вложение" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Grid.Row="5"
+                                   Grid.ColumnSpan="3"
+                                   Margin="0,12,0,0"
+                                   Foreground="#FFB42318"
+                                   Text="{Binding Compose.ErrorMessage}"
+                                   TextWrapping="Wrap"
+                                   Visibility="{Binding Compose.HasError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                        <StackPanel Grid.Row="6"
+                                    Grid.ColumnSpan="3"
+                                    Margin="0,18,0,0"
+                                    HorizontalAlignment="Right"
+                                    Orientation="Horizontal">
+                            <Button Margin="0,0,10,0"
+                                    Command="{Binding Compose.CancelCommand}"
+                                    Content="Отмена"
+                                    Style="{StaticResource MailSecondaryButtonStyle}" />
+                            <Button Command="{Binding Compose.SendCommand}"
+                                    Content="{Binding Compose.SendButtonText}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    TabIndex="6" />
                         </StackPanel>
                     </Grid>
-
-                    <TextBlock Grid.Row="5"
-                               Grid.ColumnSpan="3"
-                               Margin="0,12,0,0"
-                               Foreground="#FFB42318"
-                               Text="{Binding Compose.ErrorMessage}"
-                               TextWrapping="Wrap"
-                               Visibility="{Binding Compose.HasError, Converter={StaticResource BooleanToVisibilityConverter}}" />
-
-                    <StackPanel Grid.Row="6"
-                                Grid.ColumnSpan="3"
-                                Margin="0,18,0,0"
-                                HorizontalAlignment="Right"
-                                Orientation="Horizontal">
-                        <Button Margin="0,0,10,0"
-                                Padding="18,9"
-                                Command="{Binding Compose.CancelCommand}"
-                                Content="Отмена" />
-                        <Button Padding="20,9"
-                                Command="{Binding Compose.SendCommand}"
-                                Content="{Binding Compose.SendButtonText}"
-                                Style="{StaticResource PrimaryButtonStyle}"
-                                TabIndex="6" />
-                    </StackPanel>
-                </Grid>
-            </Border>
+                </Border>
+            </Grid>
         </Grid>
     </Grid>
 </UserControl>

@@ -99,6 +99,13 @@ public interface IMailMessageStateProvider
         CancellationToken cancellationToken = default);
 }
 
+public interface IMailInboxUnreadCountProvider
+{
+    Task<int> GetInboxUnreadCountAsync(
+        MailAccount account,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record GmailScopeUpgradeResult(bool IsSuccess, string UserMessage)
 {
     public static GmailScopeUpgradeResult Success() =>

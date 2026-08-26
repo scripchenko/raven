@@ -45,10 +45,9 @@ public sealed class NavigationAccountItem : ObservableObject, IDisposable
             MailProviderType.GenericImap => "M",
             _ => "M"
         };
-    public int? UnreadCount => _service?.UnreadCount;
-    public string? UnreadBadgeText => _service?.UnreadBadgeText;
-    public bool ShowUnreadBadge => _service?.ShowUnreadBadge == true;
-    public bool ShowUnreadDot => _service?.ShowUnreadDot == true;
+    public int SidebarBadgeCount => _service?.SidebarBadgeCount ?? _mailAccount?.InboxUnreadCount ?? 0;
+    public string? UnreadBadgeText => SidebarBadgeFormatter.Format(SidebarBadgeCount);
+    public bool ShowUnreadBadge => IsEnabled && SidebarBadgeCount > 0;
 
     public static NavigationAccountItem FromService(ServiceInstance service) =>
         new(service ?? throw new ArgumentNullException(nameof(service)));
@@ -93,15 +92,26 @@ public sealed class NavigationAccountItem : ObservableObject, IDisposable
         if (_service is not null
             && eventArgs.PropertyName is (
                 nameof(ServiceInstance.UnreadCount)
+                or nameof(ServiceInstance.LanternUnviewedActivityCount)
+                or nameof(ServiceInstance.SidebarBadgeCount)
                 or nameof(ServiceInstance.UnreadBadgeText)
                 or nameof(ServiceInstance.HasUnreadActivity)
-                or nameof(ServiceInstance.ShowUnreadBadge)
-                or nameof(ServiceInstance.ShowUnreadDot)))
+                or nameof(ServiceInstance.ShowUnreadBadge)))
         {
-            OnPropertyChanged(nameof(UnreadCount));
+            OnPropertyChanged(nameof(SidebarBadgeCount));
             OnPropertyChanged(nameof(UnreadBadgeText));
             OnPropertyChanged(nameof(ShowUnreadBadge));
-            OnPropertyChanged(nameof(ShowUnreadDot));
+        }
+
+        if (_mailAccount is not null
+            && eventArgs.PropertyName is (
+                nameof(MailAccount.InboxUnreadCount)
+                or nameof(MailAccount.UnreadBadgeText)
+                or nameof(MailAccount.ShowUnreadBadge)))
+        {
+            OnPropertyChanged(nameof(SidebarBadgeCount));
+            OnPropertyChanged(nameof(UnreadBadgeText));
+            OnPropertyChanged(nameof(ShowUnreadBadge));
         }
     }
 }

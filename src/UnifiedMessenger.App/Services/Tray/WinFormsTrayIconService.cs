@@ -1,4 +1,5 @@
 using System.Drawing;
+using UnifiedMessenger.App.Services.Branding;
 using Forms = System.Windows.Forms;
 
 namespace UnifiedMessenger.App.Services.Tray;
@@ -11,10 +12,12 @@ public sealed class WinFormsTrayIconService : ITrayIconService
     private readonly Forms.ToolStripMenuItem _settingsItem;
     private readonly Forms.ToolStripMenuItem _doNotDisturbItem;
     private readonly Forms.ToolStripMenuItem _exitItem;
+    private readonly Icon _applicationIcon;
     private bool _disposed;
 
     public WinFormsTrayIconService()
     {
+        _applicationIcon = BrandIconResources.LoadApplicationIcon();
         _openItem = new Forms.ToolStripMenuItem("Открыть");
         _settingsItem = new Forms.ToolStripMenuItem("Настройки");
         _doNotDisturbItem = new Forms.ToolStripMenuItem("Не беспокоить") { CheckOnClick = false };
@@ -25,8 +28,8 @@ public sealed class WinFormsTrayIconService : ITrayIconService
 
         _notifyIcon = new Forms.NotifyIcon
         {
-            Icon = SystemIcons.Application,
-            Text = "UnifiedMessenger",
+            Icon = _applicationIcon,
+            Text = BrandIdentity.DisplayName,
             ContextMenuStrip = _contextMenu,
             Visible = false
         };
@@ -102,8 +105,10 @@ public sealed class WinFormsTrayIconService : ITrayIconService
         _notifyIcon.DoubleClick -= OnOpenClicked;
         _notifyIcon.BalloonTipClicked -= OnBalloonClicked;
         _notifyIcon.BalloonTipClosed -= OnBalloonClosed;
+        _notifyIcon.Icon = null;
         _notifyIcon.Dispose();
         _contextMenu.Dispose();
+        _applicationIcon.Dispose();
     }
 
     public void Dispose() => BeginShutdown();

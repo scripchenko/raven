@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -492,19 +493,11 @@ public sealed class Stage73UnifiedInboxTests
         Assert.Equal("Center", (string?)button.Attribute("HorizontalContentAlignment"));
         Assert.Equal("Center", (string?)button.Attribute("VerticalContentAlignment"));
 
-        XElement templateBorder = Assert.Single(button
-            .Descendants(presentation + "ControlTemplate")
-            .Elements(presentation + "Border"));
-        Assert.Equal("{TemplateBinding Padding}", (string?)templateBorder.Attribute("Padding"));
-
-        XElement bannerGrid = Assert.IsType<XElement>(button.Parent);
-        string[] columnWidths = bannerGrid
-            .Descendants(presentation + "ColumnDefinition")
-            .Select(column => (string?)column.Attribute("Width") ?? string.Empty)
-            .ToArray();
-        Assert.Equal(["*", "Auto"], columnWidths);
+        XElement actionPanel = Assert.IsType<XElement>(button.Parent);
+        Assert.Equal(presentation + "WrapPanel", actionPanel.Name);
+        XElement bannerPanel = Assert.IsType<XElement>(actionPanel.Parent);
         Assert.Contains(
-            bannerGrid.Elements(presentation + "TextBlock"),
+            bannerPanel.Elements(presentation + "TextBlock"),
             text => (string?)text.Attribute("TextWrapping") == "Wrap");
 
         using MailInboxViewModel viewModel = CreateViewModel(new QueueReadProvider());
@@ -822,6 +815,183 @@ public sealed class Stage73UnifiedInboxTests
     }
 
     [Fact]
+    public void EmbeddedStaticPresentationClass_PreservesGreenBackgroundAndTextColors()
+    {
+        MimeMessage message = CreateMessage(new TextPart("html")
+        {
+            Text = "<style>.status-panel{background-color:#198754;color:#ffffff;border-color:#146c43}" +
+                ".status-panel{background-image:url('https://tracking.invalid/pixel.png')}</style>" +
+                "<div class='status-panel'>Success</div>"
+        });
+
+        string html = CreateExtractor().Extract("static-green", message, false).SanitizedHtmlContent;
+        HtmlAgilityPack.HtmlDocument document = new();
+        document.LoadHtml(html);
+        HtmlNode panel = Assert.IsType<HtmlNode>(document.DocumentNode.SelectSingleNode("//div"));
+        string style = panel.GetAttributeValue("style", string.Empty);
+
+        Assert.Contains("background-color", style, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            style.Contains("#198754", StringComparison.OrdinalIgnoreCase)
+            || style.Contains("25, 135, 84", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("color", style, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("border-color", style, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("url(", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tracking.invalid", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<style", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("class=", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void YandexIdStylePattern_CompoundDescendantBackgroundImportantOverridesGrayInlineFallback()
+    {
+        MimeMessage message = CreateMessage(new TextPart("html")
+        {
+            Text = "<style>" +
+                ".mail-shell > table.notice td.status.success{" +
+                "background:#c5efb7 !important;color:#153b20;border-color:#86c995}" +
+                "</style>" +
+                "<div class='mail-shell'><table class='notice'><tr>" +
+                "<td class='status success' style='background-color:#d9d9d9'>Success</td>" +
+                "</tr></table></div>"
+        });
+
+        string html = CreateExtractor().Extract("selector-cascade-green", message, false).SanitizedHtmlContent;
+        HtmlAgilityPack.HtmlDocument document = new();
+        document.LoadHtml(html);
+        HtmlNode cell = Assert.IsType<HtmlNode>(document.DocumentNode.SelectSingleNode("//td"));
+        string style = cell.GetAttributeValue("style", string.Empty);
+
+        Assert.Contains("background-color", style, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            style.Contains("#c5efb7", StringComparison.OrdinalIgnoreCase)
+            || style.Contains("197, 239, 183", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("important", style, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("url(", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StaticGreenPanel_RemainsGreenWhileRemoteImageIsStillBlocked()
+    {
+        MimeMessage message = CreateMessage(new TextPart("html")
+        {
+            Text = "<style>.green-panel{background-color:#198754;color:#ffffff}</style>" +
+                "<div class='green-panel'>Success</div>" +
+                "<img src='https://images.example.test/remote.png'>"
+        });
+
+        MailMessageContent content = CreateExtractor().Extract("green-with-remote", message, false);
+        string document = new MailHtmlDocumentBuilder().Build(content);
+
+        Assert.Single(content.RemoteImages);
+        Assert.Contains("background-color", document, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            document.Contains("#198754", StringComparison.OrdinalIgnoreCase)
+            || document.Contains("25, 135, 84", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("images.example.test", document, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("url(", document, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LegacyBgColor_IsConvertedToSafeInlineBackgroundColor()
+    {
+        MimeMessage message = CreateMessage(new TextPart("html")
+        {
+            Text = "<table><tr><td bgcolor='#198754'>Success</td></tr></table>"
+        });
+
+        string html = CreateExtractor().Extract("legacy-green", message, false).SanitizedHtmlContent;
+
+        Assert.Contains("background-color", html, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            html.Contains("#198754", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("25, 135, 84", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("bgcolor", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EmbeddedPresentationRules_DoNotAllowBackgroundUrlsOrComplexSelectorEscapes()
+    {
+        MimeMessage message = CreateMessage(new TextPart("html")
+        {
+            Text = "<style>.safe .nested{background-color:#198754}" +
+                ".unsafe{background:url('https://tracking.invalid/pixel.png') #198754}" +
+                "@import url('https://tracking.invalid/mail.css')</style>" +
+                "<div class='safe'><span class='nested'>No complex selector inlining</span></div>" +
+                "<div class='unsafe'>Static color only</div>"
+        });
+
+        string html = CreateExtractor().Extract("css-network-block", message, false).SanitizedHtmlContent;
+
+        Assert.DoesNotContain("url(", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tracking.invalid", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("@import", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<style", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Static color only", html, StringComparison.Ordinal);
+        Assert.Contains("background-color", html, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            html.Contains("#198754", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("25, 135, 84", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void MailRuRemoteBackgroundShorthand_PreservesImportantBlueFallbackAndWhiteForeground()
+    {
+        const string remoteBackground = "https://tracking.invalid/decorative-background.png";
+        MimeMessage message = CreateMessage(new TextPart("html")
+        {
+            Text = "<style>" +
+                ".mail-shell > table.notice td.primary{" +
+                $"background:#087eff url('{remoteBackground}') center/cover no-repeat !important;" +
+                "color:#ffffff !important}" +
+                "</style>" +
+                "<div class='mail-shell'><table class='notice'><tr>" +
+                "<td class='primary' style='background-color:#d9d9d9'>Readable</td>" +
+                "</tr></table></div>"
+        });
+
+        MailMessageContent content = CreateExtractor().Extract("mailru-blue-fallback", message, false);
+        HtmlAgilityPack.HtmlDocument sanitized = new();
+        sanitized.LoadHtml(content.SanitizedHtmlContent);
+        HtmlNode cell = Assert.IsType<HtmlNode>(sanitized.DocumentNode.SelectSingleNode("//td"));
+        string style = cell.GetAttributeValue("style", string.Empty);
+        string document = new MailHtmlDocumentBuilder().Build(content);
+
+        Assert.Contains("background-color", style, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            style.Contains("#087eff", StringComparison.OrdinalIgnoreCase)
+            || style.Contains("8, 126, 255", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("color", style, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            style.Contains("#ffffff", StringComparison.OrdinalIgnoreCase)
+            || style.Contains("255, 255, 255", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("important", style, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("#d9d9d9", style, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("url(", content.SanitizedHtmlContent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(remoteBackground, content.SanitizedHtmlContent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(remoteBackground, document, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(content.RemoteImages);
+    }
+
+    [Fact]
+    public void StaticGradientFallback_PreservesOnlySolidColorAndNeverTheGradientLayer()
+    {
+        MimeMessage message = CreateMessage(new TextPart("html")
+        {
+            Text = "<div style='background:linear-gradient(#004a99,#087eff) #087eff;color:#fff'>Readable</div>"
+        });
+
+        string html = CreateExtractor().Extract("gradient-solid-fallback", message, false).SanitizedHtmlContent;
+
+        Assert.Contains("background-color", html, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            html.Contains("#087eff", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("8, 126, 255", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("gradient", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("url(", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task MultipleLinkedSocialIcons_DoNotBecomeConcatenatedRawUrls()
     {
         const string firstHref = "https://example.com/social-one";
@@ -893,6 +1063,7 @@ public sealed class Stage73UnifiedInboxTests
         Assert.DoesNotContain("cdn.example.com", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Safe text", html, StringComparison.Ordinal);
         Assert.Contains("padding", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("background-color", html, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1103,7 +1274,6 @@ public sealed class Stage73UnifiedInboxTests
         Assert.DoesNotContain(
             typeof(MailInboxViewModel).GetConstructors().Single().GetParameters(),
             parameter => parameter.ParameterType.Name.Contains("Settings", StringComparison.OrdinalIgnoreCase)
-                || parameter.ParameterType.Name.Contains("Store", StringComparison.OrdinalIgnoreCase)
                 || parameter.ParameterType == typeof(Stream));
     }
 
@@ -1288,6 +1458,130 @@ public sealed class Stage73UnifiedInboxTests
     }
 
     [Fact]
+    public void PrintDocument_UsesEscapedMetadataHeaderHiddenOnScreenAndVisibleOnlyForPrint()
+    {
+        DateTimeOffset receivedAt = new(2026, 8, 25, 9, 42, 17, TimeSpan.Zero);
+        MailMessageContent content = new(
+            "print-safe",
+            "<Subject & details>",
+            "<Sender & name>",
+            "sender@example.test",
+            "Recipient <recipient@example.test>",
+            receivedAt,
+            MailMessageBodyKind.SanitizedHtml,
+            "<p>Safe body</p>",
+            [],
+            false,
+            true)
+        {
+            Attachments =
+            [
+                new MailAttachmentInfo(
+                    "attachment-1",
+                    "invoice <draft> & copy.pdf",
+                    "application/pdf",
+                    1024,
+                    false,
+                    true)
+            ]
+        };
+
+        string document = new MailHtmlDocumentBuilder().Build(content);
+        string expectedDate = WebUtility.HtmlEncode(
+            receivedAt.ToLocalTime().ToString("ddd, d MMM, HH:mm", CultureInfo.CurrentCulture));
+
+        Assert.Contains("<section class=\"um-print-header\"", document, StringComparison.Ordinal);
+        Assert.Contains("&lt;Subject &amp; details&gt;", document, StringComparison.Ordinal);
+        Assert.Contains("&lt;Sender &amp; name&gt;", document, StringComparison.Ordinal);
+        Assert.Contains("Recipient &lt;recipient@example.test&gt;", document, StringComparison.Ordinal);
+        Assert.Contains(expectedDate, document, StringComparison.Ordinal);
+        Assert.Contains("invoice &lt;draft&gt; &amp; copy.pdf", document, StringComparison.Ordinal);
+        Assert.Contains(".um-print-header { display: none; }", document, StringComparison.Ordinal);
+        Assert.Contains("@media print", document, StringComparison.Ordinal);
+        Assert.Contains(".um-print-header { display: block;", document, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Subject & details>", document, StringComparison.Ordinal);
+        Assert.DoesNotContain("invoice <draft> & copy.pdf", document, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PrintDocument_UsesAttachmentMetadataOnlyAndDoesNotGrantRemoteImageConsent()
+    {
+        MailMessageContent content = Content(
+            "print-blocked-image",
+            bodyKind: MailMessageBodyKind.SanitizedHtml,
+            body: $"<img {MailHtmlSanitizer.RemoteImageIdAttribute}='remote-1'>",
+            remoteImages:
+            [
+                new MailRemoteImageReference(
+                    "remote-1",
+                    new Uri("https://images.example.test/private.png"))
+            ]) with
+        {
+            Attachments =
+            [
+                new MailAttachmentInfo(
+                    "attachment-1",
+                    "metadata-only.pdf",
+                    "application/pdf",
+                    2048,
+                    false,
+                    true)
+            ]
+        };
+
+        string document = new MailHtmlDocumentBuilder().Build(content);
+        HtmlAgilityPack.HtmlDocument parsed = new();
+        parsed.LoadHtml(document);
+        HtmlNode image = Assert.IsType<HtmlNode>(parsed.DocumentNode.SelectSingleNode("//img"));
+
+        Assert.Null(image.Attributes["src"]);
+        Assert.Equal("remote-1", image.GetAttributeValue(MailHtmlSanitizer.RemoteImageIdAttribute, string.Empty));
+        Assert.DoesNotContain("images.example.test", document, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("metadata-only.pdf", document, StringComparison.Ordinal);
+        Assert.Empty(typeof(MailHtmlDocumentBuilder).GetConstructors().Single().GetParameters());
+        Assert.DoesNotContain(
+            typeof(MailAttachmentInfo).GetProperties(),
+            property => property.PropertyType == typeof(byte[])
+                || property.PropertyType == typeof(Stream)
+                || property.PropertyType == typeof(ReadOnlyMemory<byte>));
+    }
+
+    [Fact]
+    public async Task PrintAction_IsAvailableOnlyForLoadedHtmlDetailWithReadyRenderer()
+    {
+        MailMessageSummary summary = Summary("printable");
+        QueueReadProvider provider = new()
+        {
+            Message = Content(
+                "printable",
+                bodyKind: MailMessageBodyKind.SanitizedHtml,
+                body: "<p>Printable</p>")
+        };
+        provider.EnqueuePage(Page([summary], null));
+        using MailInboxViewModel viewModel = CreateViewModel(provider);
+
+        await viewModel.ActivateAsync(CreateAccount(MailProviderType.Gmail));
+        Assert.False(viewModel.ShowPrintAction);
+        Assert.False(viewModel.CanPrintMessage);
+
+        viewModel.OpenMessageCommand.Execute(summary);
+        await viewModel.CurrentMessageLoadTask;
+        Assert.True(viewModel.ShowPrintAction);
+        Assert.False(viewModel.CanPrintMessage);
+
+        viewModel.SetPrintAvailable(isAvailable: true);
+        Assert.True(viewModel.CanPrintMessage);
+
+        viewModel.BackToMessageListCommand.Execute(null);
+        Assert.False(viewModel.ShowPrintAction);
+        Assert.False(viewModel.CanPrintMessage);
+
+        viewModel.Compose.NewMessageCommand.Execute(null);
+        Assert.False(viewModel.ShowPrintAction);
+        Assert.False(viewModel.CanPrintMessage);
+    }
+
+    [Fact]
     public void RendererResourcePolicy_AllowsOnlySupportedMemoryImagesAndInternalDocument()
     {
         MailRendererNavigationPolicy policy = new();
@@ -1317,6 +1611,11 @@ public sealed class Stage73UnifiedInboxTests
         Assert.False(MailMessageHtmlRenderer.HostObjectsEnabled);
         Assert.True(MailMessageHtmlRenderer.UsesInPrivateProfile);
         Assert.Equal(1, MailMessageHtmlRenderer.MaximumControllerCount);
+        Assert.Equal(CoreWebView2PrintDialogKind.System, MailMessageHtmlRenderer.PrintDialogKind);
+        Assert.NotNull(typeof(IMailMessageHtmlRenderer).GetMethod(nameof(IMailMessageHtmlRenderer.TryShowPrintPreview)));
+        Assert.NotNull(typeof(CoreWebView2).GetMethod(
+            nameof(CoreWebView2.ShowPrintUI),
+            [typeof(CoreWebView2PrintDialogKind)]));
     }
 
     [Theory]
@@ -1907,7 +2206,9 @@ public sealed class Stage73UnifiedInboxTests
     {
         public bool IsInitialized { get; set; }
         public bool IsVisible { get; set; }
+        public bool CanPrint { get; set; }
         public int ControllerCount => IsInitialized ? 1 : 0;
+        public event EventHandler? PrintAvailabilityChanged;
         public int LayoutCalls { get; private set; }
         public int ParentPositionChangeCalls { get; private set; }
         public int HideCalls { get; private set; }
@@ -1931,6 +2232,8 @@ public sealed class Stage73UnifiedInboxTests
 
         public void NotifyParentWindowPositionChanged() => ParentPositionChangeCalls++;
 
+        public bool TryShowPrintPreview() => CanPrint;
+
         public void Hide(bool clearContent)
         {
             HideCalls++;
@@ -1951,6 +2254,9 @@ public sealed class Stage73UnifiedInboxTests
         }
 
         public void Dispose() => BeginShutdown();
+
+        public void RaisePrintAvailabilityChanged() =>
+            PrintAvailabilityChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private sealed class RecordingImageHttpClient : IRemoteMailImageHttpClient

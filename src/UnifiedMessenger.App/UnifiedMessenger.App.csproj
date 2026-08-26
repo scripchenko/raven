@@ -7,7 +7,15 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>UnifiedMessenger.App</AssemblyName>
     <RootNamespace>UnifiedMessenger.App</RootNamespace>
+    <ApplicationIcon>Assets\Branding\lantern.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Branding\lantern.ico" />
+    <Resource Include="Assets\Branding\lantern_icon.png" />
+    <Resource Include="Assets\Branding\lantern_logo.png" />
+    <Resource Include="Assets\Services\*.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

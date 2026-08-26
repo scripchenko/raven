@@ -1,5 +1,6 @@
 using System.Globalization;
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Branding;
 
 namespace UnifiedMessenger.App.Services.Notifications;
 
@@ -28,6 +29,9 @@ public sealed class ServiceActivityCoordinator : IServiceActivityCoordinator
     public void MarkNotificationReceived(ServiceInstance service)
     {
         ArgumentNullException.ThrowIfNull(service);
+        service.LanternUnviewedActivityCount = service.LanternUnviewedActivityCount == int.MaxValue
+            ? int.MaxValue
+            : service.LanternUnviewedActivityCount + 1;
         service.HasUnreadActivity = true;
         ActivityChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -36,6 +40,7 @@ public sealed class ServiceActivityCoordinator : IServiceActivityCoordinator
     {
         ArgumentNullException.ThrowIfNull(service);
         service.UnreadCount = null;
+        service.LanternUnviewedActivityCount = 0;
         service.HasUnreadActivity = false;
         ActivityChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -46,6 +51,7 @@ public sealed class ServiceActivityCoordinator : IServiceActivityCoordinator
         foreach (ServiceInstance service in services)
         {
             service.UnreadCount = null;
+            service.LanternUnviewedActivityCount = 0;
             service.HasUnreadActivity = false;
         }
 
@@ -60,14 +66,14 @@ public sealed class ServiceActivityCoordinator : IServiceActivityCoordinator
             service.HasUnreadActivity && service.UnreadCount is not > 0);
         if (hasUnknownActivity)
         {
-            return "UnifiedMessenger — есть новые события";
+            return $"{BrandIdentity.DisplayName} — есть новые события";
         }
 
         long knownTotal = enabled
             .Where(service => service.UnreadCount is > 0)
             .Sum(service => (long)service.UnreadCount!.Value);
         return knownTotal > 0
-            ? $"UnifiedMessenger — {knownTotal.ToString(CultureInfo.InvariantCulture)} непрочитанных"
-            : "UnifiedMessenger";
+            ? $"{BrandIdentity.DisplayName} — {knownTotal.ToString(CultureInfo.InvariantCulture)} непрочитанных"
+            : BrandIdentity.DisplayName;
     }
 }

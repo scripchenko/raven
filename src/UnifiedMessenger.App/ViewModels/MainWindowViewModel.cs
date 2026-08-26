@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
+using UnifiedMessenger.App.Services.Branding;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.WebView;
@@ -132,12 +133,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         : "Отключить уведомления аккаунта";
 
     public string WindowTitle => IsSettingsOpen
-        ? "Настройки — UnifiedMessenger"
-        : SelectedNavigationItem is null
-            ? "UnifiedMessenger"
-            : $"{SelectedNavigationItem.DisplayName} — UnifiedMessenger";
+        ? BrandIdentity.CreateWindowTitle("Настройки")
+        : BrandIdentity.CreateWindowTitle(SelectedNavigationItem?.DisplayName);
 
-    public string SelectedAccountDisplayName => SelectedNavigationItem?.DisplayName ?? "UnifiedMessenger";
+    public string SelectedAccountDisplayName => SelectedNavigationItem?.DisplayName ?? BrandIdentity.DisplayName;
 
     public string SelectedAccountLabel => SelectedMailAccount is MailAccount mailAccount
         ? $"{GetMailProviderDisplayName(mailAccount.Provider)} · Почта"

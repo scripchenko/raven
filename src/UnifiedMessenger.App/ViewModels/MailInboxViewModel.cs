@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
@@ -7,15 +8,25 @@ using UnifiedMessenger.App.Services.Mail;
 
 namespace UnifiedMessenger.App.ViewModels;
 
+public enum MailInboxPresentationMode
+{
+    MessageList,
+    MessageDetail,
+    Compose
+}
+
 public sealed class MailInboxViewModel : ObservableObject, IDisposable
 {
     public const int InitialPageSize = 30;
     public const int MessageBodyCacheCapacity = 20;
     public const int RemoteImageConsentCacheCapacity = 20;
+    public static readonly TimeSpan MailReadDwellDelay = TimeSpan.FromSeconds(3);
 
     private readonly IMailReadProviderFactory _providerFactory;
     private readonly IMailAttachmentSaveService? _attachmentSaveService;
     private readonly MailMessageSourceCache? _messageSourceCache;
+    private readonly IMailReadDwellScheduler _readDwellScheduler;
+    private readonly IRemoteImageSenderTrustStore _remoteImageSenderTrustStore;
     private readonly Dictionary<FolderStateKey, FolderState> _folderStates = [];
     private readonly Dictionary<Guid, AccountFolderState> _accountFolderStates = [];
     private readonly BoundedLruCache<MessageBodyCacheKey, MailMessageContent> _messageBodyCache =
@@ -27,6 +38,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _messageCancellation;
     private CancellationTokenSource? _mutationCancellation;
     private CancellationTokenSource? _attachmentCancellation;
+    private CancellationTokenSource? _readDwellCancellation;
+    private CancellationTokenSource? _remoteImageSenderTrustCancellation;
     private MailAccount? _activeAccount;
     private MailFolder? _selectedFolder;
     private MailMessageSummary? _selectedMessageSummary;
@@ -34,6 +47,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private bool _isListLoading;
     private bool _isMessageLoading;
     private bool _isRemoteImageLoading;
+    private bool _isPrintAvailable;
+    private bool _isCurrentRemoteImageSenderTrusted;
+    private bool _canTrustCurrentRemoteImageSender;
     private bool _isReadStateChanging;
     private bool _hasLoaded;
     private string? _listErrorMessage;
@@ -48,17 +64,44 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private long _viewVersion;
     private bool _isApplyingState;
     private bool _isReadStateMetadataUpdate;
+    private bool _isDetailHostActive;
+    private MailInboxPresentationMode _contentMode = MailInboxPresentationMode.MessageList;
+    private MailReadDwellTarget? _readDwellTarget;
+    private MailReadDwellTarget? _readDwellAttemptedTarget;
+    private MailReadDwellTarget? _automaticReadMutationTarget;
+    private MailReadDwellTarget? _manualUnreadSuppressionTarget;
+    private Task _currentReadDwellTask = Task.CompletedTask;
     private bool _disposed;
 
     public MailInboxViewModel(
         IMailReadProviderFactory providerFactory,
         MailComposeViewModel? composeViewModel = null,
         IMailAttachmentSaveService? attachmentSaveService = null,
-        MailMessageSourceCache? messageSourceCache = null)
+        MailMessageSourceCache? messageSourceCache = null,
+        IRemoteImageSenderTrustStore? remoteImageSenderTrustStore = null)
+        : this(
+            providerFactory,
+            composeViewModel,
+            attachmentSaveService,
+            messageSourceCache,
+            SystemMailReadDwellScheduler.Instance,
+            remoteImageSenderTrustStore)
+    {
+    }
+
+    internal MailInboxViewModel(
+        IMailReadProviderFactory providerFactory,
+        MailComposeViewModel? composeViewModel,
+        IMailAttachmentSaveService? attachmentSaveService,
+        MailMessageSourceCache? messageSourceCache,
+        IMailReadDwellScheduler readDwellScheduler,
+        IRemoteImageSenderTrustStore? remoteImageSenderTrustStore = null)
     {
         _providerFactory = providerFactory;
         _attachmentSaveService = attachmentSaveService;
         _messageSourceCache = messageSourceCache;
+        _readDwellScheduler = readDwellScheduler;
+        _remoteImageSenderTrustStore = remoteImageSenderTrustStore ?? NullRemoteImageSenderTrustStore.Instance;
         Compose = composeViewModel ?? MailComposeViewModel.CreateUnavailable();
         Compose.PropertyChanged += OnComposePropertyChanged;
         Compose.Sent += OnMailSent;
@@ -69,6 +112,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         SetReadStateCommand = new AsyncRelayCommand(SetReadStateAsync, CanSetReadState);
         AuthorizeGmailCommand = new AsyncRelayCommand(AuthorizeGmailAsync, CanAuthorizeGmail);
         SaveAttachmentCommand = new AsyncRelayCommand<MailAttachmentInfo>(SaveAttachmentAsync, CanSaveAttachment);
+        OpenMessageCommand = new RelayCommand<MailMessageSummary>(OpenMessage, CanOpenMessage);
+        BackToMessageListCommand = new RelayCommand(ShowMessageList, CanShowMessageList);
     }
 
     public ObservableCollection<MailFolder> Folders { get; } = [];
@@ -82,12 +127,17 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand SetReadStateCommand { get; }
     public IAsyncRelayCommand AuthorizeGmailCommand { get; }
     public IAsyncRelayCommand<MailAttachmentInfo> SaveAttachmentCommand { get; }
+    public IRelayCommand<MailMessageSummary> OpenMessageCommand { get; }
+    public IRelayCommand BackToMessageListCommand { get; }
 
     internal Task CurrentMessageLoadTask { get; private set; } = Task.CompletedTask;
     internal Task CurrentFolderLoadTask { get; private set; } = Task.CompletedTask;
     internal int CachedMessageBodyCount => _messageBodyCache.Count;
     internal int CachedRemoteImageConsentCount => _remoteImageConsents.Count;
     internal bool IsReadStateMetadataUpdate => _isReadStateMetadataUpdate;
+    internal Task CurrentReadDwellTask => _currentReadDwellTask;
+    internal bool IsReadDwellPending => _readDwellCancellation is not null;
+    internal Task CurrentRemoteImageSenderTrustTask { get; private set; } = Task.CompletedTask;
 
     public MailAccount? ActiveAccount
     {
@@ -100,7 +150,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(AccountDisplayName));
                 OnPropertyChanged(nameof(ProviderDisplayName));
                 OnPropertyChanged(nameof(EmailAddress));
-                RaiseRemoteImageConsentStateChanged();
+                RaisePresentationStateChanged();
+                BeginRemoteImageSenderTrustLookup();
                 RaiseReadStateChanged();
                 NotifyCommandStates();
             }
@@ -119,6 +170,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
             AccountFolderState catalog = GetAccountFolderState(ActiveAccount.Id);
             catalog.SelectedFolderKey = value.Key;
+            CancelReadDwell(resetDetailSession: true);
             CurrentFolderLoadTask = SwitchFolderAsync(ActiveAccount, value);
         }
     }
@@ -133,6 +185,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            CancelReadDwell(resetDetailSession: true);
             OnPropertyChanged(nameof(HasSelectedMessage));
             RaiseReadStateChanged();
             if (_isApplyingState || ActiveAccount is null || SelectedFolder is null)
@@ -142,6 +195,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
             FolderState state = GetState(ActiveAccount.Id, SelectedFolder.Key);
             state.SelectedMessageKey = value?.MessageKey;
+            SetContentMode(
+                value is null
+                    ? MailInboxPresentationMode.MessageList
+                    : MailInboxPresentationMode.MessageDetail,
+                state);
             CancelAttachmentOperation();
             AttachmentStatusMessage = null;
             CancelMessageOperation();
@@ -174,14 +232,29 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _selectedMessageContent, value))
             {
-                IsRemoteImageLoading = false;
+                bool isReadStateMetadataUpdate = _isReadStateMetadataUpdate;
+                if (!isReadStateMetadataUpdate)
+                {
+                    SetPrintAvailable(isAvailable: false);
+                    IsRemoteImageLoading = false;
+                }
+
                 OnPropertyChanged(nameof(HasSelectedContent));
                 OnPropertyChanged(nameof(HasAttachments));
                 OnPropertyChanged(nameof(IsSelectedMessagePlainText));
                 OnPropertyChanged(nameof(IsSelectedMessageHtml));
-                RaiseRemoteImageConsentStateChanged();
+                OnPropertyChanged(nameof(ShouldDisplayHtmlRenderer));
+                OnPropertyChanged(nameof(SelectedMessageDisplayDate));
+                OnPropertyChanged(nameof(ShowPrintAction));
+                OnPropertyChanged(nameof(CanPrintMessage));
+                if (!isReadStateMetadataUpdate)
+                {
+                    BeginRemoteImageSenderTrustLookup();
+                }
+
                 RaiseReadStateChanged();
                 SaveAttachmentCommand.NotifyCanExecuteChanged();
+                UpdateReadDwellState();
             }
         }
     }
@@ -189,6 +262,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public bool AreRemoteImagesShown =>
         TryGetCurrentRemoteImageConsentKey(out RemoteImageConsentKey key)
         && _remoteImageConsents.TryGet(key, out _);
+
+    public bool IsCurrentRemoteImageSenderTrusted => _isCurrentRemoteImageSenderTrusted;
+
+    public bool CanTrustCurrentRemoteImageSender => _canTrustCurrentRemoteImageSender;
 
     public bool IsRemoteImageLoading
     {
@@ -199,6 +276,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(CanShowRemoteImages));
                 OnPropertyChanged(nameof(RemoteImagesButtonText));
+                OnPropertyChanged(nameof(CanAlwaysShowRemoteImagesFromSender));
             }
         }
     }
@@ -224,6 +302,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isMessageLoading, value))
             {
                 OnPropertyChanged(nameof(ShowMessagePlaceholder));
+                OnPropertyChanged(nameof(ShowPrintAction));
+                OnPropertyChanged(nameof(CanPrintMessage));
                 RetryMessageCommand.NotifyCanExecuteChanged();
             }
         }
@@ -274,6 +354,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(HasMessageError));
                 OnPropertyChanged(nameof(ShowMessagePlaceholder));
+                OnPropertyChanged(nameof(ShowPrintAction));
+                OnPropertyChanged(nameof(CanPrintMessage));
                 RetryMessageCommand.NotifyCanExecuteChanged();
             }
         }
@@ -330,6 +412,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     public bool IsActive => ActiveAccount is { IsEnabled: true };
     public bool IsComposeOpen => Compose.IsOpen;
+    public MailInboxPresentationMode PresentationMode => IsComposeOpen
+        ? MailInboxPresentationMode.Compose
+        : _contentMode;
+    public bool IsMessageListVisible => IsActive && PresentationMode is MailInboxPresentationMode.MessageList;
+    public bool IsMessageDetailVisible => IsActive && PresentationMode is MailInboxPresentationMode.MessageDetail;
+    public bool ShouldDisplayHtmlRenderer => IsMessageDetailVisible && IsSelectedMessageHtml;
     public bool HasFolders => Folders.Count > 0;
     public bool HasMessages => Messages.Count > 0;
     public bool HasMore => !string.IsNullOrWhiteSpace(ContinuationToken);
@@ -344,9 +432,24 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public bool HasAttachments => SelectedMessageContent?.Attachments.Count > 0;
     public bool IsSelectedMessagePlainText => SelectedMessageContent?.BodyKind is MailMessageBodyKind.PlainText;
     public bool IsSelectedMessageHtml => SelectedMessageContent?.BodyKind is MailMessageBodyKind.SanitizedHtml;
-    public bool ShowRemoteImagesBanner => SelectedMessageContent?.HasRemoteImages == true && !AreRemoteImagesShown;
-    public bool CanShowRemoteImages => ShowRemoteImagesBanner && !IsRemoteImageLoading;
+    public bool ShowRemoteImagesBanner =>
+        SelectedMessageContent?.HasRemoteImages == true
+        && (IsCurrentRemoteImageSenderTrusted || !AreRemoteImagesShown);
+    public bool ShowOneTimeRemoteImagesAction =>
+        ShowRemoteImagesBanner
+        && !IsCurrentRemoteImageSenderTrusted
+        && !AreRemoteImagesShown;
+    public bool ShowAlwaysRemoteImagesFromSenderAction =>
+        ShowOneTimeRemoteImagesAction && CanTrustCurrentRemoteImageSender;
+    public bool ShowRevokeRemoteImagesFromSenderAction =>
+        ShowRemoteImagesBanner && IsCurrentRemoteImageSenderTrusted;
+    public bool CanShowRemoteImages => ShowOneTimeRemoteImagesAction && !IsRemoteImageLoading;
+    public bool CanAlwaysShowRemoteImagesFromSender =>
+        ShowAlwaysRemoteImagesFromSenderAction && !IsRemoteImageLoading;
     public string RemoteImagesButtonText => IsRemoteImageLoading ? "Загружаем…" : "Показать";
+    public string RemoteImagesBannerText => IsCurrentRemoteImageSenderTrusted
+        ? "Внешние изображения автоматически разрешены для этого отправителя."
+        : "Внешние изображения заблокированы для защиты конфиденциальности.";
     public bool IsAttachmentSaving
     {
         get => _isAttachmentSaving;
@@ -373,6 +476,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     public bool HasAttachmentStatus => !string.IsNullOrWhiteSpace(AttachmentStatusMessage);
     public bool ShowMessagePlaceholder => !HasSelectedContent && !IsMessageLoading && !HasMessageError;
+    public bool ShowPrintAction =>
+        IsMessageDetailVisible
+        && HasSelectedContent
+        && IsSelectedMessageHtml
+        && !IsMessageLoading
+        && !HasMessageError
+        && !IsComposeOpen;
+    public bool CanPrintMessage => ShowPrintAction && _isPrintAvailable;
     public bool ShowReadStateAction =>
         HasSelectedContent
         && SelectedFolder?.SupportsReadState == true
@@ -387,8 +498,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public string ReadStateActionText => IsReadStateChanging
         ? "Сохраняем…"
         : SelectedMessageSummary?.IsUnread == true
-            ? "Отметить прочитанным"
-            : "Отметить непрочитанным";
+            ? "Отметить как прочитанное"
+            : "Отметить как непрочитанное";
+    public string SelectedMessageDisplayDate => SelectedMessageContent is null
+        ? string.Empty
+        : SelectedMessageContent.ReceivedAt.ToLocalTime().ToString(
+            "ddd, d MMM, HH:mm",
+            CultureInfo.CurrentCulture);
     public string ReadStateAuthorizationText =>
         AuthorizationMessage
         ?? _readStateCapability.UserMessage
@@ -451,6 +567,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     {
         ThrowIfDisposed();
         CancelActivation();
+        _readStateCapability = MailReadStateCapability.Unsupported;
         long version = ++_viewVersion;
         _activationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         ActiveAccount = account;
@@ -486,10 +603,16 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         ApplyState(state);
         if (!state.HasLoaded)
         {
+            if (folder.Kind is not MailFolderKind.Inbox)
+            {
+                await RefreshInboxUnreadCountAsync(account, version, _activationCancellation.Token);
+            }
+
             await LoadPageAsync(account, folder, state, true, version, _activationCancellation.Token);
         }
         else
         {
+            await RefreshInboxUnreadCountAsync(account, version, _activationCancellation.Token);
             await RefreshReadStateCapabilityAsync();
         }
     }
@@ -521,7 +644,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             return;
         }
 
+        SetDetailHostActive(false);
         _disposed = true;
+        CancelRemoteImageSenderTrustLookup();
         CancelActivation();
         Compose.PropertyChanged -= OnComposePropertyChanged;
         Compose.Sent -= OnMailSent;
@@ -594,6 +719,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private async Task SwitchFolderAsync(MailAccount account, MailFolder folder)
     {
         long version = ++_viewVersion;
+        CancelReadDwell(resetDetailSession: true);
         CancelListOperation();
         CancelMessageOperation();
         CancelMutationOperation();
@@ -699,6 +825,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         try
         {
             IMailReadProvider provider = _providerFactory.Get(account.Provider);
+            Task<int?> unreadCountTask = replace && folder.Kind is MailFolderKind.Inbox
+                ? TryGetInboxUnreadCountAsync(provider, account, cancellationToken)
+                : Task.FromResult<int?>(null);
             MailPage<MailMessageSummary> page = await provider.GetPageAsync(
                 account,
                 folder,
@@ -708,6 +837,17 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             if (!IsCurrent(account.Id, folder.Key, version, cancellationToken))
             {
                 return;
+            }
+
+            int? inboxUnreadCount = await unreadCountTask;
+            if (!IsCurrent(account.Id, folder.Key, version, cancellationToken))
+            {
+                return;
+            }
+
+            if (inboxUnreadCount is int exactUnreadCount)
+            {
+                account.InboxUnreadCount = exactUnreadCount;
             }
 
             if (replace)
@@ -870,30 +1010,80 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     private async Task SetReadStateAsync()
     {
+        if (!TryGetCurrentReadDwellTarget(out MailReadDwellTarget target)
+            || SelectedMessageSummary is not MailMessageSummary summary)
+        {
+            return;
+        }
+
+        CancelReadDwell(resetDetailSession: false);
+        _readDwellAttemptedTarget = target;
+        await ChangeReadStateAsync(summary.IsUnread, ReadStateMutationOrigin.Manual, target);
+    }
+
+    public void SetPrintAvailable(bool isAvailable)
+    {
+        if (_disposed || _isPrintAvailable == isAvailable)
+        {
+            return;
+        }
+
+        _isPrintAvailable = isAvailable;
+        OnPropertyChanged(nameof(CanPrintMessage));
+    }
+
+    private async Task ChangeReadStateAsync(
+        bool isRead,
+        ReadStateMutationOrigin origin,
+        MailReadDwellTarget expectedTarget,
+        CancellationToken operationToken = default)
+    {
         if (ActiveAccount is not MailAccount account
             || SelectedFolder is not MailFolder folder
             || SelectedMessageSummary is not MailMessageSummary summary
+            || !expectedTarget.Matches(account.Id, folder.Key, summary.MessageKey, _viewVersion)
             || _providerFactory.Get(account.Provider) is not IMailMessageStateProvider provider)
         {
             return;
         }
 
         CancelMutationOperation();
-        _mutationCancellation = CancellationTokenSource.CreateLinkedTokenSource(GetActivationToken());
+        _mutationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            GetActivationToken(),
+            operationToken);
         CancellationToken cancellationToken = _mutationCancellation.Token;
-        bool isRead = summary.IsUnread;
         IsReadStateChanging = true;
         ReadStateErrorMessage = null;
         try
         {
-            await provider.SetReadStateAsync(account, folder, summary.MessageKey, isRead, cancellationToken);
-            if (!IsCurrent(account.Id, folder.Key, _viewVersion, cancellationToken)
-                || SelectedMessageSummary?.MessageKey != summary.MessageKey)
+            if (origin is ReadStateMutationOrigin.AutomaticDwell
+                && !IsCurrentReadDwellTarget(expectedTarget))
             {
                 return;
             }
 
+            await provider.SetReadStateAsync(account, folder, summary.MessageKey, isRead, cancellationToken);
+            if (!IsCurrent(account.Id, folder.Key, expectedTarget.ViewVersion, cancellationToken)
+                || SelectedMessageSummary?.MessageKey != summary.MessageKey
+                || (origin is ReadStateMutationOrigin.AutomaticDwell
+                    && !IsCurrentReadDwellTarget(expectedTarget)))
+            {
+                return;
+            }
+
+            if (origin is ReadStateMutationOrigin.Manual && !isRead)
+            {
+                _manualUnreadSuppressionTarget = expectedTarget;
+            }
+
             bool isUnread = !isRead;
+            if (folder.Kind is MailFolderKind.Inbox
+                && account.InboxUnreadCount is int inboxUnreadCount
+                && summary.IsUnread != isUnread)
+            {
+                account.InboxUnreadCount = Math.Max(0, inboxUnreadCount + (isUnread ? 1 : -1));
+            }
+
             MailMessageSummary updatedSummary = summary with { IsUnread = isUnread };
             FolderState state = GetState(account.Id, folder.Key);
             int stateIndex = state.Messages.FindIndex(message => message.MessageKey == summary.MessageKey);
@@ -962,6 +1152,56 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         {
             IsReadStateChanging = false;
         }
+    }
+
+    public async Task TrustCurrentRemoteImageSenderAsync(CancellationToken cancellationToken = default)
+    {
+        if (!TryGetCurrentRemoteImageSenderTrustTarget(out RemoteImageSenderTrustTarget target))
+        {
+            return;
+        }
+
+        await _remoteImageSenderTrustStore.TrustAsync(target.AccountId, target.NormalizedAddress, cancellationToken);
+        if (IsCurrentRemoteImageSenderTrustTarget(target))
+        {
+            SetCurrentRemoteImageSenderTrustState(canTrust: true, isTrusted: true);
+        }
+    }
+
+    public async Task RevokeCurrentRemoteImageSenderTrustAsync(CancellationToken cancellationToken = default)
+    {
+        if (!TryGetCurrentRemoteImageSenderTrustTarget(out RemoteImageSenderTrustTarget target))
+        {
+            return;
+        }
+
+        await _remoteImageSenderTrustStore.RevokeAsync(target.AccountId, target.NormalizedAddress, cancellationToken);
+        if (IsCurrentRemoteImageSenderTrustTarget(target))
+        {
+            SetCurrentRemoteImageSenderTrustState(canTrust: true, isTrusted: false);
+        }
+    }
+
+    public Task DeleteRemoteImageSenderTrustAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default) =>
+        _remoteImageSenderTrustStore.DeleteAccountAsync(accountId, cancellationToken);
+
+    internal void SetDetailHostActive(bool isActive)
+    {
+        if (_disposed || _isDetailHostActive == isActive)
+        {
+            return;
+        }
+
+        _isDetailHostActive = isActive;
+        if (!isActive)
+        {
+            CancelReadDwell(resetDetailSession: false);
+            return;
+        }
+
+        UpdateReadDwellState();
     }
 
     private async Task AuthorizeGmailAsync()
@@ -1041,6 +1281,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         _isApplyingState = true;
         try
         {
+            SetContentMode(state.ContentMode, state);
             Messages.Clear();
             foreach (MailMessageSummary summary in state.Messages)
             {
@@ -1076,6 +1317,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         {
             _isApplyingState = false;
         }
+
+        UpdateReadDwellState();
     }
 
     private void ClearDisplayedState(bool clearFolders, bool preserveLoading = false)
@@ -1083,6 +1326,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         _isApplyingState = true;
         try
         {
+            SetContentMode(MailInboxPresentationMode.MessageList);
             if (clearFolders)
             {
                 Folders.Clear();
@@ -1148,8 +1392,88 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             or nameof(MailComposeViewModel.IsClosed)
             or nameof(MailComposeViewModel.Draft))
         {
+            if (Compose.IsOpen)
+            {
+                CancelReadDwell(resetDetailSession: true);
+            }
+
             OnPropertyChanged(nameof(IsComposeOpen));
+            RaisePresentationStateChanged();
         }
+    }
+
+    private void OpenMessage(MailMessageSummary? summary)
+    {
+        if (summary is null || ActiveAccount is null || SelectedFolder is null)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(SelectedMessageSummary, summary))
+        {
+            SelectedMessageSummary = summary;
+        }
+        else
+        {
+            SetContentMode(MailInboxPresentationMode.MessageDetail);
+        }
+    }
+
+    private bool CanOpenMessage(MailMessageSummary? summary) =>
+        IsActive && summary is not null && !IsComposeOpen;
+
+    private void ShowMessageList() => SetContentMode(MailInboxPresentationMode.MessageList);
+
+    private bool CanShowMessageList() => IsMessageDetailVisible;
+
+    private void SetContentMode(
+        MailInboxPresentationMode mode,
+        FolderState? state = null)
+    {
+        if (mode is MailInboxPresentationMode.Compose)
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), "Compose mode is derived from the compose view model.");
+        }
+
+        FolderState? currentState = state;
+        if (currentState is null && ActiveAccount is MailAccount account && SelectedFolder is MailFolder folder)
+        {
+            currentState = GetState(account.Id, folder.Key);
+        }
+
+        if (currentState is not null)
+        {
+            currentState.ContentMode = mode;
+        }
+
+        MailInboxPresentationMode previousMode = _contentMode;
+        if (previousMode == mode)
+        {
+            RaisePresentationStateChanged();
+            return;
+        }
+
+        if (previousMode is MailInboxPresentationMode.MessageDetail
+            || mode is MailInboxPresentationMode.MessageDetail)
+        {
+            CancelReadDwell(resetDetailSession: true);
+        }
+
+        _contentMode = mode;
+        RaisePresentationStateChanged();
+    }
+
+    private void RaisePresentationStateChanged()
+    {
+        OnPropertyChanged(nameof(PresentationMode));
+        OnPropertyChanged(nameof(IsMessageListVisible));
+        OnPropertyChanged(nameof(IsMessageDetailVisible));
+        OnPropertyChanged(nameof(ShouldDisplayHtmlRenderer));
+        OnPropertyChanged(nameof(ShowPrintAction));
+        OnPropertyChanged(nameof(CanPrintMessage));
+        OpenMessageCommand.NotifyCanExecuteChanged();
+        BackToMessageListCommand.NotifyCanExecuteChanged();
+        UpdateReadDwellState();
     }
 
     private void OnMailSent(object? sender, MailSentEventArgs eventArgs)
@@ -1268,6 +1592,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         RefreshCommand.NotifyCanExecuteChanged();
         LoadMoreCommand.NotifyCanExecuteChanged();
         RetryCommand.NotifyCanExecuteChanged();
+        OpenMessageCommand.NotifyCanExecuteChanged();
     }
 
     private void RaiseReadStateChanged()
@@ -1279,7 +1604,52 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ReadStateAuthorizationText));
         SetReadStateCommand.NotifyCanExecuteChanged();
         AuthorizeGmailCommand.NotifyCanExecuteChanged();
+        OpenMessageCommand.NotifyCanExecuteChanged();
+        BackToMessageListCommand.NotifyCanExecuteChanged();
         SaveAttachmentCommand.NotifyCanExecuteChanged();
+        UpdateReadDwellState();
+    }
+
+    private async Task RefreshInboxUnreadCountAsync(
+        MailAccount account,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        IMailReadProvider provider = _providerFactory.Get(account.Provider);
+        int? count = await TryGetInboxUnreadCountAsync(provider, account, cancellationToken);
+        if (count is int exactUnreadCount && IsCurrentAccount(account.Id, version, cancellationToken))
+        {
+            account.InboxUnreadCount = exactUnreadCount;
+        }
+    }
+
+    private static async Task<int?> TryGetInboxUnreadCountAsync(
+        IMailReadProvider provider,
+        MailAccount account,
+        CancellationToken cancellationToken)
+    {
+        if (provider is not IMailInboxUnreadCountProvider unreadCountProvider)
+        {
+            return null;
+        }
+
+        try
+        {
+            int count = await unreadCountProvider.GetInboxUnreadCountAsync(account, cancellationToken);
+            return Math.Max(0, count);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (MailReadException)
+        {
+            return null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private void NotifyCommandStates()
@@ -1290,6 +1660,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         RetryMessageCommand.NotifyCanExecuteChanged();
         SetReadStateCommand.NotifyCanExecuteChanged();
         AuthorizeGmailCommand.NotifyCanExecuteChanged();
+        OpenMessageCommand.NotifyCanExecuteChanged();
+        BackToMessageListCommand.NotifyCanExecuteChanged();
+        SaveAttachmentCommand.NotifyCanExecuteChanged();
     }
 
     private bool TryGetCurrentRemoteImageConsentKey(out RemoteImageConsentKey key)
@@ -1304,15 +1677,262 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         return false;
     }
 
+    private void BeginRemoteImageSenderTrustLookup()
+    {
+        CancelRemoteImageSenderTrustLookup();
+        bool canTrust = TryGetCurrentRemoteImageSenderTrustTarget(out RemoteImageSenderTrustTarget target);
+        SetCurrentRemoteImageSenderTrustState(canTrust, isTrusted: false);
+        if (!canTrust || _disposed)
+        {
+            CurrentRemoteImageSenderTrustTask = Task.CompletedTask;
+            return;
+        }
+
+        CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(GetActivationToken());
+        _remoteImageSenderTrustCancellation = cancellation;
+        CurrentRemoteImageSenderTrustTask = ResolveRemoteImageSenderTrustAsync(target, cancellation);
+    }
+
+    private async Task ResolveRemoteImageSenderTrustAsync(
+        RemoteImageSenderTrustTarget target,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            bool trusted = await _remoteImageSenderTrustStore.IsTrustedAsync(
+                target.AccountId,
+                target.NormalizedAddress,
+                cancellation.Token);
+            if (!cancellation.IsCancellationRequested && IsCurrentRemoteImageSenderTrustTarget(target))
+            {
+                SetCurrentRemoteImageSenderTrustState(canTrust: true, isTrusted: trusted);
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // A different account or message owns the current sender-trust state.
+        }
+        catch (Exception exception) when (
+            exception is System.IO.IOException
+                or UnauthorizedAccessException
+                or System.Security.Cryptography.CryptographicException)
+        {
+            if (!cancellation.IsCancellationRequested && IsCurrentRemoteImageSenderTrustTarget(target))
+            {
+                SetCurrentRemoteImageSenderTrustState(canTrust: true, isTrusted: false);
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_remoteImageSenderTrustCancellation, cancellation))
+            {
+                _remoteImageSenderTrustCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private bool TryGetCurrentRemoteImageSenderTrustTarget(out RemoteImageSenderTrustTarget target)
+    {
+        if (ActiveAccount is MailAccount account
+            && SelectedMessageContent is MailMessageContent
+            {
+                HasRemoteImages: true,
+                HasUnambiguousFromAddress: true
+            } content
+            && RemoteImageSenderIdentity.TryNormalize(content.FromAddress, out string normalizedAddress))
+        {
+            target = new RemoteImageSenderTrustTarget(account.Id, content.MessageKey, normalizedAddress);
+            return true;
+        }
+
+        target = default;
+        return false;
+    }
+
+    private bool IsCurrentRemoteImageSenderTrustTarget(RemoteImageSenderTrustTarget target) =>
+        ActiveAccount?.Id == target.AccountId
+        && string.Equals(SelectedMessageContent?.MessageKey, target.MessageKey, StringComparison.Ordinal)
+        && SelectedMessageContent?.HasUnambiguousFromAddress == true
+        && RemoteImageSenderIdentity.TryNormalize(SelectedMessageContent.FromAddress, out string normalizedAddress)
+        && string.Equals(normalizedAddress, target.NormalizedAddress, StringComparison.Ordinal);
+
+    private void SetCurrentRemoteImageSenderTrustState(bool canTrust, bool isTrusted)
+    {
+        bool changed = _canTrustCurrentRemoteImageSender != canTrust
+            || _isCurrentRemoteImageSenderTrusted != isTrusted;
+        _canTrustCurrentRemoteImageSender = canTrust;
+        _isCurrentRemoteImageSenderTrusted = isTrusted;
+        if (changed)
+        {
+            OnPropertyChanged(nameof(CanTrustCurrentRemoteImageSender));
+            OnPropertyChanged(nameof(IsCurrentRemoteImageSenderTrusted));
+        }
+
+        RaiseRemoteImageConsentStateChanged();
+    }
+
+    private void CancelRemoteImageSenderTrustLookup()
+    {
+        _remoteImageSenderTrustCancellation?.Cancel();
+        _remoteImageSenderTrustCancellation?.Dispose();
+        _remoteImageSenderTrustCancellation = null;
+    }
+
     private void RaiseRemoteImageConsentStateChanged()
     {
         OnPropertyChanged(nameof(AreRemoteImagesShown));
         OnPropertyChanged(nameof(ShowRemoteImagesBanner));
         OnPropertyChanged(nameof(CanShowRemoteImages));
+        OnPropertyChanged(nameof(ShowOneTimeRemoteImagesAction));
+        OnPropertyChanged(nameof(ShowAlwaysRemoteImagesFromSenderAction));
+        OnPropertyChanged(nameof(ShowRevokeRemoteImagesFromSenderAction));
+        OnPropertyChanged(nameof(CanAlwaysShowRemoteImagesFromSender));
+        OnPropertyChanged(nameof(RemoteImagesBannerText));
+    }
+
+    private void UpdateReadDwellState()
+    {
+        if (!CanStartReadDwell(out MailReadDwellTarget target))
+        {
+            if (_readDwellCancellation is not null
+                && _readDwellTarget == _automaticReadMutationTarget)
+            {
+                return;
+            }
+
+            if (_readDwellCancellation is not null)
+            {
+                CancelReadDwell(resetDetailSession: false);
+            }
+
+            return;
+        }
+
+        if (_readDwellCancellation is not null && _readDwellTarget == target)
+        {
+            return;
+        }
+
+        CancelReadDwell(resetDetailSession: false);
+        CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(GetActivationToken());
+        _readDwellCancellation = cancellation;
+        _readDwellTarget = target;
+        _currentReadDwellTask = RunReadDwellAsync(target, cancellation);
+    }
+
+    private bool CanStartReadDwell(out MailReadDwellTarget target)
+    {
+        if (!TryGetCurrentReadDwellTarget(out target)
+            || !_isDetailHostActive
+            || _isApplyingState
+            || !IsMessageDetailVisible
+            || IsComposeOpen
+            || SelectedMessageSummary?.IsUnread != true
+            || SelectedMessageContent?.IsUnread != true
+            || SelectedFolder?.SupportsReadState != true
+            || !_readStateCapability.CanSetReadState
+            || IsReadStateChanging
+            || _readDwellAttemptedTarget == target
+            || _manualUnreadSuppressionTarget == target)
+        {
+            target = default;
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task RunReadDwellAsync(
+        MailReadDwellTarget target,
+        CancellationTokenSource cancellation)
+    {
+        CancellationToken cancellationToken = cancellation.Token;
+        try
+        {
+            await _readDwellScheduler.DelayAsync(MailReadDwellDelay, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentReadDwellTarget(target)
+                || !CanStartReadDwell(out MailReadDwellTarget currentTarget)
+                || currentTarget != target)
+            {
+                return;
+            }
+
+            _readDwellAttemptedTarget = target;
+            _automaticReadMutationTarget = target;
+            try
+            {
+                await ChangeReadStateAsync(
+                    isRead: true,
+                    ReadStateMutationOrigin.AutomaticDwell,
+                    target,
+                    cancellationToken);
+            }
+            finally
+            {
+                _automaticReadMutationTarget = null;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_readDwellCancellation, cancellation))
+            {
+                _readDwellCancellation = null;
+                _readDwellTarget = null;
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private bool TryGetCurrentReadDwellTarget(out MailReadDwellTarget target)
+    {
+        if (ActiveAccount is MailAccount account
+            && SelectedFolder is MailFolder folder
+            && SelectedMessageSummary is MailMessageSummary summary
+            && SelectedMessageContent is MailMessageContent content
+            && string.Equals(summary.MessageKey, content.MessageKey, StringComparison.Ordinal))
+        {
+            target = new MailReadDwellTarget(
+                account.Id,
+                folder.Key,
+                summary.MessageKey,
+                _viewVersion);
+            return true;
+        }
+
+        target = default;
+        return false;
+    }
+
+    private bool IsCurrentReadDwellTarget(MailReadDwellTarget target) =>
+        TryGetCurrentReadDwellTarget(out MailReadDwellTarget current)
+        && current == target
+        && _isDetailHostActive
+        && IsMessageDetailVisible
+        && !IsComposeOpen;
+
+    private void CancelReadDwell(bool resetDetailSession)
+    {
+        CancellationTokenSource? cancellation = _readDwellCancellation;
+        _readDwellCancellation = null;
+        _readDwellTarget = null;
+        _automaticReadMutationTarget = null;
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        if (resetDetailSession)
+        {
+            _readDwellAttemptedTarget = null;
+            _manualUnreadSuppressionTarget = null;
+        }
     }
 
     private void CancelActivation()
     {
+        CancelReadDwell(resetDetailSession: true);
         CancelListOperation();
         CancelMessageOperation();
         CancelMutationOperation();
@@ -1352,6 +1972,25 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
+    private enum ReadStateMutationOrigin
+    {
+        Manual,
+        AutomaticDwell
+    }
+
+    private readonly record struct MailReadDwellTarget(
+        Guid AccountId,
+        string FolderKey,
+        string MessageKey,
+        long ViewVersion)
+    {
+        public bool Matches(Guid accountId, string folderKey, string messageKey, long viewVersion) =>
+            AccountId == accountId
+            && string.Equals(FolderKey, folderKey, StringComparison.Ordinal)
+            && string.Equals(MessageKey, messageKey, StringComparison.Ordinal)
+            && ViewVersion == viewVersion;
+    }
+
     private sealed class AccountFolderState
     {
         public List<MailFolder> Folders { get; } = [];
@@ -1367,6 +2006,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         public bool HasLoaded { get; set; }
         public string? ListErrorMessage { get; set; }
         public MailReadFailureKind? FailureKind { get; set; }
+        public MailInboxPresentationMode ContentMode { get; set; } = MailInboxPresentationMode.MessageList;
 
         public void Reset()
         {
@@ -1376,6 +2016,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             HasLoaded = false;
             ListErrorMessage = null;
             FailureKind = null;
+            ContentMode = MailInboxPresentationMode.MessageList;
         }
 
         public void PrepareRefresh()
@@ -1397,4 +2038,25 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private readonly record struct FolderStateKey(Guid AccountId, string FolderKey);
     private readonly record struct MessageBodyCacheKey(Guid AccountId, string MessageKey);
     private readonly record struct RemoteImageConsentKey(Guid AccountId, string MessageKey);
+    private readonly record struct RemoteImageSenderTrustTarget(
+        Guid AccountId,
+        string MessageKey,
+        string NormalizedAddress);
+}
+
+internal interface IMailReadDwellScheduler
+{
+    Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken);
+}
+
+internal sealed class SystemMailReadDwellScheduler : IMailReadDwellScheduler
+{
+    public static SystemMailReadDwellScheduler Instance { get; } = new();
+
+    private SystemMailReadDwellScheduler()
+    {
+    }
+
+    public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
+        Task.Delay(delay, cancellationToken);
 }

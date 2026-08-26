@@ -57,7 +57,7 @@ public sealed class Stage72GmailOAuthTests
 
         Assert.Equal("test-code", response.Code);
         Assert.Equal("test-state", response.State);
-        Assert.Contains("Можно вернуться в UnifiedMessenger", page, StringComparison.Ordinal);
+        Assert.Contains("Можно вернуться в Lantern", page, StringComparison.Ordinal);
         Assert.DoesNotContain("test-code", page, StringComparison.Ordinal);
         Assert.DoesNotContain("test-state", page, StringComparison.Ordinal);
     }

@@ -186,6 +186,7 @@ public sealed class JsonSettingsService : ISettingsService
             if (resetRuntimeActivity)
             {
                 service.UnreadCount = null;
+                service.LanternUnviewedActivityCount = 0;
                 service.HasUnreadActivity = false;
             }
         }

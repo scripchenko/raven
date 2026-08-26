@@ -1,7 +1,9 @@
 using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
+using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
+using UnifiedMessenger.App.Services.Branding;
 using UnifiedMessenger.App.Services.Mail;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
@@ -23,6 +25,7 @@ public partial class App : System.Windows.Application
     private IWebViewEventCoordinator? _webViewEventCoordinator;
     private IWebViewSessionManager? _webViewSessionManager;
     private CancellationTokenSource? _startupCancellation;
+    private CancellationTokenSource? _startupMailUnreadCancellation;
     private StartupWindow? _startupWindow;
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -85,6 +88,7 @@ public partial class App : System.Windows.Application
             window.Show();
             _trayCoordinator = _serviceProvider.GetRequiredService<IApplicationTrayCoordinator>();
             _trayCoordinator.Initialize();
+            StartStartupMailUnreadRefresh(loadResult.Settings.MailAccounts);
 
             if (!string.IsNullOrWhiteSpace(loadResult.WarningMessage))
             {
@@ -99,7 +103,7 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             System.Windows.MessageBox.Show(
-                $"Не удалось запустить UnifiedMessenger.\n\n{exception.Message}",
+                $"Не удалось запустить {BrandIdentity.DisplayName}.\n\n{exception.Message}",
                 "Ошибка запуска",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -118,6 +122,7 @@ public partial class App : System.Windows.Application
         _webViewSessionManager = null;
         _trayCoordinator = null;
         CloseStartupWindow();
+        CancelStartupMailUnreadRefresh();
         _startupCancellation?.Dispose();
         _startupCancellation = null;
         _serviceProvider?.Dispose();
@@ -128,6 +133,7 @@ public partial class App : System.Windows.Application
     {
         _exitCoordinator?.BeginSessionEnding();
         _trayCoordinator?.BeginShutdown();
+        CancelStartupMailUnreadRefresh();
         _webViewEventCoordinator?.Dispose();
         _webViewEventCoordinator = null;
         _webViewSessionManager?.BeginShutdown();
@@ -142,6 +148,7 @@ public partial class App : System.Windows.Application
         }
 
         _startupCancellation?.Cancel();
+        CancelStartupMailUnreadRefresh();
         await ShutdownApplicationAsync();
     }
 
@@ -203,6 +210,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<IMailCredentialProtector, DpapiMailCredentialProtector>();
         services.AddSingleton<IMailCredentialStore, FileMailCredentialStore>();
+        services.AddSingleton<IRemoteImageSenderTrustProtector, DpapiRemoteImageSenderTrustProtector>();
+        services.AddSingleton<IRemoteImageSenderTrustStore, FileRemoteImageSenderTrustStore>();
         services.AddSingleton<IMailConnectionValidator, MailKitConnectionValidator>();
         services.AddSingleton(GmailOAuthOptions.Default);
         services.AddSingleton<IGoogleOAuthClientConfigurationSource, GoogleOAuthClientConfigurationSource>();
@@ -238,6 +247,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailAttachmentSaveService, MailAttachmentSaveService>();
         services.AddSingleton<IMailOutgoingAttachmentMaterializer, MailOutgoingAttachmentMaterializer>();
         services.AddSingleton<IMailReadProviderFactory, MailReadProviderFactory>();
+        services.AddSingleton<IStartupMailUnreadRefreshService, StartupMailUnreadRefreshService>();
         services.AddSingleton<IMailComposeRequestFactory, MailComposeRequestFactory>();
         services.AddSingleton<IMailComposePreparationService, MailComposePreparationService>();
         services.AddSingleton<IMailComposeConfirmationService, WpfMailComposeConfirmationService>();
@@ -299,6 +309,21 @@ public partial class App : System.Windows.Application
         _startupWindow.ExitRequested -= OnStartupExitRequested;
         _startupWindow.CompleteAndClose();
         _startupWindow = null;
+    }
+
+    private void StartStartupMailUnreadRefresh(IEnumerable<MailAccount> accounts)
+    {
+        _startupMailUnreadCancellation = new CancellationTokenSource();
+        IStartupMailUnreadRefreshService refreshService =
+            _serviceProvider!.GetRequiredService<IStartupMailUnreadRefreshService>();
+        _ = refreshService.RefreshAsync(accounts, _startupMailUnreadCancellation.Token);
+    }
+
+    private void CancelStartupMailUnreadRefresh()
+    {
+        _startupMailUnreadCancellation?.Cancel();
+        _startupMailUnreadCancellation?.Dispose();
+        _startupMailUnreadCancellation = null;
     }
 
 }

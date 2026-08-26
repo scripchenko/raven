@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
+using UnifiedMessenger.App.Services.Branding;
 using UnifiedMessenger.App.ViewModels;
 
 namespace UnifiedMessenger.App.Services.Tray;
@@ -74,8 +75,8 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         }
 
         return _trayIcon.TryShowBalloon(
-            "UnifiedMessenger",
-            "UnifiedMessenger продолжает работать в области уведомлений");
+            BrandIdentity.DisplayName,
+            "Lantern продолжает работать в области уведомлений");
     }
 
     public void BeginShutdown()

@@ -11,6 +11,7 @@ using Google.Apis.Services;
 using MimeKit;
 using UnifiedMessenger.App.Models;
 using GmailMessage = Google.Apis.Gmail.v1.Data.Message;
+using GmailMessagePart = Google.Apis.Gmail.v1.Data.MessagePart;
 
 namespace UnifiedMessenger.App.Services.Mail;
 
@@ -20,7 +21,10 @@ internal sealed record GmailApiSummaryData(
     string? From,
     long? InternalDate,
     string? Snippet,
-    IReadOnlyList<string> LabelIds);
+    IReadOnlyList<string> LabelIds)
+{
+    public MailMessageAttachmentSummary AttachmentSummary { get; init; } = MailMessageAttachmentSummary.Empty;
+}
 
 internal sealed record GmailApiInboxPage(
     IReadOnlyList<GmailApiSummaryData> Items,
@@ -30,6 +34,12 @@ internal sealed record GmailApiRawMessage(byte[] RawMime, bool IsUnread, string?
 
 internal interface IGmailApiReadClient
 {
+    Task<int> GetInboxUnreadCountAsync(
+        MailCredential credential,
+        Guid accountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(0);
+
     Task<GmailApiInboxPage> GetInboxPageAsync(
         MailCredential credential,
         Guid accountId,
@@ -111,12 +121,21 @@ internal sealed class GmailMailReadProvider(
     IMailCredentialStore credentialStore,
     IGmailApiReadClient apiClient,
     IMailContentExtractor contentExtractor,
-    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider
 {
     private const string MessageKeyPrefix = "gmail:";
     private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
 
     public bool Supports(MailProviderType providerType) => providerType == MailProviderType.Gmail;
+
+    public async Task<int> GetInboxUnreadCountAsync(
+        MailAccount account,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateAccount(account, pageSize: 1);
+        MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+        return await apiClient.GetInboxUnreadCountAsync(credential, account.Id, cancellationToken);
+    }
 
     public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
         MailAccount account,
@@ -329,7 +348,10 @@ internal sealed class GmailMailReadProvider(
             address,
             receivedAt,
             MailContentExtractor.NormalizePreview(WebUtility.HtmlDecode(item.Snippet ?? string.Empty)),
-            item.LabelIds.Contains(GmailSystemFolders.Unread, StringComparer.Ordinal));
+            item.LabelIds.Contains(GmailSystemFolders.Unread, StringComparer.Ordinal))
+        {
+            AttachmentSummary = item.AttachmentSummary
+        };
     }
 
     private async Task<MailCredential> LoadCredentialAsync(MailAccount account, CancellationToken cancellationToken)
@@ -394,7 +416,9 @@ internal sealed class GmailMailReadProvider(
 internal sealed class GmailApiReadClient : IGmailApiReadClient
 {
     internal const int MaximumMetadataConcurrency = 5;
+    internal const int MetadataMimeTreeDepth = 8;
     internal const string InboxLabel = GmailSystemFolders.Inbox;
+    internal static string MetadataFieldsProjection { get; } = BuildMetadataFieldsProjection();
 
     public Task<GmailApiInboxPage> GetInboxPageAsync(
         MailCredential credential,
@@ -403,6 +427,29 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
         int pageSize,
         CancellationToken cancellationToken = default) =>
         GetFolderPageAsync(credential, accountId, InboxLabel, false, pageToken, pageSize, cancellationToken);
+
+    public async Task<int> GetInboxUnreadCountAsync(
+        MailCredential credential,
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(credential, accountId, cancellationToken);
+            Google.Apis.Gmail.v1.Data.Label inbox = await session.Service.Users.Labels.Get("me", GmailSystemFolders.Inbox)
+                .ExecuteAsync(cancellationToken);
+            long unread = inbox.MessagesUnread ?? 0;
+            return unread >= int.MaxValue ? int.MaxValue : Math.Max(0, (int)unread);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw MapListException(exception);
+        }
+    }
 
     public async Task<IReadOnlySet<string>> GetSystemLabelIdsAsync(
         MailCredential credential,
@@ -588,8 +635,8 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
         try
         {
             UsersResource.MessagesResource.GetRequest request = service.Users.Messages.Get("me", messageId);
-            request.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Metadata;
-            request.MetadataHeaders = new[] { "Subject", "From", "Date" };
+            request.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Full;
+            request.Fields = MetadataFieldsProjection;
             GmailMessage message = await request.ExecuteAsync(cancellationToken);
             return (
                 index,
@@ -599,7 +646,10 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
                     GetHeader(message, "From"),
                     message.InternalDate,
                     message.Snippet,
-                    message.LabelIds?.ToArray() ?? []));
+                    message.LabelIds?.ToArray() ?? [])
+                {
+                    AttachmentSummary = GetAttachmentSummary(message.Payload)
+                });
         }
         finally
         {
@@ -610,6 +660,61 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
     private static string? GetHeader(GmailMessage message, string name) =>
         message.Payload?.Headers?.FirstOrDefault(header =>
             string.Equals(header.Name, name, StringComparison.OrdinalIgnoreCase))?.Value;
+
+    internal static MailMessageAttachmentSummary GetAttachmentSummary(GmailMessagePart? payload)
+    {
+        List<MailAttachmentPreviewItem> attachments = [];
+        CollectAttachments(payload, attachments);
+        return MailMessageAttachmentSummary.Create(attachments);
+    }
+
+    private static void CollectAttachments(
+        GmailMessagePart? part,
+        ICollection<MailAttachmentPreviewItem> attachments)
+    {
+        if (part is null)
+        {
+            return;
+        }
+
+        string? disposition = GetPartHeader(part, "Content-Disposition");
+        bool explicitAttachment = disposition?.TrimStart().StartsWith("attachment", StringComparison.OrdinalIgnoreCase) == true;
+        bool inline = disposition?.TrimStart().StartsWith("inline", StringComparison.OrdinalIgnoreCase) == true
+            || !string.IsNullOrWhiteSpace(GetPartHeader(part, "Content-ID"));
+        bool hasFileName = !string.IsNullOrWhiteSpace(part.Filename);
+        if (!inline && (explicitAttachment || hasFileName))
+        {
+            attachments.Add(new MailAttachmentPreviewItem(
+                MailAttachmentFileName.Sanitize(part.Filename),
+                string.IsNullOrWhiteSpace(part.MimeType) ? "application/octet-stream" : part.MimeType,
+                part.Body?.Size is int size && size >= 0 ? size : null));
+        }
+
+        if (part.Parts is null)
+        {
+            return;
+        }
+
+        foreach (GmailMessagePart child in part.Parts)
+        {
+            CollectAttachments(child, attachments);
+        }
+    }
+
+    private static string? GetPartHeader(GmailMessagePart part, string name) =>
+        part.Headers?.FirstOrDefault(header =>
+            string.Equals(header.Name, name, StringComparison.OrdinalIgnoreCase))?.Value;
+
+    private static string BuildMetadataFieldsProjection()
+    {
+        string partFields = "filename,mimeType,body/size,headers";
+        for (int depth = 0; depth < MetadataMimeTreeDepth; depth++)
+        {
+            partFields = $"filename,mimeType,body/size,headers,parts({partFields})";
+        }
+
+        return $"id,internalDate,labelIds,snippet,payload({partFields})";
+    }
 
     private static GoogleAuthorizationCodeFlow CreateFlow(MailCredential credential) =>
         new(

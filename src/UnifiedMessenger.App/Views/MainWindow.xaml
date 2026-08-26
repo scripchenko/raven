@@ -7,6 +7,7 @@
         xmlns:views="clr-namespace:UnifiedMessenger.App.Views"
         mc:Ignorable="d"
         Title="{Binding WindowTitle}"
+        Icon="/UnifiedMessenger.App;component/Assets/Branding/lantern.ico"
         Width="1180"
         Height="760"
         MinWidth="880"
@@ -19,9 +20,25 @@
     </Window.InputBindings>
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
-        <converters:ServiceGlyphConverter x:Key="ServiceGlyphConverter" />
+        <converters:BrandIconConverter x:Key="BrandIconConverter" />
+        <converters:BrandIconSizeConverter x:Key="BrandIconSizeConverter" />
+        <Style x:Key="SidebarUnreadBadgeStyle" TargetType="Border">
+            <Setter Property="MinWidth" Value="20" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Background" Value="#E53935" />
+            <Setter Property="CornerRadius" Value="9" />
+        </Style>
+        <Style x:Key="SidebarUnreadBadgeTextStyle" TargetType="TextBlock">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
     </Window.Resources>
-
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="84" />
@@ -36,13 +53,16 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border Width="48" Height="48" Background="{DynamicResource AccentBrush}" CornerRadius="14">
-                    <TextBlock HorizontalAlignment="Center"
-                               VerticalAlignment="Center"
-                               FontSize="22"
-                               FontWeight="Bold"
-                               Foreground="White"
-                               Text="U" />
+                <Border Width="48"
+                        Height="48"
+                        Padding="6"
+                        Background="{DynamicResource SidebarHoverBrush}"
+                        CornerRadius="14"
+                        ToolTip="Lantern">
+                    <Image Source="/UnifiedMessenger.App;component/Assets/Branding/lantern_icon.png"
+                           Stretch="Uniform"
+                           SnapsToDevicePixels="True"
+                           UseLayoutRounding="True" />
                 </Border>
 
                 <ListBox x:Name="AccountsList"
@@ -75,7 +95,9 @@
                             <Border x:Name="ServiceTile"
                                     Width="48"
                                     Height="48"
-                                    Background="{DynamicResource SidebarHoverBrush}"
+                                    Background="Transparent"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="1.5"
                                     CornerRadius="14"
                                     ToolTip="{Binding DisplayName}">
                                 <Border.ContextMenu>
@@ -90,40 +112,25 @@
                                     </ContextMenu>
                                 </Border.ContextMenu>
                                 <Grid>
-                                    <TextBlock HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"
-                                               FontWeight="SemiBold"
-                                               Foreground="White"
-                                               Text="{Binding Glyph}" />
-                                    <Border MinWidth="20"
-                                            Height="18"
-                                            Padding="4,0"
-                                            HorizontalAlignment="Right"
-                                            VerticalAlignment="Top"
-                                            Background="#E53935"
-                                            CornerRadius="9"
+                                    <Image Width="{Binding Converter={StaticResource BrandIconSizeConverter}}"
+                                           Height="{Binding Converter={StaticResource BrandIconSizeConverter}}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Source="{Binding Converter={StaticResource BrandIconConverter}}"
+                                           Stretch="Uniform"
+                                           SnapsToDevicePixels="True"
+                                           UseLayoutRounding="True" />
+                                    <Border Style="{StaticResource SidebarUnreadBadgeStyle}"
                                             Visibility="{Binding ShowUnreadBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <TextBlock HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center"
-                                                   FontSize="10"
-                                                   FontWeight="Bold"
-                                                   Foreground="White"
+                                        <TextBlock Style="{StaticResource SidebarUnreadBadgeTextStyle}"
                                                    Text="{Binding UnreadBadgeText}" />
                                     </Border>
-                                    <Ellipse Width="10"
-                                             Height="10"
-                                             Margin="0,0,1,1"
-                                             HorizontalAlignment="Right"
-                                             VerticalAlignment="Bottom"
-                                             Fill="#E53935"
-                                             Stroke="White"
-                                             StrokeThickness="2"
-                                             Visibility="{Binding ShowUnreadDot, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 </Grid>
                             </Border>
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                    <Setter TargetName="ServiceTile" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                    <Setter TargetName="ServiceTile" Property="Background" Value="{DynamicResource SidebarHoverBrush}" />
+                                    <Setter TargetName="ServiceTile" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsEnabled}" Value="False">
                                     <Setter TargetName="ServiceTile" Property="Opacity" Value="0.42" />
@@ -177,33 +184,35 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" VerticalAlignment="Center" Orientation="Horizontal">
-                        <Button Command="{Binding GoBackCommand}"
-                                Content="←"
-                                Style="{StaticResource ToolbarButtonStyle}"
-                                ToolTip="Назад" />
-                        <Button Command="{Binding GoForwardCommand}"
-                                Content="→"
-                                Style="{StaticResource ToolbarButtonStyle}"
-                                ToolTip="Вперёд" />
                         <Button Command="{Binding ReloadCommand}"
                                 Content="↻"
                                 Style="{StaticResource ToolbarButtonStyle}"
-                                ToolTip="Обновить" />
-                        <Button Command="{Binding NavigateHomeCommand}"
-                                Content="⌂"
-                                Style="{StaticResource ToolbarButtonStyle}"
-                                ToolTip="Домой" />
+                                ToolTip="Обновить сервис"
+                                Visibility="{Binding HasActiveWebView, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" Margin="18,0" VerticalAlignment="Center">
-                        <TextBlock FontSize="17"
-                                   FontWeight="SemiBold"
-                                   Text="{Binding SelectedAccountDisplayName}" />
-                        <ProgressBar Height="2"
-                                     Margin="0,6,0,0"
-                                     IsIndeterminate="True"
-                                     Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    </StackPanel>
+                    <Grid Grid.Column="1" Margin="18,0" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Image Width="30"
+                               Height="30"
+                               Margin="0,0,11,0"
+                               Source="{Binding SelectedNavigationItem, Converter={StaticResource BrandIconConverter}}"
+                               Stretch="Uniform"
+                               SnapsToDevicePixels="True"
+                               UseLayoutRounding="True" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock FontSize="17"
+                                       FontWeight="SemiBold"
+                                       Text="{Binding SelectedAccountDisplayName}" />
+                            <ProgressBar Height="2"
+                                         Margin="0,6,0,0"
+                                         IsIndeterminate="True"
+                                         Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </StackPanel>
+                    </Grid>
 
                     <StackPanel Grid.Column="2" VerticalAlignment="Center" Orientation="Horizontal">
                         <Button Margin="0,0,10,0"
@@ -211,14 +220,8 @@
                                 Content="{Binding MuteButtonText}"
                                 IsEnabled="{Binding HasSelectedService}"
                                 Style="{StaticResource ToolbarButtonStyle}"
-                                ToolTip="{Binding MuteButtonToolTip}" />
-                        <Border Padding="10,5"
-                                VerticalAlignment="Center"
-                                Background="{DynamicResource AccentSoftBrush}"
-                                CornerRadius="10"
-                                ToolTip="{Binding WebViewRuntimeVersion, StringFormat=WebView2 Runtime {0}}">
-                            <TextBlock FontSize="12" Foreground="{DynamicResource AccentBrush}" Text="{Binding SelectedAccountLabel}" />
-                        </Border>
+                                ToolTip="{Binding MuteButtonToolTip}"
+                                Visibility="{Binding HasActiveWebView, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -271,7 +274,7 @@
                         <ProgressBar Width="220" Height="4" IsIndeterminate="True" />
                         <TextBlock Margin="0,18,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Подготовка отдельного защищённого профиля WebView2…" />
+                                   Text="Подготовка отдельного защищённого профиля…" />
                     </StackPanel>
                 </Border>
 

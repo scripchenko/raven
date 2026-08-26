@@ -100,6 +100,7 @@ public partial class MainWindow : Window
         ApplySavedWindowSettings(viewModel.WindowSettings);
         Loaded += OnLoaded;
         Activated += OnActivated;
+        Deactivated += OnDeactivated;
         SourceInitialized += OnSourceInitialized;
         LocationChanged += OnWindowLocationChanged;
         StateChanged += OnWindowStateChanged;
@@ -107,6 +108,10 @@ public partial class MainWindow : Window
         WebViewContainer.SizeChanged += OnWebViewContainerSizeChanged;
         MailInboxContent.HtmlRendererSurface.SizeChanged += OnMailRendererSurfaceSizeChanged;
         MailInboxContent.ShowRemoteImagesRequested += OnShowRemoteImagesRequested;
+        MailInboxContent.AlwaysShowRemoteImagesFromSenderRequested += OnAlwaysShowRemoteImagesFromSenderRequested;
+        MailInboxContent.RevokeRemoteImagesFromSenderRequested += OnRevokeRemoteImagesFromSenderRequested;
+        MailInboxContent.PrintRequested += OnPrintRequested;
+        _mailMessageHtmlRenderer.PrintAvailabilityChanged += OnMailRendererPrintAvailabilityChanged;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _mailInboxViewModel.PropertyChanged += OnMailInboxViewModelPropertyChanged;
         _viewModel.SelectedServiceChanged += OnSelectedServiceChanged;
@@ -124,6 +129,7 @@ public partial class MainWindow : Window
     {
         Loaded -= OnLoaded;
         Activated -= OnActivated;
+        Deactivated -= OnDeactivated;
         SourceInitialized -= OnSourceInitialized;
         LocationChanged -= OnWindowLocationChanged;
         StateChanged -= OnWindowStateChanged;
@@ -131,6 +137,10 @@ public partial class MainWindow : Window
         WebViewContainer.SizeChanged -= OnWebViewContainerSizeChanged;
         MailInboxContent.HtmlRendererSurface.SizeChanged -= OnMailRendererSurfaceSizeChanged;
         MailInboxContent.ShowRemoteImagesRequested -= OnShowRemoteImagesRequested;
+        MailInboxContent.AlwaysShowRemoteImagesFromSenderRequested -= OnAlwaysShowRemoteImagesFromSenderRequested;
+        MailInboxContent.RevokeRemoteImagesFromSenderRequested -= OnRevokeRemoteImagesFromSenderRequested;
+        MailInboxContent.PrintRequested -= OnPrintRequested;
+        _mailMessageHtmlRenderer.PrintAvailabilityChanged -= OnMailRendererPrintAvailabilityChanged;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _mailInboxViewModel.PropertyChanged -= OnMailInboxViewModelPropertyChanged;
         _viewModel.SelectedServiceChanged -= OnSelectedServiceChanged;
@@ -151,6 +161,7 @@ public partial class MainWindow : Window
         _remoteImageLoadCancellation?.Cancel();
         _remoteImageLoadCancellation?.Dispose();
         _remoteImageLoadCancellation = null;
+        _mailInboxViewModel.SetDetailHostActive(false);
         _loadedRemoteImages = new Dictionary<string, MailImageContent>(StringComparer.Ordinal);
         _sessionRemoteImages.Clear();
         _lifetimeCancellation.Cancel();
@@ -176,6 +187,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs eventArgs)
     {
+        _mailInboxViewModel.SetDetailHostActive(false);
         bool shutdownStarted = Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished;
         if (_exitCoordinator.ShouldHideToTray(_viewModel.CloseToTray, shutdownStarted))
         {
@@ -218,6 +230,7 @@ public partial class MainWindow : Window
             await _mailInboxViewModel.ActivateAsync(
                 _viewModel.SelectedMailAccount,
                 _lifetimeCancellation.Token);
+            UpdateMailDetailActivity();
             return;
         }
 
@@ -229,6 +242,7 @@ public partial class MainWindow : Window
             await _mailInboxViewModel.ActivateAsync(
                 _viewModel.SelectedMailAccount,
                 _lifetimeCancellation.Token);
+            UpdateMailDetailActivity();
             return;
         }
 
@@ -237,10 +251,12 @@ public partial class MainWindow : Window
         await _mailInboxViewModel.ActivateAsync(
             _viewModel.SelectedMailAccount,
             _lifetimeCancellation.Token);
+        UpdateMailDetailActivity();
     }
 
     private async void OnSelectedServiceChanged(object? sender, EventArgs eventArgs)
     {
+        UpdateMailDetailActivity();
         try
         {
             Task mailActivation = _mailInboxViewModel.ActivateAsync(
@@ -259,6 +275,7 @@ public partial class MainWindow : Window
             await _viewModel.PersistSelectionAsync();
             await ShowSelectedServiceAsync();
             await mailActivation;
+            UpdateMailDetailActivity();
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
@@ -273,7 +290,11 @@ public partial class MainWindow : Window
     {
         _viewModel.MarkSelectedServiceViewed(IsVisible, IsActive);
         UpdateDirectSurface(moveFocus: true);
+        UpdateMailDetailActivity();
     }
+
+    private void OnDeactivated(object? sender, EventArgs eventArgs) =>
+        UpdateMailDetailActivity();
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
@@ -282,6 +303,7 @@ public partial class MainWindow : Window
         {
             UpdateDirectSurface(moveFocus: false);
             UpdateMailRendererSurface();
+            UpdateMailDetailActivity();
             if (eventArgs.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen)
                 && !_viewModel.IsSettingsOpen)
             {
@@ -297,9 +319,16 @@ public partial class MainWindow : Window
 
     private async void OnMailInboxViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
+        UpdateMailDetailActivity();
         if (eventArgs.PropertyName == nameof(MailInboxViewModel.IsComposeOpen))
         {
             _mailRendererWindowLifecycle.SetComposeActive(_mailInboxViewModel.IsComposeOpen);
+        }
+
+        if (ShouldLoadTrustedRemoteImages(_mailInboxViewModel, eventArgs.PropertyName))
+        {
+            await LoadCurrentRemoteImagesAsync();
+            return;
         }
 
         if (!ShouldRefreshMailRendererContent(_mailInboxViewModel, eventArgs.PropertyName))
@@ -318,9 +347,17 @@ public partial class MainWindow : Window
             nameof(MailInboxViewModel.SelectedMessageContent) => !viewModel.IsReadStateMetadataUpdate,
             nameof(MailInboxViewModel.ActiveAccount)
                 or nameof(MailInboxViewModel.IsMessageLoading)
-                or nameof(MailInboxViewModel.IsComposeOpen) => true,
+                or nameof(MailInboxViewModel.IsComposeOpen)
+                or nameof(MailInboxViewModel.IsMessageDetailVisible) => true,
             _ => false
         };
+
+    internal static bool ShouldLoadTrustedRemoteImages(
+        MailInboxViewModel viewModel,
+        string? propertyName) =>
+        propertyName == nameof(MailInboxViewModel.IsCurrentRemoteImageSenderTrusted)
+        && viewModel.IsCurrentRemoteImageSenderTrusted
+        && !viewModel.AreRemoteImagesShown;
 
     private async Task InitializeSelectedServiceAfterSettingsAsync()
     {
@@ -395,12 +432,14 @@ public partial class MainWindow : Window
     {
         UpdateDirectSurface(moveFocus: false);
         UpdateMailRendererSurface();
+        UpdateMailDetailActivity();
     }
 
     private async void OnWindowVisibilityChanged(object sender, DependencyPropertyChangedEventArgs eventArgs)
     {
         UpdateDirectSurface(moveFocus: false);
         UpdateMailRendererSurface();
+        UpdateMailDetailActivity();
         if (!IsVisible && !_lifetimeCancellation.IsCancellationRequested)
         {
             await PrimeDeferredServicesWhileHiddenAsync(_lifetimeCancellation.Token);
@@ -754,6 +793,9 @@ public partial class MainWindow : Window
 
         try
         {
+            await _mailInboxViewModel.DeleteRemoteImageSenderTrustAsync(
+                account.Id,
+                _lifetimeCancellation.Token);
             await _mailAccountProvisioningService.DeleteAsync(account.Id, _lifetimeCancellation.Token);
             _mailInboxViewModel.RemoveAccount(account.Id);
             _sessionRemoteImages.RemoveWhere(key => key.AccountId == account.Id);
@@ -937,6 +979,7 @@ public partial class MainWindow : Window
         if (!_isRuntimeAvailable
             || _mailInboxViewModel.IsMessageLoading
             || _mailInboxViewModel.IsComposeOpen
+            || !_mailInboxViewModel.IsMessageDetailVisible
             || content?.BodyKind is not MailMessageBodyKind.SanitizedHtml
             || _mailInboxViewModel.ActiveAccount is null
             || _viewModel.SelectedMailAccount?.Id != _mailInboxViewModel.ActiveAccount.Id)
@@ -994,7 +1037,60 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnShowRemoteImagesRequested(object? sender, EventArgs eventArgs)
+    private async void OnShowRemoteImagesRequested(object? sender, EventArgs eventArgs) =>
+        await LoadCurrentRemoteImagesAsync();
+
+    private async void OnAlwaysShowRemoteImagesFromSenderRequested(object? sender, EventArgs eventArgs)
+    {
+        try
+        {
+            await _mailInboxViewModel.TrustCurrentRemoteImageSenderAsync(_lifetimeCancellation.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            // The application is closing.
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось сохранить доверие к отправителю", exception);
+        }
+    }
+
+    private async void OnRevokeRemoteImagesFromSenderRequested(object? sender, EventArgs eventArgs)
+    {
+        try
+        {
+            await _mailInboxViewModel.RevokeCurrentRemoteImageSenderTrustAsync(_lifetimeCancellation.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            // The application is closing.
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Не удалось отменить доверие к отправителю", exception);
+        }
+    }
+
+    private void OnMailRendererPrintAvailabilityChanged(object? sender, EventArgs eventArgs) =>
+        _mailInboxViewModel.SetPrintAvailable(
+            _mailMessageHtmlRenderer.CanPrint && ShouldShowMailRenderer());
+
+    private void OnPrintRequested(object? sender, EventArgs eventArgs)
+    {
+        if (!_mailInboxViewModel.CanPrintMessage
+            || !_mailMessageHtmlRenderer.TryShowPrintPreview())
+        {
+            WpfMessageBox.Show(
+                this,
+                "Не удалось открыть окно печати.",
+                "Печать",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task LoadCurrentRemoteImagesAsync()
     {
         MailAccount? account = _mailInboxViewModel.ActiveAccount;
         MailMessageContent? content = _mailInboxViewModel.SelectedMessageContent;
@@ -1107,9 +1203,20 @@ public partial class MainWindow : Window
             _viewModel.SelectedService is not null,
             _mailInboxViewModel.ActiveAccount is { IsEnabled: true }
                 && _viewModel.SelectedMailAccount?.Id == _mailInboxViewModel.ActiveAccount.Id,
-            _mailInboxViewModel.IsComposeOpen
+            _mailInboxViewModel.IsComposeOpen || !_mailInboxViewModel.IsMessageDetailVisible
                 ? null
                 : _mailInboxViewModel.SelectedMessageContent?.BodyKind);
+
+    private void UpdateMailDetailActivity()
+    {
+        bool isActive = IsVisible
+            && IsActive
+            && WindowState != WindowState.Minimized
+            && !_viewModel.IsSettingsOpen
+            && _viewModel.SelectedService is null
+            && _viewModel.SelectedMailAccount?.Id == _mailInboxViewModel.ActiveAccount?.Id;
+        _mailInboxViewModel.SetDetailHostActive(isActive);
+    }
 
     private Rectangle GetDirectWebViewBounds()
         => GetElementClientBounds(WebViewContainer);
@@ -1221,6 +1328,7 @@ public partial class MainWindow : Window
             or UnauthorizedAccessException
             or InvalidOperationException
             or ArgumentException
+            or System.Security.Cryptography.CryptographicException
             or System.Runtime.InteropServices.COMException;
 
     private void ApplySavedWindowSettings(WindowSettings settings)

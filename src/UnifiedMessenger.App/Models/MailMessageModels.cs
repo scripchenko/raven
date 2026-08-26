@@ -9,6 +9,14 @@ public sealed record MailMessageSummary(
     string Preview,
     bool IsUnread)
 {
+    public MailMessageAttachmentSummary AttachmentSummary { get; init; } = MailMessageAttachmentSummary.Empty;
+
+    public bool HasAttachments => AttachmentSummary.Count > 0;
+    public int AttachmentCount => AttachmentSummary.Count;
+    public IReadOnlyList<MailAttachmentPreviewItem> AttachmentPreviewItems => AttachmentSummary.PreviewItems;
+    public bool HasMoreAttachments => AttachmentSummary.RemainingCount > 0;
+    public string RemainingAttachmentText => $"+{AttachmentSummary.RemainingCount}";
+
     public string SenderDisplay => string.IsNullOrWhiteSpace(FromDisplayName)
         ? FromAddress
         : FromDisplayName;
@@ -31,6 +39,136 @@ public sealed record MailMessageSummary(
 
             return local.ToString("dd.MM.yyyy", System.Globalization.CultureInfo.CurrentCulture);
         }
+    }
+}
+
+public sealed record MailAttachmentPreviewItem(
+    string DisplayFileName,
+    string ContentType,
+    long? Size)
+{
+    public MailAttachmentVisualType VisualType => MailAttachmentVisualCatalog.Resolve(ContentType);
+    public string TypeLabel => MailAttachmentVisualCatalog.GetBadgeText(VisualType);
+}
+
+public enum MailAttachmentVisualType
+{
+    Pdf,
+    Image,
+    Document,
+    Spreadsheet,
+    Archive,
+    Text,
+    Generic
+}
+
+public static class MailAttachmentVisualCatalog
+{
+    private static readonly HashSet<string> DocumentContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/msword",
+        "application/rtf",
+        "application/vnd.ms-word",
+        "application/vnd.oasis.opendocument.text",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/rtf"
+    };
+
+    private static readonly HashSet<string> SpreadsheetContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/vnd.ms-excel",
+        "application/vnd.oasis.opendocument.spreadsheet",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/csv"
+    };
+
+    private static readonly HashSet<string> ArchiveContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/gzip",
+        "application/vnd.rar",
+        "application/x-7z-compressed",
+        "application/x-bzip2",
+        "application/x-compressed",
+        "application/x-rar-compressed",
+        "application/x-tar",
+        "application/zip"
+    };
+
+    public static MailAttachmentVisualType Resolve(string? contentType)
+    {
+        string normalized = Normalize(contentType);
+        if (normalized.Equals("application/pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return MailAttachmentVisualType.Pdf;
+        }
+
+        if (normalized.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return MailAttachmentVisualType.Image;
+        }
+
+        if (DocumentContentTypes.Contains(normalized))
+        {
+            return MailAttachmentVisualType.Document;
+        }
+
+        if (SpreadsheetContentTypes.Contains(normalized))
+        {
+            return MailAttachmentVisualType.Spreadsheet;
+        }
+
+        if (ArchiveContentTypes.Contains(normalized))
+        {
+            return MailAttachmentVisualType.Archive;
+        }
+
+        return normalized.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+            ? MailAttachmentVisualType.Text
+            : MailAttachmentVisualType.Generic;
+    }
+
+    public static string GetBadgeText(MailAttachmentVisualType visualType) => visualType switch
+    {
+        MailAttachmentVisualType.Pdf => "PDF",
+        MailAttachmentVisualType.Image => "IMG",
+        MailAttachmentVisualType.Document => "DOC",
+        MailAttachmentVisualType.Spreadsheet => "XLS",
+        MailAttachmentVisualType.Archive => "ZIP",
+        MailAttachmentVisualType.Text => "TXT",
+        _ => "FILE"
+    };
+
+    private static string Normalize(string? contentType)
+    {
+        string value = contentType?.Trim() ?? string.Empty;
+        int parameter = value.IndexOf(';');
+        return parameter < 0 ? value : value[..parameter].Trim();
+    }
+}
+
+public sealed record MailMessageAttachmentSummary(
+    int Count,
+    IReadOnlyList<MailAttachmentPreviewItem> PreviewItems)
+{
+    public const int MaximumPreviewItems = 2;
+    public static MailMessageAttachmentSummary Empty { get; } = new(0, []);
+    public int RemainingCount => Math.Max(0, Count - PreviewItems.Count);
+
+    public static MailMessageAttachmentSummary Create(IEnumerable<MailAttachmentPreviewItem> attachments)
+    {
+        ArgumentNullException.ThrowIfNull(attachments);
+        int count = 0;
+        List<MailAttachmentPreviewItem> previews = new(MaximumPreviewItems);
+        foreach (MailAttachmentPreviewItem attachment in attachments)
+        {
+            count++;
+            if (previews.Count < MaximumPreviewItems)
+            {
+                previews.Add(attachment);
+            }
+        }
+
+        return count == 0 ? Empty : new MailMessageAttachmentSummary(count, previews);
     }
 }
 
@@ -127,6 +265,8 @@ public sealed record MailMessageContent(
     public bool HasRemoteImages => RemoteImages.Count > 0;
 
     public IReadOnlyList<MailAttachmentInfo> Attachments { get; init; } = [];
+
+    public bool HasUnambiguousFromAddress { get; init; }
 }
 
 public sealed record MailPage<T>(

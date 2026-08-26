@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Input;
 using UnifiedMessenger.App.Services.WebView;
 
 namespace UnifiedMessenger.App.Views;
@@ -42,6 +43,14 @@ public partial class StartupWindow : Window
     }
 
     private void Exit_Click(object sender, RoutedEventArgs eventArgs) => RequestExit();
+
+    private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs eventArgs)
+    {
+        if (eventArgs.ChangedButton == MouseButton.Left)
+        {
+            DragMove();
+        }
+    }
 
     private void RequestExit()
     {

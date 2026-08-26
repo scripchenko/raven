@@ -7,7 +7,9 @@ public interface IMailMessageHtmlRenderer : IDisposable
 {
     bool IsInitialized { get; }
     bool IsVisible { get; }
+    bool CanPrint { get; }
     int ControllerCount { get; }
+    event EventHandler? PrintAvailabilityChanged;
 
     Task ShowAsync(
         IntPtr parentWindow,
@@ -19,6 +21,7 @@ public interface IMailMessageHtmlRenderer : IDisposable
 
     void UpdateLayout(Rectangle bounds, bool isVisible);
     void NotifyParentWindowPositionChanged();
+    bool TryShowPrintPreview();
     void Hide(bool clearContent);
     void ReleaseController(bool clearContent);
     void BeginShutdown();

@@ -15,6 +15,7 @@ public sealed class MailMessageHtmlRenderer(
     MailRendererNavigationCoordinator navigationCoordinator) : IMailMessageHtmlRenderer
 {
     public const int MaximumControllerCount = 1;
+    internal const CoreWebView2PrintDialogKind PrintDialogKind = CoreWebView2PrintDialogKind.System;
     public const bool JavaScriptEnabled = false;
     public const bool WebMessagingEnabled = false;
     public const bool HostObjectsEnabled = false;
@@ -36,13 +37,17 @@ public sealed class MailMessageHtmlRenderer(
     private Rectangle _currentBounds;
     private bool _hasCurrentBounds;
     private bool _isVisible;
+    private bool _isDocumentReady;
+    private bool _lastCanPrint;
     private bool _shutdownStarted;
     private bool _disposed;
     private long _controllerGeneration;
 
     public bool IsInitialized => _controller is not null && _coreWebView is not null;
     public bool IsVisible => IsInitialized && _isVisible;
+    public bool CanPrint => IsVisible && _isDocumentReady && !_shutdownStarted;
     public int ControllerCount => IsInitialized ? 1 : 0;
+    public event EventHandler? PrintAvailabilityChanged;
 
     public async Task ShowAsync(
         IntPtr parentWindow,
@@ -85,6 +90,7 @@ public sealed class MailMessageHtmlRenderer(
         _currentDocument = documentBuilder.Build(content, remoteImages);
         SetBounds(bounds);
         SetVisibility(isVisible: false);
+        SetDocumentReady(isReady: false);
         _coreWebView.Navigate(MailRendererNavigationPolicy.InternalDocumentUri.AbsoluteUri);
         SetVisibility(isVisible);
     }
@@ -126,6 +132,24 @@ public sealed class MailMessageHtmlRenderer(
         catch (COMException)
         {
             Hide(clearContent: true);
+        }
+    }
+
+    public bool TryShowPrintPreview()
+    {
+        if (!CanPrint || _coreWebView is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            _coreWebView.ShowPrintUI(PrintDialogKind);
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or COMException)
+        {
+            return false;
         }
     }
 
@@ -173,6 +197,8 @@ public sealed class MailMessageHtmlRenderer(
         _initializationTask = null;
         _hasCurrentBounds = false;
         _isVisible = false;
+        _isDocumentReady = false;
+        RaisePrintAvailabilityChangedIfNeeded();
     }
 
     public void BeginShutdown()
@@ -261,6 +287,7 @@ public sealed class MailMessageHtmlRenderer(
             CoreWebView2WebResourceContext.All,
             CoreWebView2WebResourceRequestSourceKinds.All);
         coreWebView.WebResourceRequested += OnWebResourceRequested;
+        coreWebView.NavigationCompleted += OnNavigationCompleted;
         coreWebView.NavigationStarting += OnNavigationStarting;
         coreWebView.NewWindowRequested += OnNewWindowRequested;
         coreWebView.LaunchingExternalUriScheme += OnLaunchingExternalUriScheme;
@@ -307,6 +334,14 @@ public sealed class MailMessageHtmlRenderer(
         eventArgs.Cancel = disposition is not MailRendererNavigationDisposition.InternalDocument;
     }
 
+    private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs eventArgs)
+    {
+        bool isInternalDocument = _coreWebView is CoreWebView2 coreWebView
+            && Uri.TryCreate(coreWebView.Source, UriKind.Absolute, out Uri? source)
+            && navigationPolicy.IsInternalDocument(source);
+        SetDocumentReady(eventArgs.IsSuccess && isInternalDocument);
+    }
+
     private void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs eventArgs)
     {
         eventArgs.Handled = true;
@@ -331,6 +366,7 @@ public sealed class MailMessageHtmlRenderer(
         try
         {
             coreWebView.WebResourceRequested -= OnWebResourceRequested;
+            coreWebView.NavigationCompleted -= OnNavigationCompleted;
             coreWebView.NavigationStarting -= OnNavigationStarting;
             coreWebView.NewWindowRequested -= OnNewWindowRequested;
             coreWebView.LaunchingExternalUriScheme -= OnLaunchingExternalUriScheme;
@@ -374,5 +410,29 @@ public sealed class MailMessageHtmlRenderer(
 
         _controller.IsVisible = isVisible;
         _isVisible = isVisible;
+        RaisePrintAvailabilityChangedIfNeeded();
+    }
+
+    private void SetDocumentReady(bool isReady)
+    {
+        if (_isDocumentReady == isReady)
+        {
+            return;
+        }
+
+        _isDocumentReady = isReady;
+        RaisePrintAvailabilityChangedIfNeeded();
+    }
+
+    private void RaisePrintAvailabilityChangedIfNeeded()
+    {
+        bool canPrint = CanPrint;
+        if (_lastCanPrint == canPrint)
+        {
+            return;
+        }
+
+        _lastCanPrint = canPrint;
+        PrintAvailabilityChanged?.Invoke(this, EventArgs.Empty);
     }
 }

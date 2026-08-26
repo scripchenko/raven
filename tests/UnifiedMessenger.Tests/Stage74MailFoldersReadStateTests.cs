@@ -228,7 +228,7 @@ public sealed class Stage74MailFoldersReadStateTests
     }
 
     [Fact]
-    public async Task OrdinaryMessageOpen_DoesNotMutateServerState()
+    public async Task MessageOpenWithoutActiveDetailHost_DoesNotMutateServerState()
     {
         StatefulFolderProvider provider = new();
         provider.SetPage(MailFolderCatalog.Inbox(), [Summary("one", unread: true)]);

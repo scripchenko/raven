@@ -50,7 +50,7 @@ internal sealed class TcpOAuthLoopbackListener : IOAuthLoopbackListener
         await WriteResponseAsync(
             stream,
             HttpStatusCode.OK,
-            "Авторизация завершена. Можно вернуться в UnifiedMessenger.");
+            "Авторизация завершена. Можно вернуться в Lantern.");
         return new OAuthLoopbackResponse(
             query.GetValueOrDefault("code"),
             query.GetValueOrDefault("state"),
@@ -138,7 +138,7 @@ internal sealed class TcpOAuthLoopbackListener : IOAuthLoopbackListener
         HttpStatusCode statusCode,
         string message)
     {
-        string html = $"<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>UnifiedMessenger</title></head><body><p>{WebUtility.HtmlEncode(message)}</p></body></html>";
+        string html = $"<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Lantern</title></head><body><p>{WebUtility.HtmlEncode(message)}</p></body></html>";
         byte[] body = Encoding.UTF8.GetBytes(html);
         string headers =
             $"HTTP/1.1 {(int)statusCode} {statusCode}\r\n" +

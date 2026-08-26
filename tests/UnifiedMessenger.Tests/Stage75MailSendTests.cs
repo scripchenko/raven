@@ -1367,8 +1367,14 @@ public sealed class Stage75MailSendTests
             .ToArray();
 
         Assert.Contains("Написать", buttonContents);
-        Assert.Contains("Ответить", buttonContents);
-        Assert.Contains("Переслать", buttonContents);
+        Assert.Contains(
+            view.Descendants(presentation + "Button"),
+            element => (string?)element.Attribute("Command") == "{Binding Compose.ReplyCommand}"
+                && (string?)element.Attribute("ToolTip") == "Ответить");
+        Assert.Contains(
+            view.Descendants(presentation + "Button"),
+            element => (string?)element.Attribute("Command") == "{Binding Compose.ForwardCommand}"
+                && (string?)element.Attribute("ToolTip") == "Переслать");
         Assert.Contains("{Binding Compose.SendButtonText}", buttonContents);
         Assert.DoesNotContain(view.Descendants(), element => element.Name.LocalName.Contains("WebView", StringComparison.Ordinal));
         Assert.Contains(
