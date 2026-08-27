@@ -7,6 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Branding;
 using UnifiedMessenger.App.Services.Mail;
 using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
@@ -419,6 +420,7 @@ public partial class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs eventArgs)
     {
         _mainWindowHandle = new WindowInteropHelper(this).Handle;
+        _ = WindowsShellIdentity.TryApplyToWindow(_mainWindowHandle);
         _windowSource = HwndSource.FromHwnd(_mainWindowHandle);
         _windowSource?.AddHook(WindowMessageHook);
     }

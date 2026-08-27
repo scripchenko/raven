@@ -72,9 +72,10 @@ dotnet test -c Release --no-restore
 ./scripts/build.ps1
 ./scripts/test.ps1
 ./scripts/publish-win-x64.ps1
+./scripts/build-windows-package.ps1
 ```
 
-Публикация создаётся как folder-based self-contained `win-x64`, без trimming и без single-file упаковки.
+Публикация создаётся в `artifacts/publish/win-x64` как folder-based self-contained `win-x64`, без trimming и без single-file упаковки. Полная инструкция по publish и Inno Setup installer: [docs/windows-distribution.md](docs/windows-distribution.md).
 
 ## Данные приложения
 

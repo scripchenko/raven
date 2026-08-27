@@ -8,10 +8,18 @@
     <AssemblyName>UnifiedMessenger.App</AssemblyName>
     <RootNamespace>UnifiedMessenger.App</RootNamespace>
     <ApplicationIcon>Assets\Branding\lantern.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Product>Lantern</Product>
+    <Title>Lantern</Title>
+    <AssemblyTitle>Lantern</AssemblyTitle>
+    <Description>Windows-приложение для мессенджеров и почты.</Description>
+    <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
   </PropertyGroup>
 
   <ItemGroup>
-    <Resource Include="Assets\Branding\lantern.ico" />
+    <Resource Include="Assets\Branding\lantern_system.ico" />
     <Resource Include="Assets\Branding\lantern_icon.png" />
     <Resource Include="Assets\Branding\lantern_logo.png" />
     <Resource Include="Assets\Services\*.png" />
@@ -27,5 +35,22 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
   </ItemGroup>
+
+  <Target Name="ExcludeDistributionDocumentationFiles"
+          AfterTargets="ComputeFilesToPublish"
+          Condition="'$(PublishProfile)' == 'win-x64-self-contained'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Extension)' == '.xml'" />
+      <ResolvedFileToPublish Include="$(MSBuildProjectDirectory)\Assets\Branding\lantern.ico">
+        <RelativePath>Assets\Branding\lantern.ico</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+      <ResolvedFileToPublish Include="$(MSBuildProjectDirectory)\Assets\Branding\lantern_system.ico">
+        <RelativePath>Assets\Branding\lantern_system.ico</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 
 </Project>

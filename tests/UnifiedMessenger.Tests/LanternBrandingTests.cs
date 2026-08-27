@@ -10,28 +10,66 @@ public sealed class LanternBrandingTests
     {
         Assert.Equal("Lantern", BrandIdentity.DisplayName);
         Assert.Equal("Lantern", BrandIdentity.CreateWindowTitle(null));
-        Assert.Equal("Telegram — Lantern", BrandIdentity.CreateWindowTitle("Telegram"));
+        Assert.Equal("Lantern", BrandIdentity.CreateWindowTitle("Telegram"));
+        Assert.Equal("Lantern", BrandIdentity.CreateWindowTitle("WhatsApp"));
+        Assert.Equal("Lantern", BrandIdentity.CreateWindowTitle("Почта Mail.Ru"));
     }
 
     [Fact]
-    public void MainWindowExeAndTray_UseFullLanternIcon()
+    public void SystemSurfacesUseCompactIcon_WhileExeKeepsFullLanternIcon()
     {
-        Assert.EndsWith("/Assets/Branding/lantern.ico", BrandIdentity.ApplicationIconPackUri, StringComparison.Ordinal);
+        Assert.EndsWith("/Assets/Branding/lantern_system.ico", BrandIdentity.SystemIconPackUri, StringComparison.Ordinal);
 
         string mainWindow = File.ReadAllText(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "MainWindow.xaml"));
         string project = File.ReadAllText(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "UnifiedMessenger.App.csproj"));
+        string trayService = File.ReadAllText(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Services", "Tray", "WinFormsTrayIconService.cs"));
 
         Assert.Contains(
-            "Icon=\"/UnifiedMessenger.App;component/Assets/Branding/lantern.ico\"",
+            "Icon=\"/UnifiedMessenger.App;component/Assets/Branding/lantern_system.ico\"",
             mainWindow,
             StringComparison.Ordinal);
         Assert.DoesNotContain("<Window.Icon>", mainWindow, StringComparison.Ordinal);
         Assert.Contains("<ApplicationIcon>Assets\\Branding\\lantern.ico</ApplicationIcon>", project, StringComparison.Ordinal);
-        Assert.Contains("<Resource Include=\"Assets\\Branding\\lantern.ico\" />", project, StringComparison.Ordinal);
+        Assert.Contains("<Resource Include=\"Assets\\Branding\\lantern_system.ico\" />", project, StringComparison.Ordinal);
+        Assert.Contains("BrandIconResources.LoadSystemIcon()", trayService, StringComparison.Ordinal);
         Assert.DoesNotContain("lantern_taskbar.ico", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("lantern_taskbar.ico", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CompactSystemIcon_ContainsSmallSurfaceFramesWithoutClipping()
+    {
+        string path = FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Assets", "Branding", "lantern_system.ico");
+        byte[] icon = File.ReadAllBytes(path);
+
+        using MemoryStream stream = new(icon, writable: false);
+        using BinaryReader reader = new(stream);
+        Assert.Equal((ushort)0, reader.ReadUInt16());
+        Assert.Equal((ushort)1, reader.ReadUInt16());
+        ushort frameCount = reader.ReadUInt16();
+        Assert.True(frameCount >= 5);
+
+        HashSet<int> sizes = [];
+        for (int i = 0; i < frameCount; i++)
+        {
+            int width = reader.ReadByte();
+            int height = reader.ReadByte();
+            reader.ReadByte();
+            reader.ReadByte();
+            reader.ReadUInt16();
+            reader.ReadUInt16();
+            uint byteCount = reader.ReadUInt32();
+            uint offset = reader.ReadUInt32();
+            sizes.Add(width == 0 ? 256 : width);
+            Assert.Equal(width, height);
+            Assert.True(offset + byteCount <= icon.Length);
+        }
+
+        Assert.True(sizes.IsSupersetOf([16, 20, 24, 32, 40]));
     }
 
     [Theory]

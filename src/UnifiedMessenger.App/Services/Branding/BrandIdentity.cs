@@ -5,12 +5,9 @@ namespace UnifiedMessenger.App.Services.Branding;
 public static class BrandIdentity
 {
     public const string DisplayName = "Lantern";
-    public const string ApplicationIconPackUri =
-        "pack://application:,,,/UnifiedMessenger.App;component/Assets/Branding/lantern.ico";
-    public static string CreateWindowTitle(string? context) =>
-        string.IsNullOrWhiteSpace(context)
-            ? DisplayName
-            : $"{context.Trim()} — {DisplayName}";
+    public const string SystemIconPackUri =
+        "pack://application:,,,/UnifiedMessenger.App;component/Assets/Branding/lantern_system.ico";
+    public static string CreateWindowTitle(string? _) => DisplayName;
 }
 
 public enum BrandIconKind

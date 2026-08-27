@@ -30,6 +30,7 @@ public partial class App : System.Windows.Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        _ = WindowsShellIdentity.TryInitializeProcess();
         base.OnStartup(e);
 
         try

@@ -7,7 +7,7 @@
         xmlns:views="clr-namespace:UnifiedMessenger.App.Views"
         mc:Ignorable="d"
         Title="{Binding WindowTitle}"
-        Icon="/UnifiedMessenger.App;component/Assets/Branding/lantern.ico"
+        Icon="/UnifiedMessenger.App;component/Assets/Branding/lantern_system.ico"
         Width="1180"
         Height="760"
         MinWidth="880"

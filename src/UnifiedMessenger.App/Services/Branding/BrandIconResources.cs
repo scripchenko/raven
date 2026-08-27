@@ -5,11 +5,11 @@ namespace UnifiedMessenger.App.Services.Branding;
 
 public static class BrandIconResources
 {
-    public static Icon LoadApplicationIcon()
+    public static Icon LoadSystemIcon()
     {
-        Uri resourceUri = new(BrandIdentity.ApplicationIconPackUri, UriKind.Absolute);
+        Uri resourceUri = new(BrandIdentity.SystemIconPackUri, UriKind.Absolute);
         System.Windows.Resources.StreamResourceInfo resource = System.Windows.Application.GetResourceStream(resourceUri)
-            ?? throw new InvalidOperationException("Lantern application icon resource is unavailable.");
+            ?? throw new InvalidOperationException("Lantern system icon resource is unavailable.");
 
         using Stream stream = resource.Stream;
         using Icon source = new(stream);

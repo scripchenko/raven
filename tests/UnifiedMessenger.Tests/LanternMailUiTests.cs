@@ -129,7 +129,7 @@ public sealed class LanternMailUiTests
                 or "{Binding NavigateHomeCommand}");
         Assert.DoesNotContain("SelectedAccountLabel", window.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("· WebView2", window.ToString(), StringComparison.Ordinal);
-        Assert.Equal("Telegram — Lantern", BrandIdentity.CreateWindowTitle("Telegram"));
+        Assert.Equal("Lantern", BrandIdentity.CreateWindowTitle("Telegram"));
     }
 
     [Fact]
@@ -158,6 +158,65 @@ public sealed class LanternMailUiTests
         Assert.Contains("BackToMessageListCommand", detail.ToString(), StringComparison.Ordinal);
         Assert.Contains("OpenMessageCommand", list.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Grid.Column=\"4\"", view.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MailNavigation_UsesFilledComposeAndSharedOutlineFolderSelection()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        XElement composeStyle = Assert.Single(
+            view.Descendants(presentation + "Style"),
+            element => (string?)element.Attribute(xaml + "Key") == "MailComposeButtonStyle");
+        XElement composeButton = Assert.Single(
+            view.Descendants(presentation + "Button"),
+            element => (string?)element.Attribute("Content") == "Написать");
+        Assert.Equal(
+            "#FFE7F0FF",
+            (string?)Assert.Single(
+                composeStyle.Elements(presentation + "Setter"),
+                setter => (string?)setter.Attribute("Property") == "Background")
+                .Attribute("Value"));
+        Assert.Equal(
+            "{StaticResource MailComposeButtonStyle}",
+            (string?)composeButton.Attribute("Style"));
+
+        XElement folderStyle = Assert.Single(
+            view.Descendants(presentation + "Style"),
+            element => (string?)element.Attribute(xaml + "Key") == "MailFolderItemStyle");
+        XElement selectedTrigger = Assert.Single(
+            folderStyle.Descendants(presentation + "Trigger"),
+            trigger =>
+                (string?)trigger.Attribute("Property") == "IsSelected"
+                && (string?)trigger.Attribute("Value") == "True");
+        XElement hoverTrigger = Assert.Single(
+            folderStyle.Descendants(presentation + "Trigger"),
+            trigger =>
+                (string?)trigger.Attribute("Property") == "IsMouseOver"
+                && (string?)trigger.Attribute("Value") == "True");
+
+        Assert.Equal("Transparent", TriggerValue(selectedTrigger, presentation, "Background"));
+        Assert.Equal("#FF2356B8", TriggerValue(selectedTrigger, presentation, "BorderBrush"));
+        Assert.Equal("1", TriggerValue(selectedTrigger, presentation, "BorderThickness"));
+        Assert.Equal("#FF2356B8", TriggerValue(selectedTrigger, presentation, "Foreground"));
+        Assert.Equal("#FFEAF2FF", TriggerValue(hoverTrigger, presentation, "Background"));
+        Assert.DoesNotContain("#FFDDEAFF", folderStyle.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        XElement folderList = Assert.Single(
+            view.Descendants(presentation + "ListBox"),
+            element => (string?)element.Attribute("ItemsSource") == "{Binding Folders}");
+        Assert.Equal(
+            "{StaticResource MailFolderItemStyle}",
+            (string?)folderList.Attribute("ItemContainerStyle"));
+        Assert.All(
+            new[] { MailProviderType.Gmail, MailProviderType.Yandex, MailProviderType.MailRu },
+            provider => Assert.DoesNotContain(
+                provider.ToString(),
+                folderStyle.ToString(),
+                StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -356,6 +415,16 @@ public sealed class LanternMailUiTests
         Assert.Single(
             document.Descendants(presentation + elementName),
             element => (string?)element.Attribute(xaml + "Name") == name);
+
+    private static string? TriggerValue(
+        XElement trigger,
+        XNamespace presentation,
+        string property) =>
+        Assert.Single(
+            trigger.Elements(presentation + "Setter"),
+            setter => (string?)setter.Attribute("Property") == property)
+        .Attribute("Value")
+        ?.Value;
 
     private static MailInboxViewModel CreateViewModel(UiMailProvider provider) =>
         new(new UiMailProviderFactory(provider));

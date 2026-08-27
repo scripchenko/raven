@@ -17,7 +17,7 @@ public sealed class WinFormsTrayIconService : ITrayIconService
 
     public WinFormsTrayIconService()
     {
-        _applicationIcon = BrandIconResources.LoadApplicationIcon();
+        _applicationIcon = BrandIconResources.LoadSystemIcon();
         _openItem = new Forms.ToolStripMenuItem("Открыть");
         _settingsItem = new Forms.ToolStripMenuItem("Настройки");
         _doNotDisturbItem = new Forms.ToolStripMenuItem("Не беспокоить") { CheckOnClick = false };

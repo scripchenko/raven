@@ -1,16 +1,11 @@
-$ErrorActionPreference = 'Stop'
-$repositoryRoot = Split-Path -Parent $PSScriptRoot
+[CmdletBinding()]
+param(
+    [string]$DotNetPath = 'dotnet'
+)
 
-Push-Location $repositoryRoot
-try {
-    dotnet publish `
-        src/UnifiedMessenger.App/UnifiedMessenger.App.csproj `
-        -c Release `
-        -r win-x64 `
-        --self-contained true `
-        -p:PublishSingleFile=false `
-        -p:PublishTrimmed=false
-}
-finally {
-    Pop-Location
-}
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+& (Join-Path $PSScriptRoot 'build-windows-package.ps1') `
+    -DotNetPath $DotNetPath `
+    -SkipInstaller
