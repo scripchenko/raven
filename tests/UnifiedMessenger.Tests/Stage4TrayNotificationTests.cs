@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.IO;
 using System.Text.Json;
+using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
 using UnifiedMessenger.App.Services.Notifications;
@@ -89,6 +90,112 @@ public sealed class Stage4TrayNotificationTests
     public void NotificationPermissionDecision_IsSavedInStableWebViewProfile()
     {
         Assert.True(WebViewSessionManager.SaveNotificationPermissionsInProfile);
+    }
+
+    [Theory]
+    [InlineData(CoreWebView2PermissionState.Allow, NotificationPermissionState.Allowed)]
+    [InlineData(CoreWebView2PermissionState.Deny, NotificationPermissionState.Denied)]
+    [InlineData(CoreWebView2PermissionState.Default, NotificationPermissionState.Unknown)]
+    public async Task MaxProfilePermission_IsMappedAndPersistedWithoutSchemaChange(
+        CoreWebView2PermissionState profileState,
+        NotificationPermissionState expectedState)
+    {
+        ServiceInstance service = CreateService(ServiceType.Max);
+        service.NotificationPermissionState = expectedState is NotificationPermissionState.Denied
+            ? NotificationPermissionState.Allowed
+            : NotificationPermissionState.Denied;
+        AppSettings settings = new() { Services = [service] };
+        int schemaVersion = settings.SchemaVersion;
+        FakeSettingsStore store = new(settings);
+        using NotificationPermissionCoordinator coordinator = CreatePermissionCoordinator(store);
+
+        NotificationPermissionState synchronized = await coordinator.SynchronizeFromProfileAsync(
+            service,
+            WebViewSessionManager.MaxNotificationOrigin,
+            WebViewSessionManager.MapProfileNotificationPermission(profileState));
+
+        Assert.Equal(expectedState, synchronized);
+        Assert.Equal(expectedState, service.NotificationPermissionState);
+        Assert.Equal(1, store.SaveCount);
+        Assert.Equal(schemaVersion, settings.SchemaVersion);
+        Assert.Equal(AppSettings.CurrentSchemaVersion, settings.SchemaVersion);
+    }
+
+    [Fact]
+    public async Task UnchangedMaxProfilePermission_DoesNotCauseExtraSettingsSave()
+    {
+        ServiceInstance service = CreateService(ServiceType.Max);
+        service.NotificationPermissionState = NotificationPermissionState.Allowed;
+        FakeSettingsStore store = new(new AppSettings { Services = [service] });
+        using NotificationPermissionCoordinator coordinator = CreatePermissionCoordinator(store);
+
+        NotificationPermissionState synchronized = await coordinator.SynchronizeFromProfileAsync(
+            service,
+            WebViewSessionManager.MaxNotificationOrigin,
+            NotificationPermissionState.Allowed);
+
+        Assert.Equal(NotificationPermissionState.Allowed, synchronized);
+        Assert.Equal(0, store.SaveCount);
+    }
+
+    [Theory]
+    [InlineData("https://web.max.ru", true)]
+    [InlineData("https://web.max.ru/", true)]
+    [InlineData("https://sub.web.max.ru", false)]
+    [InlineData("https://web.max.ru.evil.example", false)]
+    [InlineData("http://web.max.ru", false)]
+    public void MaxProfilePermissionSync_UsesExactOfficialOrigin(string origin, bool expected) =>
+        Assert.Equal(expected, WebViewSessionManager.IsExactMaxOrigin(origin));
+
+    [Theory]
+    [InlineData(CoreWebView2PermissionState.Allow, true)]
+    [InlineData(CoreWebView2PermissionState.Deny, false)]
+    public async Task MaxProfilePermission_ControlsExistingPopupGate(
+        CoreWebView2PermissionState profileState,
+        bool popupExpected)
+    {
+        using NotificationFixture fixture = CreateNotificationFixture(ServiceType.Max);
+        fixture.Service.NotificationPermissionState = NotificationPermissionState.Unknown;
+        using NotificationPermissionCoordinator permissionCoordinator = CreatePermissionCoordinator(fixture.Store);
+        await permissionCoordinator.SynchronizeFromProfileAsync(
+            fixture.Service,
+            WebViewSessionManager.MaxNotificationOrigin,
+            WebViewSessionManager.MapProfileNotificationPermission(profileState));
+
+        fixture.Coordinator.Handle(fixture.Request(new LifecycleProbe()));
+
+        Assert.Equal(popupExpected ? 1 : 0, fixture.Popup.Shown.Count);
+        Assert.Equal(popupExpected ? 1 : 0, fixture.Sound.Requests.Count);
+        if (popupExpected)
+        {
+            Assert.Equal(ServiceType.Max, Assert.Single(fixture.Sound.Requests).ServiceType);
+        }
+    }
+
+    [Theory]
+    [InlineData("notifications-disabled")]
+    [InlineData("do-not-disturb")]
+    [InlineData("service-muted")]
+    public void MaxProfileAllow_DoesNotBypassExistingNotificationGates(string gate)
+    {
+        using NotificationFixture fixture = CreateNotificationFixture(ServiceType.Max);
+        switch (gate)
+        {
+            case "notifications-disabled":
+                fixture.Settings.Notifications.IsEnabled = false;
+                break;
+            case "do-not-disturb":
+                fixture.Settings.Notifications.DoNotDisturb = true;
+                break;
+            case "service-muted":
+                fixture.Service.IsMuted = true;
+                break;
+        }
+
+        fixture.Coordinator.Handle(fixture.Request(new LifecycleProbe()));
+
+        Assert.Empty(fixture.Popup.Shown);
+        Assert.True(fixture.Service.HasUnreadActivity);
     }
 
     [Fact]
@@ -679,7 +786,7 @@ public sealed class Stage4TrayNotificationTests
     }
 
     [Fact]
-    public void HiddenTelegramNotification_RequestsUnifiedMessengerSound()
+    public void HiddenTelegramNotification_PassesThroughSharedSoundEligibilityGate()
     {
         using NotificationFixture fixture = CreateNotificationFixture();
 
@@ -688,6 +795,18 @@ public sealed class Stage4TrayNotificationTests
         TelegramNotificationSoundRequest request = Assert.Single(fixture.Sound.Requests);
         Assert.Equal(fixture.Service.Id, request.ServiceInstanceId);
         Assert.Equal(ServiceType.Telegram, request.ServiceType);
+    }
+
+    [Fact]
+    public void HiddenWhatsAppNotification_RequestsSoundExactlyOnce()
+    {
+        using NotificationFixture fixture = CreateNotificationFixture(ServiceType.WhatsApp);
+
+        fixture.Coordinator.Handle(fixture.Request(new LifecycleProbe()));
+
+        TelegramNotificationSoundRequest request = Assert.Single(fixture.Sound.Requests);
+        Assert.Equal(fixture.Service.Id, request.ServiceInstanceId);
+        Assert.Equal(ServiceType.WhatsApp, request.ServiceType);
     }
 
     [Fact]
@@ -919,41 +1038,120 @@ public sealed class Stage4TrayNotificationTests
         Assert.DoesNotContain(secretBody, json, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void TelegramNotificationReceived_PlaysOneSystemSound()
+    [Theory]
+    [InlineData(ServiceType.Telegram)]
+    [InlineData(ServiceType.WhatsApp)]
+    [InlineData(ServiceType.Max)]
+    public void LanternMode_WebNotificationPlaysLanternSoundExactlyOnce(ServiceType serviceType)
     {
-        using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(serviceType);
 
-        Assert.True(fixture.Coordinator.RequestSound(fixture.Request()));
-        Assert.Equal(0, fixture.Player.PlayCount);
-
+        Assert.True(fixture.Coordinator.RequestSound(fixture.Request("tag-hash")));
         fixture.Dispatcher.RunAll();
 
         Assert.Equal(1, fixture.Player.PlayCount);
+        Assert.Equal([serviceType], fixture.Player.Requests);
+    }
+
+    [Theory]
+    [InlineData(ServiceType.Telegram)]
+    [InlineData(ServiceType.WhatsApp)]
+    [InlineData(ServiceType.Max)]
+    public void NativeMode_SuppressesLanternPlayback(ServiceType serviceType)
+    {
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(serviceType);
+        _ = fixture.Settings.Notifications.TrySetSoundMode(serviceType, NotificationSoundMode.Native);
+
+        Assert.False(fixture.Coordinator.RequestSound(fixture.Request("tag-hash")));
+        fixture.Dispatcher.RunAll();
+
+        Assert.Empty(fixture.Player.Requests);
+    }
+
+    [Theory]
+    [InlineData(ServiceType.VkMessenger)]
+    [InlineData(ServiceType.Gmail)]
+    public void UnsupportedService_DoesNotUseWebLanternSound(ServiceType serviceType)
+    {
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(serviceType);
+
+        Assert.False(fixture.Coordinator.RequestSound(fixture.Request("tag-hash")));
+        fixture.Dispatcher.RunAll();
+
+        Assert.Empty(fixture.Player.Requests);
+    }
+
+    [Theory]
+    [InlineData("notifications-disabled")]
+    [InlineData("sound-disabled")]
+    [InlineData("dnd")]
+    [InlineData("muted")]
+    [InlineData("service-disabled")]
+    [InlineData("permission-denied")]
+    [InlineData("permission-unknown")]
+    public void ExistingNotificationGates_SuppressLanternSound(string gate)
+    {
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(ServiceType.WhatsApp);
+        switch (gate)
+        {
+            case "notifications-disabled": fixture.Settings.Notifications.IsEnabled = false; break;
+            case "sound-disabled": fixture.Settings.Notifications.PlaySound = false; break;
+            case "dnd": fixture.Settings.Notifications.DoNotDisturb = true; break;
+            case "muted": fixture.Service.IsMuted = true; break;
+            case "service-disabled": fixture.Service.IsEnabled = false; break;
+            case "permission-denied": fixture.Service.NotificationPermissionState = NotificationPermissionState.Denied; break;
+            case "permission-unknown": fixture.Service.NotificationPermissionState = NotificationPermissionState.Unknown; break;
+            default: throw new ArgumentOutOfRangeException(nameof(gate));
+        }
+
+        Assert.False(fixture.Coordinator.RequestSound(fixture.Request("tag-hash")));
+        fixture.Dispatcher.RunAll();
+
+        Assert.Empty(fixture.Player.Requests);
     }
 
     [Fact]
-    public void TwoRapidTelegramNotifications_PlayOneSound()
+    public void ActiveSelectedService_SuppressesPopupActivityAndLanternSound()
+    {
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(ServiceType.WhatsApp);
+        FakeWindowActivationService window = new()
+        {
+            IsMainWindowActive = true,
+            IsMainWindowVisible = true,
+            SelectedServiceId = fixture.Service.Id
+        };
+        FakeNotificationPopupService popup = new();
+        using WebNotificationCoordinator coordinator = CreateNotificationCoordinatorWithSound(fixture, window, popup);
+
+        coordinator.Handle(WhatsAppSoundRequest(fixture) with { NotificationTagHash = "tag-hash" });
+        fixture.Dispatcher.RunAll();
+
+        Assert.Empty(fixture.Player.Requests);
+        Assert.Empty(popup.Shown);
+        Assert.False(fixture.Service.HasUnreadActivity);
+    }
+
+    [Fact]
+    public void SameTagHash_IsDeduplicatedPerSession()
+    {
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
+
+        Assert.True(fixture.Coordinator.RequestSound(fixture.Request("same-hash")));
+        Assert.False(fixture.Coordinator.RequestSound(fixture.Request("same-hash")));
+        fixture.Dispatcher.RunAll();
+
+        Assert.Single(fixture.Player.Requests);
+    }
+
+    [Fact]
+    public void EmptyTag_UsesShortPerSessionDebounce()
     {
         using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
 
         Assert.True(fixture.Coordinator.RequestSound(fixture.Request()));
         Assert.False(fixture.Coordinator.RequestSound(fixture.Request()));
         fixture.Dispatcher.RunAll();
-        Assert.False(fixture.Coordinator.RequestSound(fixture.Request()));
-        fixture.Dispatcher.RunAll();
-
-        Assert.Equal(1, fixture.Player.PlayCount);
-    }
-
-    [Fact]
-    public void TelegramNotificationAfterCooldown_PlaysNewSound()
-    {
-        using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
-        Assert.True(fixture.Coordinator.RequestSound(fixture.Request()));
-        fixture.Dispatcher.RunAll();
-
-        fixture.Time.Advance(TelegramNotificationSoundCoordinator.SoundCooldown);
+        fixture.Time.Advance(TelegramNotificationSoundCoordinator.EmptyTagDebounce);
         Assert.True(fixture.Coordinator.RequestSound(fixture.Request()));
         fixture.Dispatcher.RunAll();
 
@@ -961,89 +1159,74 @@ public sealed class Stage4TrayNotificationTests
     }
 
     [Fact]
-    public void DoNotDisturb_SuppressesTelegramNotificationSound()
+    public void DifferentSessions_DoNotSuppressEachOther()
     {
         using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
-        fixture.Settings.Notifications.DoNotDisturb = true;
+        ServiceInstance second = CreateService(ServiceType.Telegram);
+        fixture.Settings.Services.Add(second);
 
-        Assert.False(fixture.Coordinator.RequestSound(fixture.Request()));
+        Assert.True(fixture.Coordinator.RequestSound(fixture.Request("same-hash")));
+        Assert.True(fixture.Coordinator.RequestSound(
+            new TelegramNotificationSoundRequest(second.Id, second.ServiceType, "same-hash")));
         fixture.Dispatcher.RunAll();
 
-        Assert.Equal(0, fixture.Player.PlayCount);
+        Assert.Equal(2, fixture.Player.PlayCount);
     }
 
     [Fact]
-    public void MutedTelegramAccount_SuppressesNotificationSound()
+    public void DifferentTagHashes_InSameSessionAreIndependent()
     {
-        using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
-        fixture.Service.IsMuted = true;
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(ServiceType.Max);
 
-        Assert.False(fixture.Coordinator.RequestSound(fixture.Request()));
+        Assert.True(fixture.Coordinator.RequestSound(fixture.Request("hash-one")));
+        Assert.True(fixture.Coordinator.RequestSound(fixture.Request("hash-two")));
         fixture.Dispatcher.RunAll();
 
-        Assert.Equal(0, fixture.Player.PlayCount);
+        Assert.Equal(2, fixture.Player.PlayCount);
     }
 
     [Fact]
-    public void NotificationsDisabled_SuppressesTelegramNotificationSound()
+    public void SoundDecision_IsContentBlindAndDoesNotChangeWebViewMuteState()
     {
-        using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
-        fixture.Settings.Notifications.IsEnabled = false;
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(ServiceType.WhatsApp);
+        bool initialMute = fixture.Service.IsMuted;
+        FakeTelegramNotificationSoundCoordinator sound = new();
+        using WebNotificationCoordinator coordinator = new(
+            new FakeNotificationPopupService(),
+            new FakeTrayIconService(),
+            new FakeWindowActivationService(),
+            new FakeSettingsStore(fixture.Settings),
+            new NavigationPolicy(_catalog),
+            new ServiceActivityCoordinator(),
+            _catalog,
+            sound);
 
-        Assert.False(fixture.Coordinator.RequestSound(fixture.Request()));
-        fixture.Dispatcher.RunAll();
+        coordinator.Handle(new WebNotificationRequest(
+            fixture.Service.Id,
+            "https://web.whatsapp.com/",
+            "private title",
+            "private body",
+            new LifecycleProbe().Lifecycle,
+            "safe-hash"));
 
-        Assert.Equal(0, fixture.Player.PlayCount);
+        TelegramNotificationSoundRequest request = Assert.Single(sound.Requests);
+        Assert.Equal("safe-hash", request.NotificationTagHash);
+        Assert.Equal(initialMute, fixture.Service.IsMuted);
+        Assert.DoesNotContain(
+            typeof(TelegramNotificationSoundRequest).GetProperties(),
+            property => property.Name is "Title" or "Body" or "SenderOrigin");
     }
 
     [Fact]
-    public void SoundPreferenceDisabled_SuppressesTelegramNotificationSound()
+    public void PendingSound_IsCancelledByShutdown()
     {
-        using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
-        fixture.Settings.Notifications.PlaySound = false;
-
-        Assert.False(fixture.Coordinator.RequestSound(fixture.Request()));
-        fixture.Dispatcher.RunAll();
-
-        Assert.Equal(0, fixture.Player.PlayCount);
-    }
-
-    [Theory]
-    [InlineData(ServiceType.WhatsApp)]
-    [InlineData(ServiceType.Max)]
-    [InlineData(ServiceType.VkMessenger)]
-    public void OtherServices_DoNotUseTelegramNotificationSound(ServiceType serviceType)
-    {
-        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(serviceType);
-
-        Assert.False(fixture.Coordinator.RequestSound(fixture.Request()));
-        fixture.Dispatcher.RunAll();
-
-        Assert.Equal(0, fixture.Player.PlayCount);
-    }
-
-    [Fact]
-    public void Shutdown_CancelsPendingTelegramNotificationSound()
-    {
-        using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
-        Assert.True(fixture.Coordinator.RequestSound(fixture.Request()));
+        using TelegramSoundFixture fixture = CreateTelegramSoundFixture(ServiceType.WhatsApp);
+        Assert.True(fixture.Coordinator.RequestSound(fixture.Request("tag-hash")));
 
         fixture.Coordinator.Shutdown();
         fixture.Dispatcher.RunAll();
 
         Assert.True(fixture.Coordinator.IsShutdownStarted);
-        Assert.Equal(0, fixture.Player.PlayCount);
-    }
-
-    [Fact]
-    public void NotificationAfterShutdown_DoesNotCreateSound()
-    {
-        using TelegramSoundFixture fixture = CreateTelegramSoundFixture();
-        fixture.Coordinator.Shutdown();
-
-        Assert.False(fixture.Coordinator.RequestSound(fixture.Request()));
-        fixture.Dispatcher.RunAll();
-
         Assert.Equal(0, fixture.Player.PlayCount);
     }
 
@@ -1161,6 +1344,80 @@ public sealed class Stage4TrayNotificationTests
     }
 
     [Fact]
+    public void VkBackgroundActivity_UsesExistingActivityPipelineWithoutPopup()
+    {
+        ServiceInstance telegram = CreateService(ServiceType.Telegram);
+        ServiceInstance vk = CreateService(ServiceType.VkMessenger);
+        AppSettings settings = new() { Services = [telegram, vk] };
+        FakeSettingsStore store = new(settings);
+        FakeSessionManager sessions = new();
+        ServiceActivityCoordinator activity = new();
+        FakeWebNotificationCoordinator notifications = new();
+        FakeWindowActivationService activation = new()
+        {
+            IsMainWindowActive = true,
+            SelectedServiceId = telegram.Id
+        };
+        using WebViewEventCoordinator coordinator = new(
+            sessions,
+            store,
+            activity,
+            notifications,
+            activation);
+
+        sessions.RaiseBackgroundNotificationActivity(vk);
+
+        Assert.True(vk.HasUnreadActivity);
+        Assert.Equal(1, vk.LanternUnviewedActivityCount);
+        Assert.Empty(notifications.Requests);
+    }
+
+    [Fact]
+    public void VkBackgroundActivity_ForSelectedActiveVk_IsTreatedAsViewed()
+    {
+        ServiceInstance vk = CreateService(ServiceType.VkMessenger);
+        AppSettings settings = new() { Services = [vk] };
+        FakeSettingsStore store = new(settings);
+        FakeSessionManager sessions = new();
+        ServiceActivityCoordinator activity = new();
+        FakeWindowActivationService activation = new()
+        {
+            IsMainWindowActive = true,
+            SelectedServiceId = vk.Id
+        };
+        using WebViewEventCoordinator coordinator = new(
+            sessions,
+            store,
+            activity,
+            new FakeWebNotificationCoordinator(),
+            activation);
+
+        sessions.RaiseBackgroundNotificationActivity(vk);
+
+        Assert.False(vk.HasUnreadActivity);
+        Assert.Equal(0, vk.LanternUnviewedActivityCount);
+    }
+
+    [Fact]
+    public void VkDocumentTitle_DoesNotCompeteWithBackgroundNotificationSource()
+    {
+        ServiceInstance vk = CreateService(ServiceType.VkMessenger);
+        AppSettings settings = new() { Services = [vk] };
+        FakeSessionManager sessions = new();
+        using WebViewEventCoordinator coordinator = new(
+            sessions,
+            new FakeSettingsStore(settings),
+            new ServiceActivityCoordinator(),
+            new FakeWebNotificationCoordinator(),
+            new FakeWindowActivationService());
+
+        sessions.RaiseDocumentTitle(vk, "(4) VK");
+
+        Assert.False(vk.HasUnreadActivity);
+        Assert.Null(vk.UnreadCount);
+    }
+
+    [Fact]
     public void VkExactOnlyPolicy_RemainsUnchanged()
     {
         NavigationPolicy policy = new(_catalog);
@@ -1217,12 +1474,19 @@ public sealed class Stage4TrayNotificationTests
         };
     }
 
-    private NotificationFixture CreateNotificationFixture()
+    private NotificationFixture CreateNotificationFixture(ServiceType serviceType = ServiceType.Telegram)
     {
-        ServiceInstance service = CreateService(ServiceType.Telegram);
+        ServiceInstance service = CreateService(serviceType);
         AppSettings settings = new() { Services = [service] };
         return new NotificationFixture(settings, service, _catalog);
     }
+
+    private NotificationPermissionCoordinator CreatePermissionCoordinator(FakeSettingsStore store) =>
+        new(
+            new NavigationPolicy(_catalog),
+            new FakePermissionPrompt(),
+            new ImmediateDispatcher(),
+            store);
 
     private TelegramSoundFixture CreateTelegramSoundFixture(ServiceType serviceType = ServiceType.Telegram)
     {
@@ -1231,8 +1495,32 @@ public sealed class Stage4TrayNotificationTests
         return new TelegramSoundFixture(settings, service);
     }
 
+    private WebNotificationCoordinator CreateNotificationCoordinatorWithSound(
+        TelegramSoundFixture fixture,
+        FakeWindowActivationService? window = null,
+        FakeNotificationPopupService? popup = null) =>
+        new(
+            popup ?? new FakeNotificationPopupService(),
+            new FakeTrayIconService(),
+            window ?? new FakeWindowActivationService(),
+            fixture.Store,
+            new NavigationPolicy(_catalog),
+            new ServiceActivityCoordinator(),
+            _catalog,
+            fixture.Coordinator);
+
+    private static WebNotificationRequest WhatsAppSoundRequest(TelegramSoundFixture fixture) =>
+        new(
+            fixture.Service.Id,
+            "https://web.whatsapp.com/",
+            string.Empty,
+            string.Empty,
+            new LifecycleProbe().Lifecycle);
+
     private sealed class NotificationFixture : IDisposable
     {
+        private readonly string _notificationOrigin;
+
         public NotificationFixture(AppSettings settings, ServiceInstance service, BuiltInServiceCatalog catalog)
         {
             Settings = settings;
@@ -1243,6 +1531,8 @@ public sealed class Stage4TrayNotificationTests
             Activity = new ServiceActivityCoordinator();
             Popup = new FakeNotificationPopupService();
             Sound = new FakeTelegramNotificationSoundCoordinator();
+            _notificationOrigin = catalog.Get(service.ServiceType).StartUri?.GetLeftPart(UriPartial.Authority)
+                ?? throw new InvalidOperationException("A web service requires a notification origin.");
             Coordinator = new WebNotificationCoordinator(
                 Popup,
                 Tray,
@@ -1268,7 +1558,7 @@ public sealed class Stage4TrayNotificationTests
             LifecycleProbe lifecycle,
             string title = "Private title",
             string body = "Private body") =>
-            new(Service.Id, "https://web.telegram.org/", title, body, lifecycle.Lifecycle);
+            new(Service.Id, _notificationOrigin, title, body, lifecycle.Lifecycle);
 
         public void Dispose() => Coordinator.Dispose();
     }
@@ -1298,8 +1588,8 @@ public sealed class Stage4TrayNotificationTests
         public FakeTimeProvider Time { get; }
         public TelegramNotificationSoundCoordinator Coordinator { get; }
 
-        public TelegramNotificationSoundRequest Request() =>
-            new(Service.Id, Service.ServiceType);
+        public TelegramNotificationSoundRequest Request(string? notificationTagHash = null) =>
+            new(Service.Id, Service.ServiceType, notificationTagHash);
 
         public void Dispose() => Coordinator.Dispose();
     }
@@ -1552,11 +1842,16 @@ public sealed class Stage4TrayNotificationTests
     private sealed class FakeNotificationSoundPlayer : INotificationSoundPlayer
     {
         public int PlayCount { get; private set; }
-        public bool TryPlay(ServiceType serviceType, NotificationSoundMode mode)
+        public List<ServiceType> Requests { get; } = [];
+
+        public bool TryPlay(ServiceType serviceType)
         {
             PlayCount++;
+            Requests.Add(serviceType);
             return true;
         }
+
+        public bool TryPreviewLanternSound() => true;
     }
 
 
@@ -1575,6 +1870,7 @@ public sealed class Stage4TrayNotificationTests
         }
         public event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged;
         public event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived;
+        public event EventHandler<BackgroundNotificationActivityReceivedEventArgs>? BackgroundNotificationActivityReceived;
 
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted { get; private set; }
@@ -1614,6 +1910,11 @@ public sealed class Stage4TrayNotificationTests
                     "Private title",
                     "Private body",
                     lifecycle));
+
+        public void RaiseBackgroundNotificationActivity(ServiceInstance service) =>
+            BackgroundNotificationActivityReceived?.Invoke(
+                this,
+                new BackgroundNotificationActivityReceivedEventArgs(service.Id, service.ServiceType));
     }
 
     private sealed class TempSettingsFolder : IDisposable

@@ -149,21 +149,24 @@ public sealed class StartupMailUnreadRefreshTests
     }
 
     [Fact]
-    public void App_StartsOneShotRefreshAfterMainWindowIsShown()
+    public void App_StartsMailBackgroundServicesAfterMainWindowIsShownAndRefreshesBeforePolling()
     {
         string source = File.ReadAllText(FindRepositoryFile("src", "UnifiedMessenger.App", "App.xaml.cs"));
         int showIndex = source.IndexOf("window.Show();", StringComparison.Ordinal);
-        int refreshIndex = source.IndexOf(
-            "StartStartupMailUnreadRefresh(loadResult.Settings.MailAccounts);",
+        const string startCall = "StartMailBackgroundServices(loadResult.Settings.MailAccounts);";
+        int backgroundServicesIndex = source.IndexOf(
+            startCall,
             StringComparison.Ordinal);
+        int refreshIndex = source.IndexOf("await refreshService.RefreshAsync", StringComparison.Ordinal);
+        int monitorStartIndex = source.IndexOf("monitor.Start();", StringComparison.Ordinal);
 
         Assert.True(showIndex >= 0);
-        Assert.True(refreshIndex > showIndex);
+        Assert.True(backgroundServicesIndex > showIndex);
+        Assert.True(refreshIndex >= 0);
+        Assert.True(monitorStartIndex > refreshIndex);
         Assert.Equal(
             1,
-            source.Split(
-                "StartStartupMailUnreadRefresh(loadResult.Settings.MailAccounts);",
-                StringSplitOptions.None).Length - 1);
+            source.Split(startCall, StringSplitOptions.None).Length - 1);
     }
 
     private static StartupMailUnreadRefreshService CreateService(ProbeMailProvider provider) =>

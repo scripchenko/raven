@@ -205,6 +205,7 @@ public sealed class Stage6DirectWebView2Tests
         public event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested { add { } remove { } }
         public event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged { add { } remove { } }
         public event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived { add { } remove { } }
+        public event EventHandler<BackgroundNotificationActivityReceivedEventArgs>? BackgroundNotificationActivityReceived { add { } remove { } }
 
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted { get; private set; }

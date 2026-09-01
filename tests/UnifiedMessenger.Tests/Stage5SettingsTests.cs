@@ -149,7 +149,7 @@ public sealed class Stage5SettingsTests
     [Fact]
     public void SoundDisabled_KeepsPopupAndActivityButDoesNotPlaySystemSound()
     {
-        ServiceInstance service = CreateService(ServiceType.Telegram);
+        ServiceInstance service = CreateService(ServiceType.WhatsApp);
         AppSettings settings = new() { Services = [service] };
         settings.Notifications.PlaySound = false;
         FakeSettingsStore store = new(settings);
@@ -177,7 +177,7 @@ public sealed class Stage5SettingsTests
         coordinator.Handle(
             new WebNotificationRequest(
                 service.Id,
-                "https://web.telegram.org/",
+                "https://web.whatsapp.com/",
                 "Runtime-only title",
                 "Runtime-only body",
                 lifecycle));
@@ -437,9 +437,9 @@ public sealed class Stage5SettingsTests
     }
 
     [Fact]
-    public void SoundAbstraction_ReceivesTelegramAndSystemMode()
+    public void SoundAbstraction_ReceivesWhatsAppInDefaultLanternMode()
     {
-        ServiceInstance service = CreateService(ServiceType.Telegram);
+        ServiceInstance service = CreateService(ServiceType.WhatsApp);
         AppSettings settings = new() { Services = [service] };
         FakeSettingsStore store = new(settings);
         FakeNotificationSoundPlayer player = new();
@@ -450,11 +450,11 @@ public sealed class Stage5SettingsTests
             TimeProvider.System);
 
         bool accepted = coordinator.RequestSound(
-            new TelegramNotificationSoundRequest(service.Id, ServiceType.Telegram));
+            new TelegramNotificationSoundRequest(service.Id, ServiceType.WhatsApp, "safe-hash"));
 
+        Assert.True(settings.Notifications.PlaySound);
         Assert.True(accepted);
-        Assert.Equal(ServiceType.Telegram, player.LastServiceType);
-        Assert.Equal(NotificationSoundMode.System, player.LastMode);
+        Assert.Equal(ServiceType.WhatsApp, player.LastServiceType);
     }
 
     private SettingsFixture CreateFixture(bool includeSecondAccount = false)
@@ -548,6 +548,7 @@ public sealed class Stage5SettingsTests
         public event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested { add { } remove { } }
         public event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged { add { } remove { } }
         public event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived { add { } remove { } }
+        public event EventHandler<BackgroundNotificationActivityReceivedEventArgs>? BackgroundNotificationActivityReceived { add { } remove { } }
 
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted { get; private set; }
@@ -630,15 +631,14 @@ public sealed class Stage5SettingsTests
     {
         public int PlayCount { get; private set; }
         public ServiceType? LastServiceType { get; private set; }
-        public NotificationSoundMode? LastMode { get; private set; }
-
-        public bool TryPlay(ServiceType serviceType, NotificationSoundMode mode)
+        public bool TryPlay(ServiceType serviceType)
         {
             PlayCount++;
             LastServiceType = serviceType;
-            LastMode = mode;
             return true;
         }
+
+        public bool TryPreviewLanternSound() => true;
     }
 
     private sealed class FakeTrayIconService : ITrayIconService

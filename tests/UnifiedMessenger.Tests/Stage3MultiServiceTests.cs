@@ -335,6 +335,11 @@ public sealed class Stage3MultiServiceTests
             add { }
             remove { }
         }
+        public event EventHandler<BackgroundNotificationActivityReceivedEventArgs>? BackgroundNotificationActivityReceived
+        {
+            add { }
+            remove { }
+        }
 
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted { get; private set; }

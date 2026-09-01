@@ -24,9 +24,19 @@ internal sealed record ImapSummaryData(
 internal sealed record ImapInboxPageData(IReadOnlyList<ImapSummaryData> Items, string? NextCursor);
 internal sealed record ImapMessageData(MimeMessage Message, bool IsUnread);
 internal sealed record ImapFolderDescriptor(MailFolderKind Kind, string FullName);
+internal sealed record ImapInboxTechnicalSnapshot(
+    int UnreadCount,
+    uint UidValidity,
+    IReadOnlyList<uint> UniqueIds);
 
 internal interface IImapInboxClient
 {
+    Task<ImapInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+        MailServerSettings server,
+        string secret,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<ImapInboxTechnicalSnapshot>(new NotSupportedException());
+
     Task<int> GetInboxUnreadCountAsync(
         MailServerSettings server,
         string secret,
@@ -102,7 +112,7 @@ internal sealed class ImapMailReadProvider(
     IMailProviderFactory providerFactory,
     IImapInboxClient inboxClient,
     IMailContentExtractor contentExtractor,
-    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider
 {
     private const string MessageKeyPrefix = "imap:";
     private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
@@ -117,6 +127,23 @@ internal sealed class ImapMailReadProvider(
         MailServerSettings server = ResolveImapSettings(account, pageSize: 1);
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
         return await inboxClient.GetInboxUnreadCountAsync(server, credential.Secret, cancellationToken);
+    }
+
+    async Task<MailInboxTechnicalSnapshot> IMailInboxTechnicalSnapshotProvider.GetInboxTechnicalSnapshotAsync(
+        MailAccount account,
+        CancellationToken cancellationToken)
+    {
+        MailServerSettings server = ResolveImapSettings(account, pageSize: 1);
+        MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+        ImapInboxTechnicalSnapshot snapshot = await inboxClient
+            .GetInboxTechnicalSnapshotAsync(server, credential.Secret, cancellationToken);
+        string identityScope = $"imap-inbox:{snapshot.UidValidity.ToString(CultureInfo.InvariantCulture)}";
+        string[] identities = snapshot.UniqueIds
+            .Where(uniqueId => uniqueId > 0)
+            .Select(uniqueId => uniqueId.ToString(CultureInfo.InvariantCulture))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return new MailInboxTechnicalSnapshot(snapshot.UnreadCount, identityScope, identities);
     }
 
     public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
@@ -422,6 +449,7 @@ internal sealed class ImapMailReadProvider(
 internal sealed class MailKitImapInboxClient : IImapInboxClient
 {
     private const string CursorPrefix = "imap-index:";
+    internal const int BackgroundSnapshotMessageLimit = 100;
     internal static FolderAccess InboxAccess => FolderAccess.ReadOnly;
     internal static FolderAccess MutationAccess => FolderAccess.ReadWrite;
 
@@ -449,6 +477,73 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
             throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось получить число непрочитанных писем.");
+        }
+        finally
+        {
+            await DisconnectQuietlyAsync(client);
+        }
+    }
+
+    public async Task<ImapInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+        MailServerSettings server,
+        string secret,
+        CancellationToken cancellationToken = default)
+    {
+        using ImapClient client = new();
+        try
+        {
+            await ConnectAndAuthenticateAsync(client, server, secret, cancellationToken);
+            IMailFolder inbox = client.Inbox;
+            await inbox.StatusAsync(StatusItems.Unread, cancellationToken);
+            int unreadCount = Math.Max(0, inbox.Unread);
+            FolderAccess access = await inbox.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
+            if (access != FolderAccess.ReadOnly)
+            {
+                throw new MailReadException(
+                    MailReadFailureKind.ConnectionFailed,
+                    "Сервер не открыл папку только для чтения.");
+            }
+
+            if (inbox.Count == 0)
+            {
+                return new ImapInboxTechnicalSnapshot(unreadCount, inbox.UidValidity, []);
+            }
+
+            int startIndex = Math.Max(0, inbox.Count - BackgroundSnapshotMessageLimit);
+            IList<IMessageSummary> fetched = await inbox.FetchAsync(
+                startIndex,
+                inbox.Count - 1,
+                MessageSummaryItems.UniqueId,
+                cancellationToken);
+            uint[] uniqueIds = fetched
+                .Where(summary => summary.UniqueId.IsValid)
+                .Select(summary => summary.UniqueId.Id)
+                .Distinct()
+                .ToArray();
+            return new ImapInboxTechnicalSnapshot(
+                unreadCount,
+                inbox.UidValidity,
+                uniqueIds);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (MailReadException)
+        {
+            throw;
+        }
+        catch (MailKit.Security.AuthenticationException)
+        {
+            throw new MailReadException(
+                MailReadFailureKind.AuthenticationFailed,
+                "Не удалось войти в почту. Проверьте пароль приложения.");
+        }
+        catch (Exception exception) when (IsExpectedConnectionException(exception))
+        {
+            throw new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Не удалось проверить новые письма.");
         }
         finally
         {

@@ -659,6 +659,7 @@ public sealed class Stage7UniversalMailTests
         public event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested { add { } remove { } }
         public event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged { add { } remove { } }
         public event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived { add { } remove { } }
+        public event EventHandler<BackgroundNotificationActivityReceivedEventArgs>? BackgroundNotificationActivityReceived { add { } remove { } }
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted => false;
         public int InitializedSessionCount => 0;

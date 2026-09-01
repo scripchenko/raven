@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Branding;
@@ -17,6 +18,8 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
     private readonly MainWindowViewModel _viewModel;
     private readonly IUiDispatcher _uiDispatcher;
     private readonly ITaskbarActivityIndicator _taskbarActivityIndicator;
+    private readonly IMailActivityCoordinator? _mailActivityCoordinator;
+    private readonly IMailNotificationCoordinator? _mailNotificationCoordinator;
     private bool _initialized;
     private bool _shutdownStarted;
     private bool _disposed;
@@ -30,7 +33,9 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         IApplicationSettingsStore settingsStore,
         MainWindowViewModel viewModel,
         IUiDispatcher uiDispatcher,
-        ITaskbarActivityIndicator taskbarActivityIndicator)
+        ITaskbarActivityIndicator taskbarActivityIndicator,
+        IMailActivityCoordinator? mailActivityCoordinator = null,
+        IMailNotificationCoordinator? mailNotificationCoordinator = null)
     {
         _trayIcon = trayIcon;
         _windowActivation = windowActivation;
@@ -41,6 +46,8 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         _viewModel = viewModel;
         _uiDispatcher = uiDispatcher;
         _taskbarActivityIndicator = taskbarActivityIndicator;
+        _mailActivityCoordinator = mailActivityCoordinator;
+        _mailNotificationCoordinator = mailNotificationCoordinator;
     }
 
     public void Initialize()
@@ -57,6 +64,10 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         _trayIcon.DoNotDisturbToggleRequested += OnDoNotDisturbToggleRequested;
         _trayIcon.ExitRequested += OnExitRequested;
         _activityCoordinator.ActivityChanged += OnActivityChanged;
+        if (_mailActivityCoordinator is not null)
+        {
+            _mailActivityCoordinator.ActivityChanged += OnActivityChanged;
+        }
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _trayIcon.Show(
             _settingsStore.Current.Notifications.DoNotDisturb,
@@ -90,6 +101,7 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         Unsubscribe();
         _trayIcon.BeginShutdown();
         _notificationCoordinator.Shutdown();
+        _mailNotificationCoordinator?.Shutdown();
     }
 
     public void Dispose()
@@ -164,6 +176,7 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         bool enabled = _settingsStore.Current.Notifications.DoNotDisturb;
         _trayIcon.SetDoNotDisturb(enabled);
         _notificationCoordinator.OnDoNotDisturbChanged(enabled);
+        _mailNotificationCoordinator?.OnDoNotDisturbChanged(enabled);
     }
 
     private void UpdateActivityIndicators()
@@ -176,7 +189,17 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         var services = _settingsStore.Current.Services.ToArray();
         _trayIcon.SetToolTip(_activityCoordinator.CreateTrayToolTip(services));
         _taskbarActivityIndicator.SetHasActivity(
-            services.Any(service => service.IsEnabled && service.HasUnreadActivity));
+            HasTaskbarActivity(services, _settingsStore.Current.MailAccounts));
+    }
+
+    internal static bool HasTaskbarActivity(
+        IEnumerable<ServiceInstance> services,
+        IEnumerable<MailAccount> mailAccounts)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(mailAccounts);
+        return services.Any(service => service.IsEnabled && service.HasUnreadActivity)
+            || mailAccounts.Any(account => account.IsEnabled && account.HasNewMailActivity);
     }
 
     private void Unsubscribe()
@@ -192,6 +215,10 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         _trayIcon.DoNotDisturbToggleRequested -= OnDoNotDisturbToggleRequested;
         _trayIcon.ExitRequested -= OnExitRequested;
         _activityCoordinator.ActivityChanged -= OnActivityChanged;
+        if (_mailActivityCoordinator is not null)
+        {
+            _mailActivityCoordinator.ActivityChanged -= OnActivityChanged;
+        }
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
     }
 }

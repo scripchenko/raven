@@ -28,6 +28,7 @@ public sealed class WebViewEventCoordinator : IWebViewEventCoordinator
         _windowActivation = windowActivation;
         _sessionManager.DocumentTitleChanged += OnDocumentTitleChanged;
         _sessionManager.NotificationReceived += OnNotificationReceived;
+        _sessionManager.BackgroundNotificationActivityReceived += OnBackgroundNotificationActivityReceived;
     }
 
     public void Dispose()
@@ -40,12 +41,13 @@ public sealed class WebViewEventCoordinator : IWebViewEventCoordinator
         _disposed = true;
         _sessionManager.DocumentTitleChanged -= OnDocumentTitleChanged;
         _sessionManager.NotificationReceived -= OnNotificationReceived;
+        _sessionManager.BackgroundNotificationActivityReceived -= OnBackgroundNotificationActivityReceived;
     }
 
     private void OnDocumentTitleChanged(object? sender, ServiceDocumentTitleChangedEventArgs eventArgs)
     {
         ServiceInstance? service = FindEnabledService(eventArgs.ServiceInstanceId, eventArgs.ServiceType);
-        if (service is not null)
+        if (service is not null && service.ServiceType is not ServiceType.VkMessenger)
         {
             bool isBeingViewed = _windowActivation.IsMainWindowActive
                 && _windowActivation.SelectedServiceId == service.Id;
@@ -67,7 +69,26 @@ public sealed class WebViewEventCoordinator : IWebViewEventCoordinator
                 eventArgs.SenderOrigin,
                 eventArgs.Title,
                 eventArgs.Body,
-                eventArgs.Lifecycle));
+                eventArgs.Lifecycle,
+                eventArgs.NotificationTagHash));
+    }
+
+    private void OnBackgroundNotificationActivityReceived(
+        object? sender,
+        BackgroundNotificationActivityReceivedEventArgs eventArgs)
+    {
+        ServiceInstance? service = FindEnabledService(eventArgs.ServiceInstanceId, eventArgs.ServiceType);
+        if (service is null)
+        {
+            return;
+        }
+
+        bool isBeingViewed = _windowActivation.IsMainWindowActive
+            && _windowActivation.SelectedServiceId == service.Id;
+        if (!isBeingViewed)
+        {
+            _activityCoordinator.MarkNotificationReceived(service);
+        }
     }
 
     private ServiceInstance? FindEnabledService(Guid serviceInstanceId, ServiceType serviceType) =>

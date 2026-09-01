@@ -1,7 +1,7 @@
 namespace UnifiedMessenger.App.Services.Notifications;
 
-public enum NotificationSoundMode
+public enum LanternSoundSource
 {
-    Lantern,
-    Native
+    Default,
+    Custom
 }

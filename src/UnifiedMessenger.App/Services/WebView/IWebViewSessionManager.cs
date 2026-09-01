@@ -9,6 +9,7 @@ public interface IWebViewSessionManager : IDisposable
     event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested;
     event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged;
     event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived;
+    event EventHandler<BackgroundNotificationActivityReceivedEventArgs>? BackgroundNotificationActivityReceived;
 
     WebViewSessionState State { get; }
     bool IsShutdownStarted { get; }

@@ -82,7 +82,10 @@ public sealed class WebNotificationCoordinator : IWebNotificationCoordinator
         }
 
         _telegramSoundCoordinator.RequestSound(
-            new TelegramNotificationSoundRequest(service.Id, service.ServiceType));
+            new TelegramNotificationSoundRequest(
+                service.Id,
+                service.ServiceType,
+                request.NotificationTagHash));
 
         bool showPreview = _settingsStore.Current.Notifications.ShowNotificationPreview;
         WebNotificationRequest inMemoryRequest = showPreview

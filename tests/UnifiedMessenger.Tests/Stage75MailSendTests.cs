@@ -1421,7 +1421,7 @@ public sealed class Stage75MailSendTests
     [Fact]
     public void Stage75_DoesNotChangeSettingsSchemaOrPersistMailContent()
     {
-        Assert.Equal(4, AppSettings.CurrentSchemaVersion);
+        Assert.Equal(5, AppSettings.CurrentSchemaVersion);
         string settings = JsonSerializer.Serialize(AppSettings.CreateDefault());
         string[] forbidden = ["Compose", "Recipient", "Subject", "TextBody", "ReplyContext", "ThreadId", "RawMime"];
 

@@ -4,5 +4,6 @@ namespace UnifiedMessenger.App.Services.Notifications;
 
 public interface INotificationSoundPlayer
 {
-    bool TryPlay(ServiceType serviceType, NotificationSoundMode mode);
+    bool TryPlay(ServiceType serviceType);
+    bool TryPreviewLanternSound();
 }

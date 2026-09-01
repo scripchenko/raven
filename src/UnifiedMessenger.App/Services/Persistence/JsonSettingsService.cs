@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Notifications;
 
 namespace UnifiedMessenger.App.Services.Persistence;
 
@@ -109,6 +110,8 @@ public sealed class JsonSettingsService : ISettingsService
             WriteIndented = true,
             PropertyNameCaseInsensitive = true
         };
+        options.Converters.Add(new SafeStringEnumJsonConverter<NotificationSoundMode>(NotificationSoundMode.Lantern));
+        options.Converters.Add(new SafeStringEnumJsonConverter<LanternSoundSource>(LanternSoundSource.Default));
         options.Converters.Add(new JsonStringEnumConverter());
         return options;
     }
@@ -156,6 +159,8 @@ public sealed class JsonSettingsService : ISettingsService
             settings.Notifications = new NotificationSettings();
             changed = true;
         }
+
+        changed |= NormalizeNotificationSettings(settings.Notifications);
 
         if (settings.Window is null)
         {
@@ -258,6 +263,99 @@ public sealed class JsonSettingsService : ISettingsService
         }
 
         return changed;
+    }
+
+    private static bool NormalizeNotificationSettings(NotificationSettings settings)
+    {
+        bool changed = false;
+        if (!Enum.IsDefined(settings.TelegramSoundMode))
+        {
+            settings.TelegramSoundMode = NotificationSoundMode.Lantern;
+            changed = true;
+        }
+
+        if (!Enum.IsDefined(settings.WhatsAppSoundMode))
+        {
+            settings.WhatsAppSoundMode = NotificationSoundMode.Lantern;
+            changed = true;
+        }
+
+        if (!Enum.IsDefined(settings.MaxSoundMode))
+        {
+            settings.MaxSoundMode = NotificationSoundMode.Lantern;
+            changed = true;
+        }
+
+        if (!Enum.IsDefined(settings.LanternSoundSource))
+        {
+            settings.LanternSoundSource = LanternSoundSource.Default;
+            changed = true;
+        }
+
+        string? internalFileName = string.IsNullOrWhiteSpace(settings.CustomSoundInternalFileName)
+            ? null
+            : settings.CustomSoundInternalFileName.Trim();
+        string? displayName = string.IsNullOrWhiteSpace(settings.CustomSoundDisplayName)
+            ? null
+            : LanternSoundFilePolicy.CreateSafeDisplayName(settings.CustomSoundDisplayName.Trim());
+        if (internalFileName is not null
+            && !LanternSoundFilePolicy.IsSafeInternalFileName(internalFileName))
+        {
+            internalFileName = null;
+        }
+
+        if (!string.Equals(settings.CustomSoundInternalFileName, internalFileName, StringComparison.Ordinal)
+            || !string.Equals(settings.CustomSoundDisplayName, displayName, StringComparison.Ordinal))
+        {
+            settings.CustomSoundInternalFileName = internalFileName;
+            settings.CustomSoundDisplayName = displayName;
+            changed = true;
+        }
+
+        if (settings.LanternSoundSource is LanternSoundSource.Custom && internalFileName is null)
+        {
+            settings.LanternSoundSource = LanternSoundSource.Default;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private sealed class SafeStringEnumJsonConverter<TEnum>(TEnum fallback) : JsonConverter<TEnum>
+        where TEnum : struct, Enum
+    {
+        public override TEnum Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options)
+        {
+            if (reader.TokenType is JsonTokenType.String
+                && Enum.TryParse(reader.GetString(), ignoreCase: true, out TEnum parsed)
+                && Enum.IsDefined(parsed))
+            {
+                return parsed;
+            }
+
+            if (reader.TokenType is JsonTokenType.Number
+                && reader.TryGetInt32(out int numeric)
+                && Enum.IsDefined(typeof(TEnum), numeric))
+            {
+                return (TEnum)Enum.ToObject(typeof(TEnum), numeric);
+            }
+
+            if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+            {
+                reader.Skip();
+            }
+
+            return fallback;
+        }
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            TEnum value,
+            JsonSerializerOptions options) =>
+            writer.WriteStringValue(Enum.IsDefined(value) ? value.ToString() : fallback.ToString());
     }
 
     private string? MoveCorruptedFileAside()

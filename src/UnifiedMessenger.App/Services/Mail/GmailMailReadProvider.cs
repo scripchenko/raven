@@ -30,10 +30,20 @@ internal sealed record GmailApiInboxPage(
     IReadOnlyList<GmailApiSummaryData> Items,
     string? NextPageToken);
 
+internal sealed record GmailApiInboxTechnicalSnapshot(
+    int UnreadCount,
+    IReadOnlyList<string> MessageIds);
+
 internal sealed record GmailApiRawMessage(byte[] RawMime, bool IsUnread, string? ThreadId = null);
 
 internal interface IGmailApiReadClient
 {
+    Task<GmailApiInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+        MailCredential credential,
+        Guid accountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<GmailApiInboxTechnicalSnapshot>(new NotSupportedException());
+
     Task<int> GetInboxUnreadCountAsync(
         MailCredential credential,
         Guid accountId,
@@ -121,7 +131,7 @@ internal sealed class GmailMailReadProvider(
     IMailCredentialStore credentialStore,
     IGmailApiReadClient apiClient,
     IMailContentExtractor contentExtractor,
-    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider
 {
     private const string MessageKeyPrefix = "gmail:";
     private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
@@ -135,6 +145,20 @@ internal sealed class GmailMailReadProvider(
         ValidateAccount(account, pageSize: 1);
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
         return await apiClient.GetInboxUnreadCountAsync(credential, account.Id, cancellationToken);
+    }
+
+    async Task<MailInboxTechnicalSnapshot> IMailInboxTechnicalSnapshotProvider.GetInboxTechnicalSnapshotAsync(
+        MailAccount account,
+        CancellationToken cancellationToken)
+    {
+        ValidateAccount(account, pageSize: 1);
+        MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+        GmailApiInboxTechnicalSnapshot snapshot = await apiClient
+            .GetInboxTechnicalSnapshotAsync(credential, account.Id, cancellationToken);
+        return new MailInboxTechnicalSnapshot(
+            snapshot.UnreadCount,
+            "gmail-inbox",
+            snapshot.MessageIds);
     }
 
     public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
@@ -417,6 +441,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
 {
     internal const int MaximumMetadataConcurrency = 5;
     internal const int MetadataMimeTreeDepth = 8;
+    internal const int BackgroundSnapshotMessageLimit = 100;
     internal const string InboxLabel = GmailSystemFolders.Inbox;
     internal static string MetadataFieldsProjection { get; } = BuildMetadataFieldsProjection();
 
@@ -440,6 +465,48 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
                 .ExecuteAsync(cancellationToken);
             long unread = inbox.MessagesUnread ?? 0;
             return unread >= int.MaxValue ? int.MaxValue : Math.Max(0, (int)unread);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw MapListException(exception);
+        }
+    }
+
+    public async Task<GmailApiInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+        MailCredential credential,
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(
+                credential,
+                accountId,
+                cancellationToken);
+            GmailService service = session.Service;
+            Google.Apis.Gmail.v1.Data.Label inbox = await service.Users.Labels
+                .Get("me", GmailSystemFolders.Inbox)
+                .ExecuteAsync(cancellationToken);
+
+            UsersResource.MessagesResource.ListRequest request = service.Users.Messages.List("me");
+            request.LabelIds = new[] { GmailSystemFolders.Inbox };
+            request.IncludeSpamTrash = false;
+            request.MaxResults = BackgroundSnapshotMessageLimit;
+            request.Fields = "messages/id";
+            ListMessagesResponse response = await request.ExecuteAsync(cancellationToken);
+            string[] messageIds = response.Messages?
+                .Select(message => message.Id)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()
+                ?? [];
+            long unread = inbox.MessagesUnread ?? 0;
+            int unreadCount = unread >= int.MaxValue ? int.MaxValue : Math.Max(0, (int)unread);
+            return new GmailApiInboxTechnicalSnapshot(unreadCount, messageIds);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

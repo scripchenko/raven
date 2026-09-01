@@ -11,7 +11,7 @@ public sealed class NotificationPermissionCoordinator(
     IUiDispatcher uiDispatcher,
     IApplicationSettingsStore settingsStore) : INotificationPermissionCoordinator, IDisposable
 {
-    private readonly SemaphoreSlim _promptGate = new(1, 1);
+    private readonly SemaphoreSlim _stateGate = new(1, 1);
     private bool _disposed;
 
     public async Task<NotificationPermissionState> DecideAsync(
@@ -28,10 +28,7 @@ public sealed class NotificationPermissionCoordinator(
             return NotificationPermissionState.Denied;
         }
 
-        ServiceInstance? persistedService = settingsStore.Current.Services.FirstOrDefault(
-            candidate => candidate.Id == service.Id
-                && candidate.ServiceType == service.ServiceType
-                && string.Equals(candidate.ProfileName, service.ProfileName, StringComparison.Ordinal));
+        ServiceInstance? persistedService = FindPersistedService(service);
         if (persistedService is null)
         {
             return NotificationPermissionState.Denied;
@@ -42,7 +39,7 @@ public sealed class NotificationPermissionCoordinator(
             return persistedService.NotificationPermissionState;
         }
 
-        await _promptGate.WaitAsync(cancellationToken);
+        await _stateGate.WaitAsync(cancellationToken);
         try
         {
             if (persistedService.NotificationPermissionState is not NotificationPermissionState.Unknown)
@@ -59,9 +56,59 @@ public sealed class NotificationPermissionCoordinator(
         }
         finally
         {
-            _promptGate.Release();
+            _stateGate.Release();
         }
     }
+
+    public async Task<NotificationPermissionState> SynchronizeFromProfileAsync(
+        ServiceInstance service,
+        string? permissionOrigin,
+        NotificationPermissionState profileState,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(service);
+
+        if (!Enum.IsDefined(profileState))
+        {
+            throw new ArgumentOutOfRangeException(nameof(profileState), profileState, "Unknown notification permission state.");
+        }
+
+        if (!Uri.TryCreate(permissionOrigin, UriKind.Absolute, out Uri? origin)
+            || !navigationPolicy.IsAllowedTopLevelNavigation(service.ServiceType, origin))
+        {
+            return NotificationPermissionState.Denied;
+        }
+
+        ServiceInstance? persistedService = FindPersistedService(service);
+        if (persistedService is null)
+        {
+            return NotificationPermissionState.Denied;
+        }
+
+        await _stateGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (persistedService.NotificationPermissionState == profileState)
+            {
+                return profileState;
+            }
+
+            persistedService.NotificationPermissionState = profileState;
+            await settingsStore.SaveAsync(cancellationToken);
+            return profileState;
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+    }
+
+    private ServiceInstance? FindPersistedService(ServiceInstance service) =>
+        settingsStore.Current.Services.FirstOrDefault(
+            candidate => candidate.Id == service.Id
+                && candidate.ServiceType == service.ServiceType
+                && string.Equals(candidate.ProfileName, service.ProfileName, StringComparison.Ordinal));
 
     public void Dispose()
     {
@@ -71,6 +118,6 @@ public sealed class NotificationPermissionCoordinator(
         }
 
         _disposed = true;
-        _promptGate.Dispose();
+        _stateGate.Dispose();
     }
 }

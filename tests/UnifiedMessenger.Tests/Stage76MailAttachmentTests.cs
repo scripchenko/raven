@@ -814,7 +814,7 @@ public sealed class Stage76MailAttachmentTests
         Assert.DoesNotContain("Process.Start", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ProtocolLogger", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Attachment", settings, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("CurrentSchemaVersion = 4", settings, StringComparison.Ordinal);
+        Assert.Contains("CurrentSchemaVersion = 5", settings, StringComparison.Ordinal);
         Assert.DoesNotContain("PackageReference Include=\"MimeTypes", project, StringComparison.OrdinalIgnoreCase);
     }
 

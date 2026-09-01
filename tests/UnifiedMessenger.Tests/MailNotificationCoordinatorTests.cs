@@ -1,0 +1,359 @@
+using System.Reflection;
+using System.Text.Json;
+using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Notifications;
+using UnifiedMessenger.App.Services.Persistence;
+using UnifiedMessenger.App.Services.Tray;
+
+namespace UnifiedMessenger.Tests;
+
+public sealed class MailNotificationCoordinatorTests
+{
+    [Fact]
+    public void NewMailInInactiveAccount_SetsRuntimeActivity()
+    {
+        using Fixture fixture = new();
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.True(fixture.First.HasNewMailActivity);
+    }
+
+    [Fact]
+    public void NewMailInInactiveAccount_ShowsOneSafePopup()
+    {
+        using Fixture fixture = new();
+
+        fixture.Handle(fixture.First, 1);
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Почта", popup.ServiceName);
+        Assert.Equal("Новое письмо", popup.Title);
+        Assert.Equal("Получено новое письмо", popup.Body);
+    }
+
+    [Fact]
+    public void NewMailInInactiveAccount_PlaysOneExistingSystemSound()
+    {
+        using Fixture fixture = new();
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.Equal([ServiceType.Gmail], fixture.Sound.ServiceTypes);
+    }
+
+    [Fact]
+    public void NewMailInInactiveAccount_ProducesTaskbarActivity()
+    {
+        using Fixture fixture = new();
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.True(ApplicationTrayCoordinator.HasTaskbarActivity([], [fixture.First]));
+    }
+
+    [Fact]
+    public void BatchNotification_ShowsOnePopupAndPlaysOneSound()
+    {
+        using Fixture fixture = new();
+
+        fixture.Handle(fixture.First, 4);
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Новые письма", popup.Title);
+        Assert.Equal("Получено новых писем: 4", popup.Body);
+        Assert.Single(fixture.Sound.ServiceTypes);
+    }
+
+    [Fact]
+    public void SelectedExactActiveAccount_SuppressesPopupSoundAndActivity()
+    {
+        using Fixture fixture = new();
+        fixture.Navigation.ActiveAccountId = fixture.First.Id;
+        fixture.Navigation.IsMainWindowActive = true;
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.False(fixture.First.HasNewMailActivity);
+        Assert.Empty(fixture.Popup.Shown);
+        Assert.Empty(fixture.Sound.ServiceTypes);
+    }
+
+    [Fact]
+    public void SelectedDifferentActiveAccount_AllowsPopupSoundAndActivity()
+    {
+        using Fixture fixture = new();
+        fixture.Navigation.ActiveAccountId = fixture.Second.Id;
+        fixture.Navigation.IsMainWindowActive = true;
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.True(fixture.First.HasNewMailActivity);
+        Assert.Single(fixture.Popup.Shown);
+        Assert.Single(fixture.Sound.ServiceTypes);
+    }
+
+    [Fact]
+    public void ClearingOpenedAccountActivity_DoesNotClearServerUnreadCount()
+    {
+        using Fixture fixture = new();
+        fixture.First.InboxUnreadCount = 23;
+        fixture.Handle(fixture.First, 1);
+
+        fixture.Activity.Clear(fixture.First);
+
+        Assert.False(fixture.First.HasNewMailActivity);
+        Assert.Equal(23, fixture.First.InboxUnreadCount);
+    }
+
+    [Fact]
+    public void OpeningOneAccount_ClearsOnlyThatAccountsRuntimeActivity()
+    {
+        MailAccount first = Account();
+        MailAccount second = Account();
+        MailActivityCoordinator activity = new();
+        activity.MarkNewMail(first);
+        activity.MarkNewMail(second);
+
+        activity.Clear(first);
+
+        Assert.False(first.HasNewMailActivity);
+        Assert.True(second.HasNewMailActivity);
+    }
+
+    [Fact]
+    public void ServerUnreadCountAndRuntimeActivity_AreIndependentAndActivityIsNotSerialized()
+    {
+        MailAccount account = Account();
+        account.InboxUnreadCount = 8;
+        account.HasNewMailActivity = true;
+
+        account.InboxUnreadCount = 3;
+
+        Assert.True(account.HasNewMailActivity);
+        Assert.DoesNotContain("HasNewMailActivity", JsonSerializer.Serialize(account), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NotificationsDisabled_SuppressesPopupAndSoundButKeepsUnreadAndActivity()
+    {
+        using Fixture fixture = new();
+        fixture.Settings.Current.Notifications.IsEnabled = false;
+        fixture.First.InboxUnreadCount = 11;
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.Empty(fixture.Popup.Shown);
+        Assert.Empty(fixture.Sound.ServiceTypes);
+        Assert.True(fixture.First.HasNewMailActivity);
+        Assert.Equal(11, fixture.First.InboxUnreadCount);
+    }
+
+    [Fact]
+    public void SoundDisabled_AllowsPopupWithoutSound()
+    {
+        using Fixture fixture = new();
+        fixture.Settings.Current.Notifications.PlaySound = false;
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.Single(fixture.Popup.Shown);
+        Assert.Empty(fixture.Sound.ServiceTypes);
+        Assert.True(fixture.First.HasNewMailActivity);
+    }
+
+    [Fact]
+    public void DoNotDisturb_SuppressesPopupAndSoundButKeepsActivity()
+    {
+        using Fixture fixture = new();
+        fixture.Settings.Current.Notifications.DoNotDisturb = true;
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.Empty(fixture.Popup.Shown);
+        Assert.Empty(fixture.Sound.ServiceTypes);
+        Assert.True(fixture.First.HasNewMailActivity);
+    }
+
+    [Fact]
+    public void WebActivityOrMailActivity_EnablesTaskbarOverlay()
+    {
+        ServiceInstance web = new() { IsEnabled = true };
+        MailAccount mail = Account();
+
+        web.HasUnreadActivity = true;
+        Assert.True(ApplicationTrayCoordinator.HasTaskbarActivity([web], [mail]));
+
+        web.HasUnreadActivity = false;
+        mail.HasNewMailActivity = true;
+        Assert.True(ApplicationTrayCoordinator.HasTaskbarActivity([web], [mail]));
+    }
+
+    [Fact]
+    public void ClearingMailActivityWhileWebActivityRemains_KeepsTaskbarOverlay()
+    {
+        ServiceInstance web = new() { IsEnabled = true, HasUnreadActivity = true };
+        MailAccount mail = Account();
+        mail.HasNewMailActivity = true;
+        MailActivityCoordinator activity = new();
+
+        activity.Clear(mail);
+
+        Assert.True(ApplicationTrayCoordinator.HasTaskbarActivity([web], [mail]));
+    }
+
+    [Fact]
+    public void PopupClick_ClearsActivityAndOpensCorrectAccountInbox()
+    {
+        using Fixture fixture = new();
+        fixture.First.InboxUnreadCount = 14;
+        fixture.Handle(fixture.First, 1);
+        Guid popupId = Assert.Single(fixture.Popup.Shown).NotificationId;
+
+        fixture.Popup.RaiseClicked(popupId);
+
+        Assert.False(fixture.First.HasNewMailActivity);
+        Assert.Equal(14, fixture.First.InboxUnreadCount);
+        Assert.Equal([fixture.First.Id], fixture.Navigation.OpenedInboxAccountIds);
+    }
+
+    [Fact]
+    public void PublicDetectionContract_ContainsNoMailContentOrMessageIdentity()
+    {
+        PropertyInfo[] properties = typeof(MailNewMessageDetectedEventArgs).GetProperties();
+
+        Assert.Equal(
+            [nameof(MailNewMessageDetectedEventArgs.MailAccountId), nameof(MailNewMessageDetectedEventArgs.NewMessageCount)],
+            properties.Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+        Assert.DoesNotContain(properties, property => property.PropertyType == typeof(string));
+    }
+
+    private static MailAccount Account() => new()
+    {
+        Id = Guid.NewGuid(),
+        Provider = MailProviderType.Gmail,
+        IsEnabled = true,
+        CredentialKey = "credential"
+    };
+
+    private sealed class Fixture : IDisposable
+    {
+        private readonly FakePollingMonitor _monitor = new();
+
+        public Fixture()
+        {
+            First = Account();
+            Second = Account();
+            Settings = new TestSettingsStore(new AppSettings { MailAccounts = [First, Second] });
+            Activity = new MailActivityCoordinator();
+            Popup = new FakePopupService();
+            Sound = new FakeSoundPlayer();
+            Navigation = new FakeMailNavigation();
+            Coordinator = new MailNotificationCoordinator(
+                _monitor,
+                Settings,
+                Activity,
+                Popup,
+                Sound,
+                Navigation);
+        }
+
+        public MailAccount First { get; }
+        public MailAccount Second { get; }
+        public TestSettingsStore Settings { get; }
+        public MailActivityCoordinator Activity { get; }
+        public FakePopupService Popup { get; }
+        public FakeSoundPlayer Sound { get; }
+        public FakeMailNavigation Navigation { get; }
+        public MailNotificationCoordinator Coordinator { get; }
+
+        public void Handle(MailAccount account, int count) =>
+            _monitor.Raise(new MailNewMessageDetectedEventArgs(account.Id, count));
+
+        public void Dispose()
+        {
+            Coordinator.Dispose();
+            Popup.Dispose();
+            _monitor.Dispose();
+        }
+    }
+
+    private sealed class FakePollingMonitor : IMailBackgroundPollingMonitor
+    {
+        public event EventHandler<MailNewMessageDetectedEventArgs>? MailNewMessageDetected;
+        public void Raise(MailNewMessageDetectedEventArgs eventArgs) =>
+            MailNewMessageDetected?.Invoke(this, eventArgs);
+        public void Start() { }
+        public void BeginShutdown() { }
+        public Task StopAsync() => Task.CompletedTask;
+        public void Dispose() => MailNewMessageDetected = null;
+    }
+
+    private sealed class FakeMailNavigation : IMailNotificationNavigation
+    {
+        public Guid? ActiveAccountId { get; set; }
+        public bool IsMainWindowActive { get; set; }
+        public List<Guid> OpenedInboxAccountIds { get; } = [];
+
+        public bool IsAccountActivelyViewed(Guid mailAccountId) =>
+            IsMainWindowActive && ActiveAccountId == mailAccountId;
+
+        public void OpenInbox(Guid mailAccountId) => OpenedInboxAccountIds.Add(mailAccountId);
+    }
+
+    private sealed class FakePopupService : INotificationPopupService
+    {
+        public event EventHandler<NotificationPopupEventArgs>? Clicked;
+        public event EventHandler<NotificationPopupEventArgs>? Closed;
+        public List<NotificationPopupDisplayModel> Shown { get; } = [];
+        public int VisibleCount => Shown.Count;
+
+        public bool TryShow(NotificationPopupDisplayModel notification)
+        {
+            Shown.Add(notification);
+            return true;
+        }
+
+        public void Close(Guid notificationId) =>
+            Closed?.Invoke(this, new NotificationPopupEventArgs(notificationId));
+
+        public void CloseAll()
+        {
+            foreach (Guid id in Shown.Select(notification => notification.NotificationId).ToArray())
+            {
+                Close(id);
+            }
+        }
+
+        public void RaiseClicked(Guid notificationId) =>
+            Clicked?.Invoke(this, new NotificationPopupEventArgs(notificationId));
+
+        public void Dispose()
+        {
+            Clicked = null;
+            Closed = null;
+        }
+    }
+
+    private sealed class FakeSoundPlayer : INotificationSoundPlayer
+    {
+        public List<ServiceType> ServiceTypes { get; } = [];
+
+        public bool TryPlay(ServiceType serviceType)
+        {
+            ServiceTypes.Add(serviceType);
+            return true;
+        }
+
+        public bool TryPreviewLanternSound() => true;
+    }
+
+    private sealed class TestSettingsStore(AppSettings settings) : IApplicationSettingsStore
+    {
+        public AppSettings Current { get; private set; } = settings;
+        public bool IsInitialized => true;
+        public void Initialize(AppSettings value) => Current = value;
+        public Task SaveAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+}

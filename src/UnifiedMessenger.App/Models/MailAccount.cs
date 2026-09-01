@@ -36,6 +36,7 @@ public sealed partial class MailAccount : ObservableObject
     private int _sortOrder;
 
     private int? _inboxUnreadCount;
+    private bool _hasNewMailActivity;
 
     [JsonIgnore]
     public string DisplayLabel => string.IsNullOrWhiteSpace(DisplayName) ? EmailAddress : DisplayName;
@@ -60,6 +61,13 @@ public sealed partial class MailAccount : ObservableObject
 
     [JsonIgnore]
     public bool ShowUnreadBadge => IsEnabled && InboxUnreadCount is > 0;
+
+    [JsonIgnore]
+    public bool HasNewMailActivity
+    {
+        get => _hasNewMailActivity;
+        set => SetProperty(ref _hasNewMailActivity, value);
+    }
 
     partial void OnDisplayNameChanged(string? value) => OnPropertyChanged(nameof(DisplayLabel));
 

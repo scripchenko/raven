@@ -9,6 +9,7 @@ public interface IAppPaths
     string MailCredentialsFolder => System.IO.Path.Combine(LocalDataFolder, "Credentials", "Mail");
     string RemoteImageSenderTrustFolder =>
         System.IO.Path.Combine(LocalDataFolder, "Privacy", "RemoteImageSenderTrust");
+    string NotificationSoundsFolder => System.IO.Path.Combine(LocalDataFolder, "Sounds");
     string GoogleOAuthClientConfigurationPath =>
         System.IO.Path.Combine(LocalDataFolder, "GoogleOAuth", "client_secret.json");
     string LogsFolder { get; }

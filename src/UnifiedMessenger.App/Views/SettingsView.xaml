@@ -2,6 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:converters="clr-namespace:UnifiedMessenger.App.Converters"
+             xmlns:notifications="clr-namespace:UnifiedMessenger.App.Services.Notifications"
              Background="{DynamicResource WindowBackgroundBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
@@ -200,10 +201,10 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Margin="0,0,24,0">
-                                        <TextBlock FontWeight="SemiBold" Text="Звук уведомлений" />
+                                        <TextBlock FontWeight="SemiBold" Text="Звуки Lantern" />
                                         <TextBlock Margin="0,6,0,0"
                                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                                   Text="Чтобы избежать двойного сигнала, встроенный звук уведомлений Telegram Web рекомендуется отключить."
+                                                   Text="Управляет только звуками, которые воспроизводит Lantern. Родной звук веб-сервисов не изменяется."
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <CheckBox Grid.Column="1"
@@ -211,6 +212,119 @@
                                               Command="{Binding SetNotificationSoundEnabledCommand}"
                                               CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
                                               IsChecked="{Binding NotificationSoundEnabled, Mode=OneWay}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold" Text="Звук Lantern" />
+                                <TextBlock Margin="0,6,0,12"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="Один общий звук используется для Telegram, WhatsApp и MAX в режиме Lantern."
+                                           TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Margin="0,0,22,0"
+                                                 Command="{Binding SelectDefaultLanternSoundCommand}"
+                                                 Content="Стандартный"
+                                                 GroupName="LanternSoundSource"
+                                                 IsChecked="{Binding IsDefaultLanternSound, Mode=OneWay}" />
+                                    <RadioButton Command="{Binding SelectCustomLanternSoundCommand}"
+                                                 Content="Свой звук"
+                                                 GroupName="LanternSoundSource"
+                                                 IsChecked="{Binding IsCustomLanternSound, Mode=OneWay}" />
+                                </StackPanel>
+                                <TextBlock Margin="0,12,0,0"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding LanternCustomSoundDisplayName}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Command="{Binding ChooseLanternSoundCommand}"
+                                            Content="Выбрать файл..."
+                                            Style="{StaticResource CompactButtonStyle}" />
+                                    <Button Command="{Binding PreviewLanternSoundCommand}"
+                                            Content="Прослушать"
+                                            Style="{StaticResource CompactButtonStyle}" />
+                                    <Button Command="{Binding RestoreDefaultLanternSoundCommand}"
+                                            Content="Вернуть стандартный"
+                                            Style="{StaticResource CompactButtonStyle}" />
+                                </WrapPanel>
+                                <TextBlock Margin="0,8,0,0"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding SoundStatusMessage}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold" Text="Источник звука мессенджеров" />
+                                <TextBlock Margin="0,6,0,14"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="Lantern воспроизводит выбранный звук. Родной оставляет звук под управлением веб-сервиса."
+                                           TextWrapping="Wrap" />
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock VerticalAlignment="Center" Text="Telegram" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <RadioButton Margin="0,0,18,0"
+                                                     Command="{Binding SetTelegramSoundModeCommand}"
+                                                     CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
+                                                     Content="Lantern"
+                                                     GroupName="TelegramSoundMode"
+                                                     IsChecked="{Binding IsTelegramLanternSound, Mode=OneWay}" />
+                                        <RadioButton Command="{Binding SetTelegramSoundModeCommand}"
+                                                     CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
+                                                     Content="Родной"
+                                                     GroupName="TelegramSoundMode"
+                                                     IsChecked="{Binding IsTelegramNativeSound, Mode=OneWay}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock VerticalAlignment="Center" Text="WhatsApp" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <RadioButton Margin="0,0,18,0"
+                                                     Command="{Binding SetWhatsAppSoundModeCommand}"
+                                                     CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
+                                                     Content="Lantern"
+                                                     GroupName="WhatsAppSoundMode"
+                                                     IsChecked="{Binding IsWhatsAppLanternSound, Mode=OneWay}" />
+                                        <RadioButton Command="{Binding SetWhatsAppSoundModeCommand}"
+                                                     CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
+                                                     Content="Родной"
+                                                     GroupName="WhatsAppSoundMode"
+                                                     IsChecked="{Binding IsWhatsAppNativeSound, Mode=OneWay}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock VerticalAlignment="Center" Text="MAX" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <RadioButton Margin="0,0,18,0"
+                                                     Command="{Binding SetMaxSoundModeCommand}"
+                                                     CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
+                                                     Content="Lantern"
+                                                     GroupName="MaxSoundMode"
+                                                     IsChecked="{Binding IsMaxLanternSound, Mode=OneWay}" />
+                                        <RadioButton Command="{Binding SetMaxSoundModeCommand}"
+                                                     CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
+                                                     Content="Родной"
+                                                     GroupName="MaxSoundMode"
+                                                     IsChecked="{Binding IsMaxNativeSound, Mode=OneWay}" />
+                                    </StackPanel>
                                 </Grid>
                             </StackPanel>
                         </Border>

@@ -398,7 +398,7 @@ public sealed class Stage74MailFoldersReadStateTests
     [Fact]
     public void GmailScopeMetadata_IsNotPartOfSettingsSchema()
     {
-        Assert.Equal(4, AppSettings.CurrentSchemaVersion);
+        Assert.Equal(5, AppSettings.CurrentSchemaVersion);
         Assert.DoesNotContain(
             typeof(MailAccount).GetProperties(),
             property => property.Name.Contains("Scope", StringComparison.OrdinalIgnoreCase)

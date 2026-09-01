@@ -1,0 +1,467 @@
+using System.Reflection;
+using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Persistence;
+using UnifiedMessenger.App.Services.Tray;
+
+namespace UnifiedMessenger.Tests;
+
+public sealed class MailBackgroundPollingMonitorTests
+{
+    [Fact]
+    public async Task FirstSuccessfulSnapshot_CreatesBaselineWithoutDetection()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(8, "a", "b"));
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+
+        Assert.Empty(events);
+        Assert.Equal(8, account.InboxUnreadCount);
+    }
+
+    [Fact]
+    public async Task SecondSnapshotWithOneNewMessage_RaisesOneDetection()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(2, "a", "b"));
+        provider.Enqueue(account.Id, Snapshot(3, "new", "a", "b"));
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        MailNewMessageDetectedEventArgs detected = Assert.Single(events);
+        Assert.Equal(account.Id, detected.MailAccountId);
+        Assert.Equal(1, detected.NewMessageCount);
+    }
+
+    [Fact]
+    public async Task RepeatedSnapshot_DoesNotDuplicateDetection()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "old"));
+        provider.Enqueue(account.Id, Snapshot(2, "new", "old"));
+        provider.Enqueue(account.Id, Snapshot(2, "new", "old"));
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        Assert.Single(events);
+    }
+
+    [Fact]
+    public async Task MultipleNewMessagesBetweenPolls_ReportExactCount()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "old"));
+        provider.Enqueue(account.Id, Snapshot(4, "three", "two", "one", "old"));
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        Assert.Equal(3, Assert.Single(events).NewMessageCount);
+    }
+
+    [Fact]
+    public async Task UnreadCountUpdatesIndependentlyFromDetection()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(9, "old"));
+        provider.Enqueue(account.Id, Snapshot(4, "new", "old"));
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        Assert.Equal(9, account.InboxUnreadCount);
+        await monitor.PollOnceAsync();
+
+        Assert.Equal(4, account.InboxUnreadCount);
+        Assert.Single(events);
+    }
+
+    [Fact]
+    public async Task ReadStateCountChangeWithoutNewIdentity_DoesNotFalseDetect()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(5, "a", "b"));
+        provider.Enqueue(account.Id, Snapshot(4, "a", "b"));
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        Assert.Empty(events);
+        Assert.Equal(4, account.InboxUnreadCount);
+    }
+
+    [Fact]
+    public async Task OneAccountFailure_DoesNotStopOtherAccounts()
+    {
+        MailAccount failing = Account();
+        MailAccount healthy = Account(MailProviderType.Yandex);
+        SnapshotProvider provider = new();
+        provider.EnqueueFailure(failing.Id);
+        provider.Enqueue(healthy.Id, Snapshot(7, "healthy"));
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([failing, healthy], provider);
+
+        await monitor.PollOnceAsync();
+
+        Assert.Null(failing.InboxUnreadCount);
+        Assert.Equal(7, healthy.InboxUnreadCount);
+        Assert.Equal(1, provider.PollCount(failing.Id));
+        Assert.Equal(1, provider.PollCount(healthy.Id));
+    }
+
+    [Fact]
+    public async Task DisabledAccount_IsNotPolled()
+    {
+        MailAccount disabled = Account();
+        disabled.IsEnabled = false;
+        SnapshotProvider provider = new();
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([disabled], provider);
+
+        await monitor.PollOnceAsync();
+
+        Assert.Equal(0, provider.PollCount(disabled.Id));
+        Assert.Null(disabled.InboxUnreadCount);
+    }
+
+    [Fact]
+    public async Task NewMonitorAfterRestart_BaselinesExistingMessagesWithoutDetection()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "old"));
+        using (MailBackgroundPollingMonitor first = CreateMonitor([account], provider))
+        {
+            await first.PollOnceAsync();
+        }
+
+        provider.Enqueue(account.Id, Snapshot(2, "new-since-previous-process", "old"));
+        using MailBackgroundPollingMonitor restarted = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(restarted);
+
+        await restarted.PollOnceAsync();
+
+        Assert.Empty(events);
+        Assert.Equal(2, account.InboxUnreadCount);
+    }
+
+    [Fact]
+    public async Task IdentityScopeChange_RebaselinesWithoutFalseDetection()
+    {
+        MailAccount account = Account(MailProviderType.GenericImap);
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(2, "1", "2"));
+        provider.Enqueue(account.Id, Snapshot(3, "100", "101", "102") with { IdentityScope = "scope-2" });
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        Assert.Empty(events);
+        Assert.Equal(3, account.InboxUnreadCount);
+    }
+
+    [Fact]
+    public void PublicDetectionEvent_ContainsNoMessageIdentityOrContent()
+    {
+        PropertyInfo[] properties = typeof(MailNewMessageDetectedEventArgs).GetProperties();
+
+        Assert.Equal(
+            [nameof(MailNewMessageDetectedEventArgs.MailAccountId), nameof(MailNewMessageDetectedEventArgs.NewMessageCount)],
+            properties.Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+        Assert.DoesNotContain(properties, property => property.PropertyType == typeof(string));
+    }
+
+    [Fact]
+    public void Foundation_HasSixtySecondCadenceAndNoPresentationDependencies()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(60), MailBackgroundPollingMonitor.PollingInterval);
+        ConstructorInfo constructor = Assert.Single(typeof(MailBackgroundPollingMonitor).GetConstructors());
+        Type[] parameterTypes = constructor.GetParameters().Select(parameter => parameter.ParameterType).ToArray();
+
+        Assert.DoesNotContain(parameterTypes, type => type.Name.Contains("Popup", StringComparison.Ordinal));
+        Assert.DoesNotContain(parameterTypes, type => type.Name.Contains("Sound", StringComparison.Ordinal));
+        Assert.DoesNotContain(parameterTypes, type => type.Name.Contains("Taskbar", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StopCancelsThePollingLoopWithoutWaitingForNextInterval()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "baseline"));
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+
+        monitor.Start();
+        await provider.FirstPollCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await monitor.StopAsync().WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(1, provider.PollCount(account.Id));
+    }
+
+    [Fact]
+    public async Task GmailSnapshot_UsesOnlyProviderMessageIdsAndUnreadCount()
+    {
+        MailAccount account = Account(MailProviderType.Gmail);
+        GmailSnapshotClient client = new(new GmailApiInboxTechnicalSnapshot(6, ["gmail-2", "gmail-1"]));
+        GmailMailReadProvider provider = new(
+            new TestCredentialStore(MailCredential.CreateGmailOAuth("refresh", "client", "secret")),
+            client,
+            new MailContentExtractor(new MailHtmlSanitizer()));
+
+        MailInboxTechnicalSnapshot snapshot = await ((IMailInboxTechnicalSnapshotProvider)provider)
+            .GetInboxTechnicalSnapshotAsync(account);
+
+        Assert.Equal(6, snapshot.UnreadCount);
+        Assert.Equal("gmail-inbox", snapshot.IdentityScope);
+        Assert.Equal(["gmail-2", "gmail-1"], snapshot.MessageIdentities);
+        Assert.Equal(account.Id, client.AccountId);
+    }
+
+    [Fact]
+    public async Task ImapSnapshot_ScopesUniqueIdsByUidValidity()
+    {
+        MailAccount account = Account(MailProviderType.Yandex);
+        ImapSnapshotClient client = new(new ImapInboxTechnicalSnapshot(4, 812, [19, 20, 20, 0]));
+        ImapMailReadProvider provider = new(
+            new TestCredentialStore(MailCredential.CreatePassword("password")),
+            CreateMailProviderFactory(),
+            client,
+            new MailContentExtractor(new MailHtmlSanitizer()));
+
+        MailInboxTechnicalSnapshot snapshot = await ((IMailInboxTechnicalSnapshotProvider)provider)
+            .GetInboxTechnicalSnapshotAsync(account);
+
+        Assert.Equal(4, snapshot.UnreadCount);
+        Assert.Equal("imap-inbox:812", snapshot.IdentityScope);
+        Assert.Equal(["19", "20"], snapshot.MessageIdentities);
+        Assert.Equal("imap.yandex.com", client.Server?.Host);
+    }
+
+    private static MailBackgroundPollingMonitor CreateMonitor(
+        IReadOnlyList<MailAccount> accounts,
+        SnapshotProvider provider)
+    {
+        TestSettingsStore settings = new(new AppSettings { MailAccounts = accounts.ToList() });
+        return new MailBackgroundPollingMonitor(
+            settings,
+            new TestProviderFactory(provider),
+            new ImmediateDispatcher(),
+            TimeProvider.System);
+    }
+
+    private static List<MailNewMessageDetectedEventArgs> Subscribe(MailBackgroundPollingMonitor monitor)
+    {
+        List<MailNewMessageDetectedEventArgs> events = [];
+        monitor.MailNewMessageDetected += (_, eventArgs) => events.Add(eventArgs);
+        return events;
+    }
+
+    private static MailInboxTechnicalSnapshot Snapshot(int unreadCount, params string[] identities) =>
+        new(unreadCount, "scope-1", identities);
+
+    private static MailAccount Account(MailProviderType provider = MailProviderType.Gmail) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Provider = provider,
+            EmailAddress = "mail@example.test",
+            CredentialKey = "credential",
+            IsEnabled = true
+        };
+
+    private static IMailProviderFactory CreateMailProviderFactory()
+    {
+        NoOpConnectionValidator validator = new();
+        return new MailProviderFactory(
+        [
+            new GmailApiProvider(),
+            new YandexMailProvider(validator),
+            new MailRuMailProvider(validator),
+            new GenericImapMailProvider(validator)
+        ]);
+    }
+
+    private sealed class SnapshotProvider : IMailReadProvider, IMailInboxTechnicalSnapshotProvider
+    {
+        private readonly Dictionary<Guid, Queue<Func<MailInboxTechnicalSnapshot>>> _results = [];
+        private readonly Dictionary<Guid, int> _pollCounts = [];
+
+        public TaskCompletionSource FirstPollCompleted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool Supports(MailProviderType providerType) => true;
+
+        public void Enqueue(Guid accountId, MailInboxTechnicalSnapshot snapshot) =>
+            Queue(accountId).Enqueue(() => snapshot);
+
+        public void EnqueueFailure(Guid accountId) =>
+            Queue(accountId).Enqueue(() => throw new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Background poll failed."));
+
+        public int PollCount(Guid accountId) => _pollCounts.GetValueOrDefault(accountId);
+
+        public Task<MailInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+            MailAccount account,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _pollCounts[account.Id] = PollCount(account.Id) + 1;
+            try
+            {
+                return Task.FromResult(_results[account.Id].Dequeue().Invoke());
+            }
+            finally
+            {
+                FirstPollCompleted.TrySetResult();
+            }
+        }
+
+        public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
+            MailAccount account,
+            string? continuationToken,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<MailPage<MailMessageSummary>>(new NotSupportedException());
+
+        public Task<MailMessageContent> GetMessageAsync(
+            MailAccount account,
+            string messageKey,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<MailMessageContent>(new NotSupportedException());
+
+        private Queue<Func<MailInboxTechnicalSnapshot>> Queue(Guid accountId)
+        {
+            if (!_results.TryGetValue(accountId, out Queue<Func<MailInboxTechnicalSnapshot>>? queue))
+            {
+                queue = new Queue<Func<MailInboxTechnicalSnapshot>>();
+                _results.Add(accountId, queue);
+            }
+
+            return queue;
+        }
+    }
+
+    private sealed class TestProviderFactory(IMailReadProvider provider) : IMailReadProviderFactory
+    {
+        public IMailReadProvider Get(MailProviderType providerType) => provider;
+    }
+
+    private sealed class GmailSnapshotClient(GmailApiInboxTechnicalSnapshot snapshot) : IGmailApiReadClient
+    {
+        public Guid? AccountId { get; private set; }
+
+        public Task<GmailApiInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+            MailCredential credential,
+            Guid accountId,
+            CancellationToken cancellationToken = default)
+        {
+            AccountId = accountId;
+            return Task.FromResult(snapshot);
+        }
+
+        public Task<GmailApiInboxPage> GetInboxPageAsync(
+            MailCredential credential,
+            Guid accountId,
+            string? pageToken,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<GmailApiInboxPage>(new NotSupportedException());
+
+        public Task<GmailApiRawMessage> GetRawMessageAsync(
+            MailCredential credential,
+            Guid accountId,
+            string messageId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<GmailApiRawMessage>(new NotSupportedException());
+    }
+
+    private sealed class ImapSnapshotClient(ImapInboxTechnicalSnapshot snapshot) : IImapInboxClient
+    {
+        public MailServerSettings? Server { get; private set; }
+
+        public Task<ImapInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+            MailServerSettings server,
+            string secret,
+            CancellationToken cancellationToken = default)
+        {
+            Server = server;
+            return Task.FromResult(snapshot);
+        }
+
+        public Task<ImapInboxPageData> GetInboxPageAsync(
+            MailServerSettings server,
+            string secret,
+            string? cursor,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<ImapInboxPageData>(new NotSupportedException());
+
+        public Task<ImapMessageData> GetMessageAsync(
+            MailServerSettings server,
+            string secret,
+            uint uniqueId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<ImapMessageData>(new NotSupportedException());
+    }
+
+    private sealed class TestCredentialStore(MailCredential credential) : IMailCredentialStore
+    {
+        public Task SaveAsync(
+            string credentialKey,
+            MailCredential value,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<MailCredential?> LoadAsync(
+            string credentialKey,
+            CancellationToken cancellationToken = default) => Task.FromResult<MailCredential?>(credential);
+
+        public Task DeleteAsync(
+            string credentialKey,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class NoOpConnectionValidator : IMailConnectionValidator
+    {
+        public Task<MailConnectionValidationResult> ValidateAsync(
+            MailConnectionSettings settings,
+            string emailAddress,
+            string secret,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(MailConnectionValidationResult.Success(new MailIdentity(emailAddress, null)));
+    }
+
+    private sealed class TestSettingsStore(AppSettings current) : IApplicationSettingsStore
+    {
+        public AppSettings Current { get; private set; } = current;
+        public bool IsInitialized => true;
+        public void Initialize(AppSettings settings) => Current = settings;
+        public Task SaveAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class ImmediateDispatcher : IUiDispatcher
+    {
+        public void Post(Action action) => action();
+        public Task<T> InvokeAsync<T>(Func<T> action) => Task.FromResult(action());
+    }
+}

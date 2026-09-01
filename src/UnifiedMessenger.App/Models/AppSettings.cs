@@ -1,8 +1,10 @@
+using UnifiedMessenger.App.Services.Notifications;
+
 namespace UnifiedMessenger.App.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public AppTheme Theme { get; set; } = AppTheme.System;
@@ -46,6 +48,39 @@ public sealed class NotificationSettings
     public bool ShowServiceName { get; set; } = true;
     public bool PlaySound { get; set; } = true;
     public bool DoNotDisturb { get; set; }
+    public NotificationSoundMode TelegramSoundMode { get; set; } = NotificationSoundMode.Lantern;
+    public NotificationSoundMode WhatsAppSoundMode { get; set; } = NotificationSoundMode.Lantern;
+    public NotificationSoundMode MaxSoundMode { get; set; } = NotificationSoundMode.Lantern;
+    public LanternSoundSource LanternSoundSource { get; set; } = LanternSoundSource.Default;
+    public string? CustomSoundInternalFileName { get; set; }
+    public string? CustomSoundDisplayName { get; set; }
+
+    public NotificationSoundMode GetSoundMode(ServiceType serviceType) =>
+        serviceType switch
+        {
+            ServiceType.Telegram => TelegramSoundMode,
+            ServiceType.WhatsApp => WhatsAppSoundMode,
+            ServiceType.Max => MaxSoundMode,
+            _ => NotificationSoundMode.Native
+        };
+
+    public bool TrySetSoundMode(ServiceType serviceType, NotificationSoundMode mode)
+    {
+        switch (serviceType)
+        {
+            case ServiceType.Telegram:
+                TelegramSoundMode = mode;
+                return true;
+            case ServiceType.WhatsApp:
+                WhatsAppSoundMode = mode;
+                return true;
+            case ServiceType.Max:
+                MaxSoundMode = mode;
+                return true;
+            default:
+                return false;
+        }
+    }
 }
 
 public sealed class WindowSettings

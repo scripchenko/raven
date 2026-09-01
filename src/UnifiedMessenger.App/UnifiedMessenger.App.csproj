@@ -23,6 +23,9 @@
     <Resource Include="Assets\Branding\lantern_icon.png" />
     <Resource Include="Assets\Branding\lantern_logo.png" />
     <Resource Include="Assets\Services\*.png" />
+    <Content Include="Assets\Sounds\lantern_notification.wav"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

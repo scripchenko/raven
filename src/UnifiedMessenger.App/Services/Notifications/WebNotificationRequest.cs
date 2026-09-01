@@ -5,4 +5,5 @@ public sealed record WebNotificationRequest(
     string SenderOrigin,
     string Title,
     string Body,
-    IWebNotificationLifecycle Lifecycle);
+    IWebNotificationLifecycle Lifecycle,
+    string? NotificationTagHash = null);

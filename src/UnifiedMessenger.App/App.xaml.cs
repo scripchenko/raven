@@ -26,6 +26,8 @@ public partial class App : System.Windows.Application
     private IWebViewSessionManager? _webViewSessionManager;
     private CancellationTokenSource? _startupCancellation;
     private CancellationTokenSource? _startupMailUnreadCancellation;
+    private IMailBackgroundPollingMonitor? _mailBackgroundPollingMonitor;
+    private Task? _mailBackgroundStartupTask;
     private StartupWindow? _startupWindow;
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -89,7 +91,7 @@ public partial class App : System.Windows.Application
             window.Show();
             _trayCoordinator = _serviceProvider.GetRequiredService<IApplicationTrayCoordinator>();
             _trayCoordinator.Initialize();
-            StartStartupMailUnreadRefresh(loadResult.Settings.MailAccounts);
+            StartMailBackgroundServices(loadResult.Settings.MailAccounts);
 
             if (!string.IsNullOrWhiteSpace(loadResult.WarningMessage))
             {
@@ -123,10 +125,14 @@ public partial class App : System.Windows.Application
         _webViewSessionManager = null;
         _trayCoordinator = null;
         CloseStartupWindow();
-        CancelStartupMailUnreadRefresh();
+        BeginMailBackgroundShutdown();
         _startupCancellation?.Dispose();
         _startupCancellation = null;
         _serviceProvider?.Dispose();
+        _startupMailUnreadCancellation?.Dispose();
+        _startupMailUnreadCancellation = null;
+        _mailBackgroundPollingMonitor = null;
+        _mailBackgroundStartupTask = null;
         base.OnExit(e);
     }
 
@@ -134,7 +140,7 @@ public partial class App : System.Windows.Application
     {
         _exitCoordinator?.BeginSessionEnding();
         _trayCoordinator?.BeginShutdown();
-        CancelStartupMailUnreadRefresh();
+        BeginMailBackgroundShutdown();
         _webViewEventCoordinator?.Dispose();
         _webViewEventCoordinator = null;
         _webViewSessionManager?.BeginShutdown();
@@ -149,7 +155,7 @@ public partial class App : System.Windows.Application
         }
 
         _startupCancellation?.Cancel();
-        CancelStartupMailUnreadRefresh();
+        await StopMailBackgroundServicesAsync();
         await ShutdownApplicationAsync();
     }
 
@@ -249,6 +255,12 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailOutgoingAttachmentMaterializer, MailOutgoingAttachmentMaterializer>();
         services.AddSingleton<IMailReadProviderFactory, MailReadProviderFactory>();
         services.AddSingleton<IStartupMailUnreadRefreshService, StartupMailUnreadRefreshService>();
+        services.AddSingleton<MailBackgroundPollingMonitor>();
+        services.AddSingleton<IMailBackgroundPollingMonitor>(provider =>
+            provider.GetRequiredService<MailBackgroundPollingMonitor>());
+        services.AddSingleton<IMailActivityCoordinator, MailActivityCoordinator>();
+        services.AddSingleton<IMailNotificationNavigation, MailNotificationNavigation>();
+        services.AddSingleton<IMailNotificationCoordinator, MailNotificationCoordinator>();
         services.AddSingleton<IMailComposeRequestFactory, MailComposeRequestFactory>();
         services.AddSingleton<IMailComposePreparationService, MailComposePreparationService>();
         services.AddSingleton<IMailComposeConfirmationService, WpfMailComposeConfirmationService>();
@@ -261,6 +273,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailSendProvider, GmailMailSendProvider>();
         services.AddSingleton<IMailSendProvider, SmtpMailSendProvider>();
         services.AddSingleton<IMailSendProviderFactory, MailSendProviderFactory>();
+        services.AddSingleton<IAudioFileValidator, WpfAudioFileValidator>();
+        services.AddSingleton<ILanternSoundFileService, LanternSoundFileService>();
+        services.AddSingleton<INotificationSoundFilePicker, WpfNotificationSoundFilePicker>();
         services.AddSingleton<INotificationSoundPlayer, WindowsNotificationSoundPlayer>();
         services.AddSingleton<INotificationPermissionPrompt, WpfNotificationPermissionPrompt>();
         services.AddSingleton<INotificationPermissionCoordinator, NotificationPermissionCoordinator>();
@@ -312,19 +327,62 @@ public partial class App : System.Windows.Application
         _startupWindow = null;
     }
 
-    private void StartStartupMailUnreadRefresh(IEnumerable<MailAccount> accounts)
+    private void StartMailBackgroundServices(IEnumerable<MailAccount> accounts)
     {
         _startupMailUnreadCancellation = new CancellationTokenSource();
+        ServiceProvider serviceProvider = _serviceProvider
+            ?? throw new InvalidOperationException("Application services are unavailable.");
         IStartupMailUnreadRefreshService refreshService =
-            _serviceProvider!.GetRequiredService<IStartupMailUnreadRefreshService>();
-        _ = refreshService.RefreshAsync(accounts, _startupMailUnreadCancellation.Token);
+            serviceProvider.GetRequiredService<IStartupMailUnreadRefreshService>();
+        MailBackgroundPollingMonitor monitor =
+            serviceProvider.GetRequiredService<MailBackgroundPollingMonitor>();
+        _mailBackgroundPollingMonitor = monitor;
+        _mailBackgroundStartupTask = RefreshUnreadThenStartMonitorAsync(
+            refreshService,
+            accounts.ToArray(),
+            monitor,
+            _startupMailUnreadCancellation.Token);
     }
 
-    private void CancelStartupMailUnreadRefresh()
+    private static async Task RefreshUnreadThenStartMonitorAsync(
+        IStartupMailUnreadRefreshService refreshService,
+        IReadOnlyList<MailAccount> accounts,
+        IMailBackgroundPollingMonitor monitor,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await refreshService.RefreshAsync(accounts, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            monitor.Start();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private void BeginMailBackgroundShutdown()
     {
         _startupMailUnreadCancellation?.Cancel();
+        _mailBackgroundPollingMonitor?.BeginShutdown();
+    }
+
+    private async Task StopMailBackgroundServicesAsync()
+    {
+        BeginMailBackgroundShutdown();
+        if (_mailBackgroundStartupTask is not null)
+        {
+            await _mailBackgroundStartupTask;
+        }
+
+        if (_mailBackgroundPollingMonitor is not null)
+        {
+            await _mailBackgroundPollingMonitor.StopAsync();
+        }
+
         _startupMailUnreadCancellation?.Dispose();
         _startupMailUnreadCancellation = null;
+        _mailBackgroundStartupTask = null;
     }
 
 }

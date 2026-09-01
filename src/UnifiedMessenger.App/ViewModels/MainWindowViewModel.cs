@@ -17,6 +17,9 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IApplicationSettingsStore _settingsStore;
     private readonly IServiceActivityCoordinator _activityCoordinator;
     private readonly IWebNotificationCoordinator _notificationCoordinator;
+    private readonly IMailActivityCoordinator? _mailActivityCoordinator;
+    private readonly ILanternSoundFileService? _lanternSoundFileService;
+    private readonly INotificationSoundPlayer? _notificationSoundPlayer;
     private AppSettings _settings = AppSettings.CreateDefault();
     private bool _isInitialized;
     private bool _disposed;
@@ -27,13 +30,19 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         IWebViewSessionManager webViewSessionManager,
         IApplicationSettingsStore settingsStore,
         IServiceActivityCoordinator activityCoordinator,
-        IWebNotificationCoordinator notificationCoordinator)
+        IWebNotificationCoordinator notificationCoordinator,
+        IMailActivityCoordinator? mailActivityCoordinator = null,
+        ILanternSoundFileService? lanternSoundFileService = null,
+        INotificationSoundPlayer? notificationSoundPlayer = null)
     {
         _serviceCatalog = serviceCatalog;
         _webViewSessionManager = webViewSessionManager;
         _settingsStore = settingsStore;
         _activityCoordinator = activityCoordinator;
         _notificationCoordinator = notificationCoordinator;
+        _mailActivityCoordinator = mailActivityCoordinator;
+        _lanternSoundFileService = lanternSoundFileService;
+        _notificationSoundPlayer = notificationSoundPlayer;
         AvailableServices = serviceCatalog.All
             .Where(definition => definition.IsWebViewService && definition.ServiceType != ServiceType.Gmail)
             .ToArray();
@@ -126,6 +135,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool DoNotDisturb => _settings.Notifications.DoNotDisturb;
     public bool ShowNotificationPreview => _settings.Notifications.ShowNotificationPreview;
     public bool NotificationSoundEnabled => _settings.Notifications.PlaySound;
+    public NotificationSoundMode TelegramNotificationSoundMode =>
+        _settings.Notifications.TelegramSoundMode;
+    public NotificationSoundMode WhatsAppNotificationSoundMode =>
+        _settings.Notifications.WhatsAppSoundMode;
+    public NotificationSoundMode MaxNotificationSoundMode =>
+        _settings.Notifications.MaxSoundMode;
+    public LanternSoundSource LanternSoundSource => _settings.Notifications.LanternSoundSource;
+    public string? LanternCustomSoundDisplayName => _settings.Notifications.CustomSoundDisplayName;
     public bool IsSelectedServiceMuted => SelectedService?.IsMuted == true;
     public string MuteButtonText => IsSelectedServiceMuted ? "🔕" : "🔔";
     public string MuteButtonToolTip => IsSelectedServiceMuted
@@ -155,6 +172,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _settingsStore.Initialize(settings);
         _isInitialized = false;
         _activityCoordinator.Reset(settings.Services);
+        _mailActivityCoordinator?.Reset(settings.MailAccounts);
 
         Services.Clear();
         foreach (ServiceInstance service in ServiceInstanceManager.Sort(settings.Services))
@@ -223,6 +241,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         MailAccount target = GetExistingMailAccount(account);
         target.IsEnabled = isEnabled;
+        if (!isEnabled)
+        {
+            _mailActivityCoordinator?.Clear(target);
+        }
         OnPropertyChanged(nameof(IsSelectedMailAccountEnabled));
         OnPropertyChanged(nameof(IsSelectedMailAccountDisabled));
         await SaveSettingsAsync();
@@ -231,6 +253,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public void RemoveMailAccountFromNavigation(MailAccount account)
     {
         MailAccount target = GetExistingMailAccount(account);
+        _mailActivityCoordinator?.Clear(target);
         NavigationAccountItem? item = NavigationItems.FirstOrDefault(candidate => candidate.Id == target.Id);
         bool wasSelected = SelectedNavigationItem?.Id == target.Id;
         int removedIndex = item is null ? -1 : NavigationItems.IndexOf(item);
@@ -374,12 +397,19 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void MarkSelectedServiceViewed(bool isMainWindowVisible, bool isMainWindowActive)
     {
-        if (!IsSettingsOpen
-            && isMainWindowVisible
-            && isMainWindowActive
-            && SelectedService is ServiceInstance service)
+        if (IsSettingsOpen || !isMainWindowVisible || !isMainWindowActive)
+        {
+            return;
+        }
+
+        if (SelectedService is ServiceInstance service)
         {
             _activityCoordinator.Clear(service);
+        }
+
+        if (SelectedMailAccount is MailAccount mailAccount)
+        {
+            _mailActivityCoordinator?.Clear(mailAccount);
         }
     }
 
@@ -474,10 +504,112 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         await SaveSettingsAsync();
     }
 
+    public async Task SetNotificationSoundModeAsync(
+        ServiceType serviceType,
+        NotificationSoundMode mode)
+    {
+        ThrowIfDisposed();
+        if (!Enum.IsDefined(mode)
+            || serviceType is not (ServiceType.Telegram or ServiceType.WhatsApp or ServiceType.Max)
+            || _settings.Notifications.GetSoundMode(serviceType) == mode)
+        {
+            return;
+        }
+
+        _ = _settings.Notifications.TrySetSoundMode(serviceType, mode);
+        OnPropertyChanged(GetSoundModePropertyName(serviceType));
+        await SaveSettingsAsync();
+    }
+
+    public async Task<LanternSoundImportResult> ImportCustomLanternSoundAsync(
+        string sourceFilePath,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        if (_lanternSoundFileService is null)
+        {
+            return LanternSoundImportResult.Failed("Выбор пользовательского звука недоступен.");
+        }
+
+        LanternSoundImportResult result = await _lanternSoundFileService.ImportAsync(
+            sourceFilePath,
+            cancellationToken);
+        if (!result.Success)
+        {
+            return result;
+        }
+
+        NotificationSettings notifications = _settings.Notifications;
+        notifications.CustomSoundInternalFileName = result.InternalFileName;
+        notifications.CustomSoundDisplayName = result.DisplayName;
+        notifications.LanternSoundSource = LanternSoundSource.Custom;
+        NotifyLanternSoundSettingsChanged();
+        await SaveSettingsAsync();
+        return result;
+    }
+
+    public async Task<bool> UseExistingCustomLanternSoundAsync()
+    {
+        ThrowIfDisposed();
+        NotificationSettings notifications = _settings.Notifications;
+        if (_lanternSoundFileService is null
+            || !LanternSoundFilePolicy.IsSafeInternalFileName(notifications.CustomSoundInternalFileName)
+            || string.Equals(
+                _lanternSoundFileService.ResolvePlaybackPath(notifications),
+                _lanternSoundFileService.DefaultSoundPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (notifications.LanternSoundSource is not LanternSoundSource.Custom)
+        {
+            notifications.LanternSoundSource = LanternSoundSource.Custom;
+            NotifyLanternSoundSettingsChanged();
+            await SaveSettingsAsync();
+        }
+
+        return true;
+    }
+
+    public async Task RestoreDefaultLanternSoundAsync()
+    {
+        ThrowIfDisposed();
+        NotificationSettings notifications = _settings.Notifications;
+        string? previousInternalFileName = notifications.CustomSoundInternalFileName;
+        notifications.LanternSoundSource = LanternSoundSource.Default;
+        notifications.CustomSoundInternalFileName = null;
+        notifications.CustomSoundDisplayName = null;
+        NotifyLanternSoundSettingsChanged();
+        await SaveSettingsAsync();
+        _lanternSoundFileService?.DeleteInternalCopy(previousInternalFileName);
+    }
+
+    public bool PreviewLanternSound()
+    {
+        ThrowIfDisposed();
+        return _notificationSoundPlayer?.TryPreviewLanternSound() == true;
+    }
+
     public void SetRuntimeInfo(WebViewRuntimeInfo runtimeInfo)
     {
         ArgumentNullException.ThrowIfNull(runtimeInfo);
         WebViewRuntimeVersion = runtimeInfo.Version;
+    }
+
+    private static string GetSoundModePropertyName(ServiceType serviceType) =>
+        serviceType switch
+        {
+            ServiceType.Telegram => nameof(TelegramNotificationSoundMode),
+            ServiceType.WhatsApp => nameof(WhatsAppNotificationSoundMode),
+            ServiceType.Max => nameof(MaxNotificationSoundMode),
+            _ => throw new ArgumentOutOfRangeException(nameof(serviceType))
+        };
+
+    private void NotifyLanternSoundSettingsChanged()
+    {
+        OnPropertyChanged(nameof(LanternSoundSource));
+        OnPropertyChanged(nameof(LanternCustomSoundDisplayName));
     }
 
     public void NotifySelectedServiceStateChanged()
@@ -640,6 +772,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _settings.LastServiceId = service.Id;
             service.LastOpenedAt = DateTimeOffset.UtcNow;
+        }
+
+        if (value?.MailAccount is MailAccount mailAccount)
+        {
+            _mailActivityCoordinator?.Clear(mailAccount);
         }
 
         OnPropertyChanged(nameof(WindowTitle));

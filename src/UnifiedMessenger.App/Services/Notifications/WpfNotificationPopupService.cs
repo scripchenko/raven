@@ -7,7 +7,9 @@ public sealed class WpfNotificationPopupService : INotificationPopupService
 {
     private const int MaximumVisiblePopups = 3;
     private const double ScreenMargin = 16;
-    private const double PopupGap = 10;
+    // Each window already includes a four-DIP shadow inset: touching window bounds
+    // leave eight DIPs between the visible notification cards.
+    private const double PopupGap = 0;
 
     private readonly Dictionary<Guid, NotificationPopupWindow> _windows = [];
     private readonly List<Guid> _displayOrder = [];

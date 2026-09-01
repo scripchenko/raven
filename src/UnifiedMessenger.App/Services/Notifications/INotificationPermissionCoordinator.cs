@@ -8,4 +8,10 @@ public interface INotificationPermissionCoordinator
         ServiceInstance service,
         string? senderOrigin,
         CancellationToken cancellationToken = default);
+
+    Task<NotificationPermissionState> SynchronizeFromProfileAsync(
+        ServiceInstance service,
+        string? permissionOrigin,
+        NotificationPermissionState profileState,
+        CancellationToken cancellationToken = default);
 }

@@ -617,6 +617,24 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
+    public void OpenInbox(Guid accountId)
+    {
+        ThrowIfDisposed();
+        AccountFolderState accountState = GetAccountFolderState(accountId);
+        accountState.SelectedFolderKey = MailFolderCatalog.InboxKey;
+        if (ActiveAccount?.Id != accountId)
+        {
+            return;
+        }
+
+        MailFolder? inbox = accountState.Folders.FirstOrDefault(
+            folder => folder.Kind == MailFolderKind.Inbox);
+        if (inbox is not null)
+        {
+            SelectedFolder = inbox;
+        }
+    }
+
     public void RemoveAccount(Guid accountId)
     {
         CancelActivation();

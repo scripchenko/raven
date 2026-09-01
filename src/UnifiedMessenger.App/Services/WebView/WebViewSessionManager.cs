@@ -1,5 +1,7 @@
 using System.Drawing;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Notifications;
@@ -18,6 +20,7 @@ public sealed class WebViewSessionManager(
     IWebViewProfileCleaner profileCleaner) : IWebViewSessionManager
 {
     public const bool SaveNotificationPermissionsInProfile = true;
+    internal const string MaxNotificationOrigin = "https://web.max.ru";
     internal static readonly TimeSpan StartupPrimeTimeout = TimeSpan.FromSeconds(45);
 
     // Empirical cold-start validation showed that Telegram registers its notification
@@ -38,6 +41,7 @@ public sealed class WebViewSessionManager(
     public event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested;
     public event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged;
     public event EventHandler<WebNotificationReceivedEventArgs>? NotificationReceived;
+    public event EventHandler<BackgroundNotificationActivityReceivedEventArgs>? BackgroundNotificationActivityReceived;
 
     public WebViewSessionState State { get; private set; } = WebViewSessionState.Uninitialized;
     public bool IsShutdownStarted => _shutdownStarted;
@@ -222,6 +226,21 @@ public sealed class WebViewSessionManager(
             session.CoreWebView = controller.CoreWebView2;
             controller.Bounds = session.Bounds;
             controller.IsVisible = session.PrimeVisibleWhileParentHidden;
+            if (session.ServiceInstance.ServiceType is ServiceType.Max)
+            {
+                await SynchronizeMaxNotificationPermissionAsync(
+                    session.ServiceInstance,
+                    session.CoreWebView.Profile,
+                    cancellationToken);
+            }
+            else if (session.ServiceInstance.ServiceType is ServiceType.VkMessenger)
+            {
+                session.VkBackgroundNotificationMonitor =
+                    await VkBackgroundNotificationMonitor.TryStartAsync(
+                        session.CoreWebView,
+                        () => OnBackgroundNotificationActivityReceived(session),
+                        cancellationToken);
+            }
             ConfigureCoreWebView(session, session.CoreWebView);
 
             session.CoreWebView.Navigate(GetValidatedStartUri(session.ServiceInstance).AbsoluteUri);
@@ -246,7 +265,6 @@ public sealed class WebViewSessionManager(
             {
                 ApplyControllerLayout(session, isVisible: true, moveFocus: false);
             }
-
             return true;
         }
         catch (WebView2RuntimeNotFoundException)
@@ -756,8 +774,75 @@ public sealed class WebViewSessionManager(
                 eventArgs.SenderOrigin,
                 eventArgs.Notification.Title ?? string.Empty,
                 eventArgs.Notification.Body ?? string.Empty,
-                lifecycle));
+                lifecycle,
+                HashNotificationTag(eventArgs.Notification.Tag)));
     }
+
+    internal static string? HashNotificationTag(string? tag)
+    {
+        if (string.IsNullOrEmpty(tag))
+        {
+            return null;
+        }
+
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(tag));
+        return Convert.ToHexString(hash);
+    }
+
+    private void OnBackgroundNotificationActivityReceived(SessionEntry session)
+    {
+        if (_shutdownStarted || !_sessions.ContainsKey(session.ServiceInstance.Id))
+        {
+            return;
+        }
+
+        BackgroundNotificationActivityReceived?.Invoke(
+            this,
+            new BackgroundNotificationActivityReceivedEventArgs(
+                session.ServiceInstance.Id,
+                session.ServiceInstance.ServiceType));
+    }
+
+    private async Task SynchronizeMaxNotificationPermissionAsync(
+        ServiceInstance service,
+        CoreWebView2Profile profile,
+        CancellationToken cancellationToken)
+    {
+        CoreWebView2PermissionState profileState = await ReadExactMaxNotificationPermissionAsync(profile);
+        cancellationToken.ThrowIfCancellationRequested();
+        await permissionCoordinator.SynchronizeFromProfileAsync(
+            service,
+            MaxNotificationOrigin,
+            MapProfileNotificationPermission(profileState),
+            cancellationToken);
+    }
+
+    private static async Task<CoreWebView2PermissionState> ReadExactMaxNotificationPermissionAsync(
+        CoreWebView2Profile profile)
+    {
+        IReadOnlyList<CoreWebView2PermissionSetting> settings =
+            await profile.GetNonDefaultPermissionSettingsAsync();
+        CoreWebView2PermissionSetting? setting = settings.FirstOrDefault(candidate =>
+            candidate.PermissionKind is CoreWebView2PermissionKind.Notifications
+            && IsExactMaxOrigin(candidate.PermissionOrigin));
+        return setting?.PermissionState ?? CoreWebView2PermissionState.Default;
+    }
+
+    internal static NotificationPermissionState MapProfileNotificationPermission(
+        CoreWebView2PermissionState profileState) =>
+        profileState switch
+        {
+            CoreWebView2PermissionState.Allow => NotificationPermissionState.Allowed,
+            CoreWebView2PermissionState.Deny => NotificationPermissionState.Denied,
+            _ => NotificationPermissionState.Unknown
+        };
+
+    internal static bool IsExactMaxOrigin(string permissionOrigin) =>
+        Uri.TryCreate(permissionOrigin, UriKind.Absolute, out Uri? origin)
+        && origin.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+        && origin.Host.Equals("web.max.ru", StringComparison.OrdinalIgnoreCase)
+        && string.IsNullOrEmpty(origin.UserInfo)
+        && origin.IsDefaultPort;
 
     private void OnProcessFailed(SessionEntry session, CoreWebView2ProcessFailedEventArgs eventArgs)
     {
@@ -811,6 +896,9 @@ public sealed class WebViewSessionManager(
 
     private void ReleaseSessionCore(SessionEntry session, bool updateState)
     {
+        session.VkBackgroundNotificationMonitor?.Dispose();
+        session.VkBackgroundNotificationMonitor = null;
+
         try
         {
             if (session.CoreWebView is CoreWebView2 coreWebView)
@@ -960,5 +1048,6 @@ public sealed class WebViewSessionManager(
         public EventHandler<CoreWebView2PermissionRequestedEventArgs>? PermissionRequestedHandler { get; set; }
         public EventHandler<CoreWebView2NotificationReceivedEventArgs>? NotificationReceivedHandler { get; set; }
         public EventHandler<CoreWebView2ProcessFailedEventArgs>? ProcessFailedHandler { get; set; }
+        public VkBackgroundNotificationMonitor? VkBackgroundNotificationMonitor { get; set; }
     }
 }

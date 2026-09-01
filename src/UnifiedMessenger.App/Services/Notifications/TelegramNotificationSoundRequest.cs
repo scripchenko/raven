@@ -4,4 +4,5 @@ namespace UnifiedMessenger.App.Services.Notifications;
 
 public sealed record TelegramNotificationSoundRequest(
     Guid ServiceInstanceId,
-    ServiceType ServiceType);
+    ServiceType ServiceType,
+    string? NotificationTagHash = null);

@@ -6,16 +6,15 @@ namespace UnifiedMessenger.App.Services.Notifications;
 
 public sealed class TelegramNotificationSoundCoordinator : ITelegramNotificationSoundCoordinator
 {
-    public static readonly TimeSpan SoundCooldown = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan EmptyTagDebounce = TimeSpan.FromSeconds(1);
+    internal const int MaximumRememberedTagHashesPerSession = 256;
 
     private readonly object _gate = new();
     private readonly IApplicationSettingsStore _settingsStore;
     private readonly INotificationSoundPlayer _soundPlayer;
     private readonly IUiDispatcher _uiDispatcher;
     private readonly TimeProvider _timeProvider;
-    private DateTimeOffset? _lastSoundAt;
-    private long _pendingGeneration;
-    private bool _soundPending;
+    private readonly Dictionary<Guid, SessionDedupeState> _dedupeBySession = [];
     private bool _shutdown;
     private bool _disposed;
 
@@ -45,24 +44,20 @@ public sealed class TelegramNotificationSoundCoordinator : ITelegramNotification
     public bool RequestSound(TelegramNotificationSoundRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (request.ServiceType is not ServiceType.Telegram || !CanPlaySound(request.ServiceInstanceId))
+        if (!SupportsNotificationSound(request.ServiceType) || !CanPlaySound(request))
         {
             return false;
         }
 
-        long generation;
         lock (_gate)
         {
-            if (_shutdown || _soundPending || IsInsideCooldown())
+            if (_shutdown || !TryReserveDedupeSlot(request))
             {
                 return false;
             }
-
-            _soundPending = true;
-            generation = ++_pendingGeneration;
         }
 
-        _uiDispatcher.Post(() => PlayPendingSound(request.ServiceInstanceId, generation));
+        _uiDispatcher.Post(() => PlayPendingSound(request));
         return true;
     }
 
@@ -76,8 +71,7 @@ public sealed class TelegramNotificationSoundCoordinator : ITelegramNotification
             }
 
             _shutdown = true;
-            _soundPending = false;
-            _pendingGeneration++;
+            _dedupeBySession.Clear();
         }
     }
 
@@ -92,44 +86,85 @@ public sealed class TelegramNotificationSoundCoordinator : ITelegramNotification
         Shutdown();
     }
 
-    private void PlayPendingSound(Guid serviceInstanceId, long generation)
+    private void PlayPendingSound(TelegramNotificationSoundRequest request)
     {
         lock (_gate)
         {
-            if (_shutdown || !_soundPending || generation != _pendingGeneration)
+            if (_shutdown)
             {
                 return;
             }
 
-            _soundPending = false;
-            if (IsInsideCooldown() || !CanPlaySound(serviceInstanceId))
+            if (!CanPlaySound(request))
             {
                 return;
             }
 
-            _lastSoundAt = _timeProvider.GetUtcNow();
-            _ = _soundPlayer.TryPlay(ServiceType.Telegram, NotificationSoundMode.System);
+            _ = _soundPlayer.TryPlay(request.ServiceType);
         }
     }
 
-    private bool CanPlaySound(Guid serviceInstanceId)
+    private bool CanPlaySound(TelegramNotificationSoundRequest request)
     {
         NotificationSettings notifications = _settingsStore.Current.Notifications;
         ServiceInstance? service = _settingsStore.Current.Services.FirstOrDefault(
-            candidate => candidate.Id == serviceInstanceId);
+            candidate => candidate.Id == request.ServiceInstanceId);
         return service is
             {
-                ServiceType: ServiceType.Telegram,
                 IsEnabled: true,
                 IsMuted: false,
                 NotificationPermissionState: NotificationPermissionState.Allowed
             }
+            && service.ServiceType == request.ServiceType
+            && SupportsNotificationSound(service.ServiceType)
+            && notifications.GetSoundMode(service.ServiceType) is NotificationSoundMode.Lantern
             && notifications.IsEnabled
             && notifications.PlaySound
             && !notifications.DoNotDisturb;
     }
 
-    private bool IsInsideCooldown() =>
-        _lastSoundAt is DateTimeOffset lastSoundAt
-        && _timeProvider.GetUtcNow() - lastSoundAt < SoundCooldown;
+    private static bool SupportsNotificationSound(ServiceType serviceType) =>
+        serviceType is ServiceType.Telegram or ServiceType.WhatsApp or ServiceType.Max;
+
+    private bool TryReserveDedupeSlot(TelegramNotificationSoundRequest request)
+    {
+        if (!_dedupeBySession.TryGetValue(request.ServiceInstanceId, out SessionDedupeState? state))
+        {
+            state = new SessionDedupeState();
+            _dedupeBySession.Add(request.ServiceInstanceId, state);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.NotificationTagHash))
+        {
+            if (!state.RememberedTagHashes.Add(request.NotificationTagHash))
+            {
+                return false;
+            }
+
+            state.TagHashOrder.Enqueue(request.NotificationTagHash);
+            while (state.TagHashOrder.Count > MaximumRememberedTagHashesPerSession)
+            {
+                _ = state.RememberedTagHashes.Remove(state.TagHashOrder.Dequeue());
+            }
+
+            return true;
+        }
+
+        DateTimeOffset now = _timeProvider.GetUtcNow();
+        if (state.LastEmptyTagSoundAt is DateTimeOffset previous
+            && now - previous < EmptyTagDebounce)
+        {
+            return false;
+        }
+
+        state.LastEmptyTagSoundAt = now;
+        return true;
+    }
+
+    private sealed class SessionDedupeState
+    {
+        public HashSet<string> RememberedTagHashes { get; } = new(StringComparer.Ordinal);
+        public Queue<string> TagHashOrder { get; } = [];
+        public DateTimeOffset? LastEmptyTagSoundAt { get; set; }
+    }
 }
