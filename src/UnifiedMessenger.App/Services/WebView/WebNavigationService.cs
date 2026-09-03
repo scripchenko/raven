@@ -5,7 +5,8 @@ namespace UnifiedMessenger.App.Services.WebView;
 
 public sealed class WebNavigationService(
     NavigationPolicy navigationPolicy,
-    IExternalBrowserService externalBrowserService)
+    IExternalBrowserService externalBrowserService,
+    ExternalBrowserLaunchPolicy externalBrowserLaunchPolicy)
 {
     public WebNavigationDisposition Classify(ServiceType serviceType, Uri target)
     {
@@ -27,11 +28,15 @@ public sealed class WebNavigationService(
             : WebNavigationDisposition.Blocked;
     }
 
-    public WebNavigationDisposition Route(ServiceType serviceType, Uri target)
+    public WebNavigationDisposition Route(ServiceType serviceType, Uri target, bool isUserInitiated)
     {
         WebNavigationDisposition disposition = Classify(serviceType, target);
-        return disposition is WebNavigationDisposition.Internal
-            ? disposition
-            : OpenExternal(target);
+        if (disposition is WebNavigationDisposition.Internal
+            || !externalBrowserLaunchPolicy.CanLaunch(serviceType, isUserInitiated))
+        {
+            return disposition;
+        }
+
+        return OpenExternal(target);
     }
 }

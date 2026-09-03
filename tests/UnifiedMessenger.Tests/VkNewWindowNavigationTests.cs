@@ -47,7 +47,11 @@ public sealed class VkNewWindowNavigationTests
         ServiceInstance vk = CreateAccount(ServiceType.VkMessenger);
         Uri? navigatedInside = null;
 
-        WebNavigationDisposition result = router.Route(vk, new Uri(address), uri => navigatedInside = uri);
+        WebNavigationDisposition result = router.Route(
+            vk,
+            new Uri(address),
+            isUserInitiated: false,
+            uri => navigatedInside = uri);
 
         Assert.Equal(WebNavigationDisposition.Internal, result);
         Assert.Equal(address, navigatedInside?.AbsoluteUri);
@@ -69,7 +73,11 @@ public sealed class VkNewWindowNavigationTests
         bool navigatedInside = false;
         Uri target = new(address);
 
-        WebNavigationDisposition result = router.Route(vk, target, _ => navigatedInside = true);
+        WebNavigationDisposition result = router.Route(
+            vk,
+            target,
+            isUserInitiated: false,
+            _ => navigatedInside = true);
 
         Assert.Equal(WebNavigationDisposition.ExternalOpened, result);
         Assert.False(navigatedInside);
@@ -84,7 +92,11 @@ public sealed class VkNewWindowNavigationTests
         ServiceInstance vk = CreateAccount(ServiceType.VkMessenger);
         Uri external = new("https://example.com/article");
 
-        WebNavigationDisposition result = router.Route(vk, external, _ => Assert.Fail("External URI entered WebView2."));
+        WebNavigationDisposition result = router.Route(
+            vk,
+            external,
+            isUserInitiated: false,
+            _ => Assert.Fail("External URI entered WebView2."));
 
         Assert.Equal(WebNavigationDisposition.ExternalOpened, result);
         Assert.Equal(external, browser.LastOpenedUri);
@@ -94,10 +106,16 @@ public sealed class VkNewWindowNavigationTests
     public void NavigationStarting_IdVkRuStaysInsideCurrentVkWebView()
     {
         RecordingExternalBrowserService browser = new();
-        WebNavigationService navigation = new(new NavigationPolicy(_catalog), browser);
+        WebNavigationService navigation = new(
+            new NavigationPolicy(_catalog),
+            browser,
+            new ExternalBrowserLaunchPolicy());
         Uri target = new("https://id.vk.ru/auth");
 
-        WebNavigationDisposition result = navigation.Route(ServiceType.VkMessenger, target);
+        WebNavigationDisposition result = navigation.Route(
+            ServiceType.VkMessenger,
+            target,
+            isUserInitiated: false);
 
         Assert.Equal(WebNavigationDisposition.Internal, result);
         Assert.Null(browser.LastOpenedUri);
@@ -116,7 +134,11 @@ public sealed class VkNewWindowNavigationTests
         ServiceInstance account = CreateAccount(serviceType);
         Uri? navigatedInside = null;
 
-        WebNavigationDisposition result = router.Route(account, new Uri(address), uri => navigatedInside = uri);
+        WebNavigationDisposition result = router.Route(
+            account,
+            new Uri(address),
+            isUserInitiated: false,
+            uri => navigatedInside = uri);
 
         Assert.Equal(WebNavigationDisposition.Internal, result);
         Assert.NotNull(navigatedInside);
@@ -124,7 +146,6 @@ public sealed class VkNewWindowNavigationTests
     }
 
     [Theory]
-    [InlineData(ServiceType.Telegram)]
     [InlineData(ServiceType.WhatsApp)]
     [InlineData(ServiceType.Max)]
     public void NewWindowRequested_OtherServicesKeepExternalPopupInSystemBrowser(ServiceType serviceType)
@@ -134,14 +155,21 @@ public sealed class VkNewWindowNavigationTests
         ServiceInstance account = CreateAccount(serviceType);
         Uri external = new("https://example.com/");
 
-        WebNavigationDisposition result = router.Route(account, external, _ => Assert.Fail("External URI entered WebView2."));
+        WebNavigationDisposition result = router.Route(
+            account,
+            external,
+            isUserInitiated: false,
+            _ => Assert.Fail("External URI entered WebView2."));
 
         Assert.Equal(WebNavigationDisposition.ExternalOpened, result);
         Assert.Equal(external, browser.LastOpenedUri);
     }
 
     private WebNewWindowNavigationService CreateRouter(RecordingExternalBrowserService browser) =>
-        new(new WebNavigationService(new NavigationPolicy(_catalog), browser));
+        new(new WebNavigationService(
+            new NavigationPolicy(_catalog),
+            browser,
+            new ExternalBrowserLaunchPolicy()));
 
     private ServiceInstance CreateAccount(ServiceType serviceType)
     {

@@ -258,10 +258,16 @@ public sealed class Stage3MultiServiceTests
     public void NavigationService_OpensExternalDomainInSystemBrowserService()
     {
         RecordingExternalBrowserService browser = new();
-        WebNavigationService navigation = new(new NavigationPolicy(_catalog), browser);
+        WebNavigationService navigation = new(
+            new NavigationPolicy(_catalog),
+            browser,
+            new ExternalBrowserLaunchPolicy());
         Uri externalUri = new("https://example.com/help");
 
-        WebNavigationDisposition disposition = navigation.Route(ServiceType.Telegram, externalUri);
+        WebNavigationDisposition disposition = navigation.Route(
+            ServiceType.Telegram,
+            externalUri,
+            isUserInitiated: true);
 
         Assert.Equal(WebNavigationDisposition.ExternalOpened, disposition);
         Assert.Equal(externalUri, browser.LastOpenedUri);

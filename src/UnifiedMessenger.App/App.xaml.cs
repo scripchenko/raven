@@ -285,6 +285,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IApplicationExitCoordinator, ApplicationExitCoordinator>();
         services.AddSingleton<IWebViewRuntimeService, WebViewRuntimeService>();
         services.AddSingleton<IExternalBrowserService, ExternalBrowserService>();
+        services.AddSingleton<ExternalBrowserLaunchPolicy>();
         services.AddSingleton<MailRendererNavigationPolicy>();
         services.AddSingleton<MailRendererNavigationCoordinator>();
         services.AddSingleton<IMailMessageHtmlRenderer, MailMessageHtmlRenderer>();

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Security.Cryptography;
@@ -601,14 +602,17 @@ public sealed class WebViewSessionManager(
 
     private void OnNavigationStarting(SessionEntry session, CoreWebView2NavigationStartingEventArgs eventArgs)
     {
-        if (!Uri.TryCreate(eventArgs.Uri, UriKind.Absolute, out Uri? target))
+        if (!TryParseNavigationTarget(eventArgs.Uri, out Uri? target))
         {
             eventArgs.Cancel = true;
             PublishFailure(session, "Переход заблокирован", "WebView2 запросил некорректный адрес.", "InvalidUri");
             return;
         }
 
-        WebNavigationDisposition disposition = webNavigationService.Route(session.ServiceInstance.ServiceType, target);
+        WebNavigationDisposition disposition = webNavigationService.Route(
+            session.ServiceInstance.ServiceType,
+            target,
+            eventArgs.IsUserInitiated);
         if (disposition is WebNavigationDisposition.Internal)
         {
             Publish(session, WebViewSessionStatus.Navigating);
@@ -617,7 +621,7 @@ public sealed class WebViewSessionManager(
 
         eventArgs.Cancel = true;
         session.CancelledExternalNavigations.Add(eventArgs.NavigationId);
-        if (disposition is WebNavigationDisposition.ExternalOpened)
+        if (disposition is WebNavigationDisposition.ExternalOpened or WebNavigationDisposition.External)
         {
             Publish(session, WebViewSessionStatus.Ready);
             return;
@@ -682,7 +686,7 @@ public sealed class WebViewSessionManager(
     {
         eventArgs.Handled = true;
 
-        if (!Uri.TryCreate(eventArgs.Uri, UriKind.Absolute, out Uri? target))
+        if (!TryParseNavigationTarget(eventArgs.Uri, out Uri? target))
         {
             PublishFailure(session, "Окно заблокировано", "Сервис запросил некорректный адрес нового окна.", "InvalidPopupUri");
             return;
@@ -691,6 +695,7 @@ public sealed class WebViewSessionManager(
         WebNavigationDisposition disposition = newWindowNavigationService.Route(
             session.ServiceInstance,
             target,
+            eventArgs.IsUserInitiated,
             internalTarget => session.CoreWebView?.Navigate(internalTarget.AbsoluteUri));
 
         if (disposition is WebNavigationDisposition.Blocked)
@@ -872,6 +877,11 @@ public sealed class WebViewSessionManager(
 
     private void PublishFailure(SessionEntry session, string title, string message, string code) =>
         Publish(session, WebViewSessionStatus.Failed, title, message, code);
+
+    internal static bool TryParseNavigationTarget(
+        string? address,
+        [NotNullWhen(true)] out Uri? target) =>
+        Uri.TryCreate(address, UriKind.Absolute, out target);
 
     private void Publish(
         SessionEntry session,
