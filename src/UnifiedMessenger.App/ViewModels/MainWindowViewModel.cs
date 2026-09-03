@@ -294,6 +294,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         NotifySelectedServiceStateChanged();
         await SaveSettingsAsync();
+        if (!isEnabled
+            && !target.IsEnabled
+            && target.ServiceType is ServiceType.Telegram)
+        {
+            _webViewSessionManager.ReleaseSession(target.Id);
+        }
     }
 
     public async Task SetServiceMutedAsync(ServiceInstance service, bool isMuted)

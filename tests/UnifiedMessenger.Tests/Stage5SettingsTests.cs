@@ -230,7 +230,171 @@ public sealed class Stage5SettingsTests
         await updateTask;
 
         Assert.False(fixture.Main.Services[0].IsEnabled);
+        Assert.Same(fixture.Main.Services[0], fixture.Main.SelectedService);
+        Assert.True(fixture.Main.IsSelectedServiceDisabled);
         Assert.Equal(1, fixture.Store.SaveCount);
+        Assert.Equal([fixture.Main.Services[0].Id], fixture.Session.ReleaseSessionRequests);
+        Assert.Equal(0, fixture.Session.ClearProfileCount);
+    }
+
+    [Fact]
+    public async Task DisablingTelegram_ReleasesOnlyTargetSessionAndPreservesEveryAccountIdentity()
+    {
+        AppSettings settings = AppSettings.CreateDefault();
+        ServiceInstance telegramA = CreateService(ServiceType.Telegram);
+        ServiceInstance telegramB = CreateService(ServiceType.Telegram);
+        ServiceInstance whatsapp = CreateService(ServiceType.WhatsApp);
+        ServiceInstance max = CreateService(ServiceType.Max);
+        ServiceInstance vk = CreateService(ServiceType.VkMessenger);
+        settings.Services.AddRange([telegramA, telegramB, whatsapp, max, vk]);
+        MailAccount gmail = new()
+        {
+            Id = Guid.NewGuid(),
+            Provider = MailProviderType.Gmail,
+            EmailAddress = "telegram-lifecycle@gmail.test",
+            CredentialKey = "gmail-credential",
+            IsEnabled = true
+        };
+        settings.MailAccounts.Add(gmail);
+        using SettingsFixture fixture = new(settings, _catalog);
+        foreach (ServiceInstance service in settings.Services)
+        {
+            fixture.Session.AddSession(service.Id);
+        }
+
+        Guid originalId = telegramA.Id;
+        string originalProfile = telegramA.ProfileName;
+
+        await fixture.Main.SetServiceEnabledAsync(telegramA, isEnabled: false);
+
+        Assert.False(telegramA.IsEnabled);
+        Assert.Equal(originalId, telegramA.Id);
+        Assert.Equal(originalProfile, telegramA.ProfileName);
+        Assert.Equal([telegramA.Id], fixture.Session.ReleaseSessionRequests);
+        Assert.False(fixture.Session.HasSession(telegramA.Id));
+        Assert.All(
+            new[] { telegramB, whatsapp, max, vk },
+            service => Assert.True(fixture.Session.HasSession(service.Id)));
+        Assert.True(gmail.IsEnabled);
+        Assert.Equal(0, fixture.Session.ClearProfileCount);
+        Assert.DoesNotContain(originalProfile, settings.PendingProfileDeletions);
+    }
+
+    [Fact]
+    public async Task DisablingTelegramWithoutCreatedSession_IsSafeAndDoesNotClearProfile()
+    {
+        using SettingsFixture fixture = CreateFixture();
+        ServiceInstance telegram = fixture.Main.Services[0];
+
+        await fixture.Main.SetServiceEnabledAsync(telegram, isEnabled: false);
+
+        Assert.False(telegram.IsEnabled);
+        Assert.False(fixture.Session.HasSession(telegram.Id));
+        Assert.Equal([telegram.Id], fixture.Session.ReleaseSessionRequests);
+        Assert.Equal(0, fixture.Session.ClearProfileCount);
+        Assert.Empty(fixture.Settings.PendingProfileDeletions);
+    }
+
+    [Fact]
+    public async Task ReenablingTelegram_PreservesIdentityAndAllowsNormalSessionCreation()
+    {
+        using SettingsFixture fixture = CreateFixture();
+        ServiceInstance telegram = fixture.Main.Services[0];
+        Guid originalId = telegram.Id;
+        string originalProfile = telegram.ProfileName;
+        fixture.Session.AddSession(telegram.Id);
+
+        await fixture.Main.SetServiceEnabledAsync(telegram, isEnabled: false);
+        await fixture.Main.SetServiceEnabledAsync(telegram, isEnabled: true);
+
+        Assert.True(telegram.IsEnabled);
+        Assert.Equal(originalId, telegram.Id);
+        Assert.Equal(originalProfile, telegram.ProfileName);
+        Assert.False(fixture.Session.IsSessionInitialized(telegram.Id));
+
+        await fixture.Session.InitializeAsync(
+            new IntPtr(42),
+            new Rectangle(0, 0, 800, 600),
+            telegram,
+            activate: true);
+
+        Assert.True(fixture.Session.IsSessionInitialized(telegram.Id));
+        Assert.Same(telegram, fixture.Session.LastInitializedService);
+        Assert.Equal(originalProfile, fixture.Session.LastInitializedService!.ProfileName);
+        Assert.Equal(0, fixture.Session.ClearProfileCount);
+    }
+
+    [Fact]
+    public async Task RepeatedTelegramEnableDisableCycles_KeepOnlyOneCurrentSession()
+    {
+        using SettingsFixture fixture = CreateFixture();
+        ServiceInstance telegram = fixture.Main.Services[0];
+        Guid originalId = telegram.Id;
+        string originalProfile = telegram.ProfileName;
+        fixture.Session.AddSession(telegram.Id);
+
+        for (int cycle = 0; cycle < 3; cycle++)
+        {
+            await fixture.Main.SetServiceEnabledAsync(telegram, isEnabled: false);
+            Assert.False(fixture.Session.HasSession(telegram.Id));
+
+            await fixture.Main.SetServiceEnabledAsync(telegram, isEnabled: true);
+            await fixture.Session.InitializeAsync(
+                new IntPtr(42),
+                new Rectangle(0, 0, 800, 600),
+                telegram,
+                activate: true);
+        }
+
+        Assert.Equal(3, fixture.Session.ReleaseSessionRequests.Count);
+        Assert.All(fixture.Session.ReleaseSessionRequests, id => Assert.Equal(originalId, id));
+        Assert.Equal(1, fixture.Session.InitializedSessionCount);
+        Assert.Equal(originalId, telegram.Id);
+        Assert.Equal(originalProfile, telegram.ProfileName);
+        Assert.Equal(0, fixture.Session.ClearProfileCount);
+    }
+
+    [Fact]
+    public async Task DeleteAfterDisabledTelegram_CleansOnlyItsPreservedProfile()
+    {
+        AppSettings settings = AppSettings.CreateDefault();
+        ServiceInstance target = CreateService(ServiceType.Telegram);
+        ServiceInstance other = CreateService(ServiceType.Telegram);
+        settings.Services.AddRange([target, other]);
+        using SettingsFixture fixture = new(settings, _catalog);
+        fixture.Session.AddSession(target.Id);
+        fixture.Session.AddSession(other.Id);
+        string targetProfile = target.ProfileName;
+
+        await fixture.Main.SetServiceEnabledAsync(target, isEnabled: false);
+        await DeleteThroughExistingLifecycleAsync(fixture, target);
+
+        Assert.Equal(1, fixture.Session.ClearProfileCount);
+        Assert.Equal(target.Id, fixture.Session.LastClearedServiceId);
+        Assert.Equal(targetProfile, fixture.Session.LastClearedProfileName);
+        Assert.DoesNotContain(fixture.Main.Services, service => service.Id == target.Id);
+        Assert.True(fixture.Session.HasSession(other.Id));
+        Assert.DoesNotContain(targetProfile, fixture.Settings.PendingProfileDeletions);
+    }
+
+    [Theory]
+    [InlineData(ServiceType.WhatsApp)]
+    [InlineData(ServiceType.Max)]
+    [InlineData(ServiceType.VkMessenger)]
+    public async Task DisablingAnotherWebService_DoesNotApplyTelegramReleasePolicy(ServiceType serviceType)
+    {
+        AppSettings settings = AppSettings.CreateDefault();
+        ServiceInstance service = CreateService(serviceType);
+        settings.Services.Add(service);
+        using SettingsFixture fixture = new(settings, _catalog);
+        fixture.Session.AddSession(service.Id);
+
+        await fixture.Main.SetServiceEnabledAsync(service, isEnabled: false);
+
+        Assert.False(service.IsEnabled);
+        Assert.Empty(fixture.Session.ReleaseSessionRequests);
+        Assert.True(fixture.Session.HasSession(service.Id));
+        Assert.Equal(0, fixture.Session.ClearProfileCount);
     }
 
     [Fact]
@@ -544,6 +708,8 @@ public sealed class Stage5SettingsTests
 
     private sealed class RecordingSessionManager : IWebViewSessionManager
     {
+        private readonly HashSet<Guid> _sessions = [];
+
         public event EventHandler<WebViewSessionStateChangedEventArgs>? StateChanged { add { } remove { } }
         public event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested { add { } remove { } }
         public event EventHandler<ServiceDocumentTitleChangedEventArgs>? DocumentTitleChanged { add { } remove { } }
@@ -552,41 +718,59 @@ public sealed class Stage5SettingsTests
 
         public WebViewSessionState State => WebViewSessionState.Uninitialized;
         public bool IsShutdownStarted { get; private set; }
-        public int InitializedSessionCount => 0;
+        public int InitializedSessionCount => _sessions.Count;
         public int InitialNavigationCount => 0;
         public int InitializeCount { get; private set; }
         public int DeactivateCount { get; private set; }
-        public int ReleaseSessionCount { get; private set; }
+        public int ReleaseSessionCount => ReleaseSessionRequests.Count;
+        public int ClearProfileCount { get; private set; }
+        public List<Guid> ReleaseSessionRequests { get; } = [];
+        public ServiceInstance? LastInitializedService { get; private set; }
         public Guid? LastClearedServiceId { get; private set; }
         public string? LastClearedProfileName { get; private set; }
+
+        public void AddSession(Guid serviceInstanceId) => _sessions.Add(serviceInstanceId);
 
         public Task<bool> InitializeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, bool activate, CancellationToken cancellationToken = default)
         {
             InitializeCount++;
+            LastInitializedService = serviceInstance;
+            _sessions.Add(serviceInstance.Id);
             return Task.FromResult(true);
         }
-        public Task<bool> PrimeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) => Task.FromResult(true);
-        public bool IsSessionInitialized(Guid serviceInstanceId) => false;
+        public Task<bool> PrimeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, CancellationToken cancellationToken = default)
+        {
+            LastInitializedService = serviceInstance;
+            _sessions.Add(serviceInstance.Id);
+            return Task.FromResult(true);
+        }
+        public bool IsSessionInitialized(Guid serviceInstanceId) => _sessions.Contains(serviceInstanceId);
         public void ActivateSession(Guid serviceInstanceId, Rectangle bounds, bool isVisible, bool moveFocus = false) { }
         public void UpdateActiveSessionLayout(Rectangle bounds, bool isVisible) { }
         public void NotifyParentWindowPositionChanged() { }
-        public bool HasSession(Guid serviceInstanceId) => false;
+        public bool HasSession(Guid serviceInstanceId) => _sessions.Contains(serviceInstanceId);
         public void DeactivateSession() => DeactivateCount++;
         public void GoBack() { }
         public void GoForward() { }
         public void Reload() { }
         public void NavigateHome() { }
         public void Retry() { }
-        public void ReleaseSession(Guid serviceInstanceId) => ReleaseSessionCount++;
+        public void ReleaseSession(Guid serviceInstanceId)
+        {
+            ReleaseSessionRequests.Add(serviceInstanceId);
+            _sessions.Remove(serviceInstanceId);
+        }
 
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default)
         {
+            ClearProfileCount++;
             LastClearedServiceId = serviceInstance.Id;
             LastClearedProfileName = serviceInstance.ProfileName;
+            _sessions.Remove(serviceInstance.Id);
             return Task.FromResult(true);
         }
 
-        public void ReleaseAllSessions() { }
+        public void ReleaseAllSessions() => _sessions.Clear();
         public void BeginShutdown() => IsShutdownStarted = true;
         public void Dispose() { }
     }
