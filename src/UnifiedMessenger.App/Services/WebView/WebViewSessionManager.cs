@@ -224,6 +224,10 @@ public sealed class WebViewSessionManager(
 
             session.Controller = controller;
             session.CoreWebView = controller.CoreWebView2;
+            await VkAutoplayPolicy.ApplyAsync(
+                session.ServiceInstance.ServiceType,
+                session.CoreWebView.Profile,
+                cancellationToken);
             controller.Bounds = session.Bounds;
             controller.IsVisible = session.PrimeVisibleWhileParentHidden;
             if (session.ServiceInstance.ServiceType is ServiceType.Max)
