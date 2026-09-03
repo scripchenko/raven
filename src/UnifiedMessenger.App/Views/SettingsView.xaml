@@ -204,7 +204,7 @@
                                         <TextBlock FontWeight="SemiBold" Text="Звуки Lantern" />
                                         <TextBlock Margin="0,6,0,0"
                                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                                   Text="Управляет только звуками, которые воспроизводит Lantern. Родной звук веб-сервисов не изменяется."
+                                                   Text="Управляет только звуками, которые воспроизводит Lantern. Звук веб-сервисов не изменяется."
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <CheckBox Grid.Column="1"
@@ -261,7 +261,7 @@
                                 <TextBlock FontWeight="SemiBold" Text="Источник звука мессенджеров" />
                                 <TextBlock Margin="0,6,0,14"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Lantern воспроизводит выбранный звук. Родной оставляет звук под управлением веб-сервиса."
+                                           Text="Выбор влияет только на звук уведомления. В режиме «Звук веб-сервиса» Lantern не воспроизводит свой звук. Всплывающие уведомления и индикатор активности Lantern продолжают работать."
                                            TextWrapping="Wrap" />
 
                                 <Grid Margin="0,0,0,12">
@@ -274,12 +274,12 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetTelegramSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Lantern"
+                                                     Content="Звук Lantern"
                                                      GroupName="TelegramSoundMode"
                                                      IsChecked="{Binding IsTelegramLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetTelegramSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
-                                                     Content="Родной"
+                                                     Content="Звук веб-сервиса"
                                                      GroupName="TelegramSoundMode"
                                                      IsChecked="{Binding IsTelegramNativeSound, Mode=OneWay}" />
                                     </StackPanel>
@@ -295,12 +295,12 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetWhatsAppSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Lantern"
+                                                     Content="Звук Lantern"
                                                      GroupName="WhatsAppSoundMode"
                                                      IsChecked="{Binding IsWhatsAppLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetWhatsAppSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
-                                                     Content="Родной"
+                                                     Content="Звук веб-сервиса"
                                                      GroupName="WhatsAppSoundMode"
                                                      IsChecked="{Binding IsWhatsAppNativeSound, Mode=OneWay}" />
                                     </StackPanel>
@@ -316,12 +316,12 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetMaxSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Lantern"
+                                                     Content="Звук Lantern"
                                                      GroupName="MaxSoundMode"
                                                      IsChecked="{Binding IsMaxLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetMaxSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
-                                                     Content="Родной"
+                                                     Content="Звук веб-сервиса"
                                                      GroupName="MaxSoundMode"
                                                      IsChecked="{Binding IsMaxNativeSound, Mode=OneWay}" />
                                     </StackPanel>
