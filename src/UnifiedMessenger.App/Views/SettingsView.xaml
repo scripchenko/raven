@@ -221,7 +221,7 @@
                                 <TextBlock FontWeight="SemiBold" Text="Звук Lantern" />
                                 <TextBlock Margin="0,6,0,12"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Один общий звук используется для Telegram, WhatsApp и MAX в режиме Lantern."
+                                           Text="Один общий звук используется для Telegram, WhatsApp и MAX в режиме Lantern, а также для почты."
                                            TextWrapping="Wrap" />
                                 <StackPanel Orientation="Horizontal">
                                     <RadioButton Margin="0,0,22,0"

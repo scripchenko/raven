@@ -5,6 +5,7 @@ using UnifiedMessenger.App.Services;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
+using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
 
@@ -227,6 +228,31 @@ public sealed class NotificationSoundSettingsTests
         Assert.DoesNotContain(".flac", LanternSoundFilePolicy.Extensions);
     }
 
+    [Theory]
+    [InlineData(LanternSoundSource.Default)]
+    [InlineData(LanternSoundSource.Custom)]
+    public void MailPlayback_UsesCurrentSharedLanternSoundSource(LanternSoundSource source)
+    {
+        using TemporaryDirectory temp = new();
+        string playbackPath = Path.Combine(temp.Path, "notification.wav");
+        File.WriteAllBytes(playbackPath, [0x52, 0x49, 0x46, 0x46]);
+        AppSettings settings = new();
+        settings.Notifications.LanternSoundSource = source;
+        FakeLanternSoundFileService soundFiles = new() { PlaybackPath = playbackPath };
+        PassiveDispatcher dispatcher = new();
+        using WindowsNotificationSoundPlayer player = new(
+            new FakeSettingsStore(settings),
+            soundFiles,
+            dispatcher);
+
+        bool queued = player.TryPlay(ServiceType.Gmail);
+
+        Assert.True(queued);
+        Assert.Equal(1, soundFiles.ResolveCount);
+        Assert.Same(settings.Notifications, soundFiles.LastSettings);
+        Assert.Equal(1, dispatcher.PostCount);
+    }
+
     [Fact]
     public void NotificationTag_IsHashedInMemoryAndRawValueIsNotForwarded()
     {
@@ -302,13 +328,30 @@ public sealed class NotificationSoundSettingsTests
     private sealed class FakeLanternSoundFileService : ILanternSoundFileService
     {
         public string DefaultSoundPath => "default.wav";
+        public string? PlaybackPath { get; init; }
         public string? DeletedFileName { get; private set; }
+        public int ResolveCount { get; private set; }
+        public NotificationSettings? LastSettings { get; private set; }
         public LanternSoundImportResult ImportResult { get; set; } =
             LanternSoundImportResult.Failed("not used");
         public Task<LanternSoundImportResult> ImportAsync(string sourceFilePath, CancellationToken cancellationToken = default) =>
             Task.FromResult(ImportResult);
-        public string ResolvePlaybackPath(NotificationSettings settings) => DefaultSoundPath;
+        public string ResolvePlaybackPath(NotificationSettings settings)
+        {
+            ResolveCount++;
+            LastSettings = settings;
+            return PlaybackPath ?? DefaultSoundPath;
+        }
         public void DeleteInternalCopy(string? internalFileName) => DeletedFileName = internalFileName;
+    }
+
+    private sealed class PassiveDispatcher : IUiDispatcher
+    {
+        public int PostCount { get; private set; }
+
+        public void Post(Action action) => PostCount++;
+
+        public Task<T> InvokeAsync<T>(Func<T> action) => Task.FromResult(action());
     }
 
     private sealed class FakeNotificationSoundPlayer : INotificationSoundPlayer

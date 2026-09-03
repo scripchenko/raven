@@ -22,12 +22,6 @@ public sealed class WindowsNotificationSoundPlayer(
             return false;
         }
 
-        if (serviceType is ServiceType.Gmail)
-        {
-            SystemSounds.Asterisk.Play();
-            return true;
-        }
-
         return QueueLanternSound();
     }
 

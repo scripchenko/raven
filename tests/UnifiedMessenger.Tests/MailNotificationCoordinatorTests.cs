@@ -34,13 +34,24 @@ public sealed class MailNotificationCoordinatorTests
     }
 
     [Fact]
-    public void NewMailInInactiveAccount_PlaysOneExistingSystemSound()
+    public void NewMailInInactiveAccount_PlaysOneSharedLanternSound()
     {
         using Fixture fixture = new();
 
         fixture.Handle(fixture.First, 1);
 
         Assert.Equal([ServiceType.Gmail], fixture.Sound.ServiceTypes);
+    }
+
+    [Fact]
+    public void IndependentMailAccounts_DoNotSuppressEachOthersSound()
+    {
+        using Fixture fixture = new();
+
+        fixture.Handle(fixture.First, 1);
+        fixture.Handle(fixture.Second, 1);
+
+        Assert.Equal([ServiceType.Gmail, ServiceType.Gmail], fixture.Sound.ServiceTypes);
     }
 
     [Fact]
