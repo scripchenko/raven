@@ -119,7 +119,43 @@ public sealed class LanternMailUiTests
         XElement reload = Assert.Single(
             headerButtons,
             button => (string?)button.Attribute("Command") == "{Binding ReloadCommand}");
+        XElement mute = Assert.Single(
+            headerButtons,
+            button => (string?)button.Attribute("Command") == "{Binding ToggleSelectedMuteCommand}");
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        XElement root = Assert.Single(window.Root!.Elements(presentation + "Grid"));
+        XElement workspace = Assert.Single(window.Descendants(presentation + "Grid"), element =>
+            (string?)element.Attribute(x + "Name") == "ServiceWorkspace");
+        XElement rowDefinitions = Assert.Single(root.Elements(presentation + "Grid.RowDefinitions"));
+        XElement[] rows = rowDefinitions.Elements(presentation + "RowDefinition").ToArray();
+        XElement topBar = Assert.Single(root.Elements(presentation + "Border"), element =>
+            (string?)element.Attribute("Grid.Row") == "0"
+                && (string?)element.Attribute("Grid.ColumnSpan") == "2");
+        XElement title = Assert.Single(topBar.Descendants(presentation + "TextBlock"), element =>
+            (string?)element.Attribute("Text") == "{Binding SelectedAccountDisplayName}");
+        XElement loading = Assert.Single(topBar.Descendants(presentation + "ProgressBar"), element =>
+            (string?)element.Attribute("Visibility")
+                == "{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}");
 
+        Assert.Equal("44", (string?)rows[0].Attribute("Height"));
+        Assert.Equal("*", (string?)rows[1].Attribute("Height"));
+        Assert.Null(workspace.Element(presentation + "Grid.RowDefinitions"));
+        Assert.Equal("32", (string?)reload.Attribute("Width"));
+        Assert.Equal("32", (string?)reload.Attribute("Height"));
+        Assert.Equal("32", (string?)mute.Attribute("Width"));
+        Assert.Equal("32", (string?)mute.Attribute("Height"));
+        Assert.Equal(
+            "{StaticResource ServiceHeaderButtonStyle}",
+            (string?)reload.Attribute("Style"));
+        Assert.Equal(
+            "{StaticResource ServiceHeaderButtonStyle}",
+            (string?)mute.Attribute("Style"));
+        Assert.Equal("{DynamicResource WindowBackgroundBrush}", (string?)topBar.Attribute("Background"));
+        Assert.Equal("15", (string?)title.Attribute("FontSize"));
+        Assert.Equal("CharacterEllipsis", (string?)title.Attribute("TextTrimming"));
+        Assert.Equal("NoWrap", (string?)title.Attribute("TextWrapping"));
+        Assert.Equal("2", (string?)loading.Attribute("Height"));
+        Assert.Equal("Bottom", (string?)loading.Attribute("VerticalAlignment"));
         Assert.Equal(
             "{Binding HasActiveWebView, Converter={StaticResource BooleanToVisibilityConverter}}",
             (string?)reload.Attribute("Visibility"));
