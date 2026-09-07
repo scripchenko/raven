@@ -276,6 +276,11 @@ public sealed class Stage6DirectWebView2Tests
         public void NavigateHome() { }
         public void Retry() { }
         public void ReleaseSession(Guid serviceInstanceId) => _initialized.Remove(serviceInstanceId);
+        public Task ReleaseSessionAsync(Guid serviceInstanceId, CancellationToken cancellationToken = default)
+        {
+            ReleaseSession(serviceInstanceId);
+            return Task.CompletedTask;
+        }
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default)
         {
             _initialized.Remove(serviceInstance.Id);

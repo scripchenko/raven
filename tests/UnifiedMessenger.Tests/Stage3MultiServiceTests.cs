@@ -192,7 +192,7 @@ public sealed class Stage3MultiServiceTests
         await File.WriteAllTextAsync(Path.Combine(targetFolder, "target.marker"), "test");
         await File.WriteAllTextAsync(Path.Combine(otherFolder, "other.marker"), "test");
 
-        bool deleted = await cleaner.TryDeleteProfileAsync(targetProfile);
+        bool deleted = await cleaner.TryDeleteProfileAsync(targetId, targetProfile);
 
         Assert.True(deleted);
         Assert.False(Directory.Exists(targetFolder));
@@ -367,6 +367,7 @@ public sealed class Stage3MultiServiceTests
         public void NavigateHome() { }
         public void Retry() { }
         public void ReleaseSession(Guid serviceInstanceId) { }
+        public Task ReleaseSessionAsync(Guid serviceInstanceId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
         public void ReleaseAllSessions() { }

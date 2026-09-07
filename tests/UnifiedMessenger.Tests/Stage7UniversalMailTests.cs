@@ -689,6 +689,7 @@ public sealed class Stage7UniversalMailTests
         public void NavigateHome() { }
         public void Retry() { }
         public void ReleaseSession(Guid serviceInstanceId) { }
+        public Task ReleaseSessionAsync(Guid serviceInstanceId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public void ReleaseAllSessions() { }
         public void BeginShutdown() { }

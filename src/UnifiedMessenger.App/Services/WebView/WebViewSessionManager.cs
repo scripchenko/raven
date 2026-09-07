@@ -33,6 +33,8 @@ public sealed class WebViewSessionManager(
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly Dictionary<Guid, SessionEntry> _sessions = [];
+    private readonly WebViewSessionSettlementTracker _settlementTracker = new();
+    private readonly HashSet<Guid> _profilesBeingCleared = [];
     private SessionEntry? _activeSession;
     private int _initialNavigationCount;
     private bool _shutdownStarted;
@@ -98,6 +100,11 @@ public sealed class WebViewSessionManager(
         ValidateBounds(bounds);
         ValidateServiceInstance(serviceInstance);
 
+        if (_profilesBeingCleared.Contains(serviceInstance.Id))
+        {
+            throw new InvalidOperationException("The WebView2 profile is being cleared.");
+        }
+
         if (!_sessions.TryGetValue(serviceInstance.Id, out SessionEntry? session))
         {
             session = new SessionEntry(serviceInstance, parentWindow, bounds);
@@ -135,15 +142,14 @@ public sealed class WebViewSessionManager(
             return true;
         }
 
-        Task<bool> initializationTask;
-        lock (session.InitializationSync)
-        {
-            session.InitializationTask ??= InitializeCoreAsync(session);
-            initializationTask = session.InitializationTask;
-        }
+        Task<bool> initializationTask = session.Lifetime.GetOrStartInitialization(
+            lifetimeToken => InitializeCoreAsync(session, lifetimeToken));
 
         bool initialized = await initializationTask.WaitAsync(cancellationToken);
-        if (initialized && activate && ReferenceEquals(_activeSession, session))
+        if (initialized
+            && activate
+            && IsCurrentSession(session)
+            && ReferenceEquals(_activeSession, session))
         {
             ApplyControllerLayout(session, isVisible: true, moveFocus: true);
             PublishCurrentState(session);
@@ -193,13 +199,26 @@ public sealed class WebViewSessionManager(
         }
     }
 
-    private async Task<bool> InitializeCoreAsync(SessionEntry session)
+    private async Task<bool> InitializeCoreAsync(
+        SessionEntry session,
+        CancellationToken lifetimeToken)
     {
-        CancellationToken cancellationToken = _shutdownCancellation.Token;
-        await _initializationGate.WaitAsync(cancellationToken);
+        using CancellationTokenSource initializationCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                _shutdownCancellation.Token,
+                lifetimeToken);
+        CancellationToken cancellationToken = initializationCancellation.Token;
+        bool gateEntered = false;
         try
         {
+            await _initializationGate.WaitAsync(cancellationToken);
+            gateEntered = true;
             cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentSession(session))
+            {
+                return false;
+            }
+
             if (HasInitializedControl(session))
             {
                 return true;
@@ -217,18 +236,24 @@ public sealed class WebViewSessionManager(
             CoreWebView2Controller controller = await environment.CreateCoreWebView2ControllerAsync(
                 session.ParentWindow,
                 options);
-            if (cancellationToken.IsCancellationRequested)
+            if (!session.Lifetime.TryAttachResource(
+                    controller,
+                    attachedController =>
+                    {
+                        session.Controller = attachedController;
+                        session.CoreWebView = attachedController.CoreWebView2;
+                    },
+                    rejectedController => CloseController(session, rejectedController)))
             {
-                controller.Close();
-                cancellationToken.ThrowIfCancellationRequested();
+                return false;
             }
 
-            session.Controller = controller;
-            session.CoreWebView = controller.CoreWebView2;
+            cancellationToken.ThrowIfCancellationRequested();
             await VkAutoplayPolicy.ApplyAsync(
                 session.ServiceInstance.ServiceType,
-                session.CoreWebView.Profile,
+                session.CoreWebView!.Profile,
                 cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             controller.Bounds = session.Bounds;
             controller.IsVisible = session.PrimeVisibleWhileParentHidden;
             if (session.ServiceInstance.ServiceType is ServiceType.Max)
@@ -246,8 +271,10 @@ public sealed class WebViewSessionManager(
                         () => OnBackgroundNotificationActivityReceived(session),
                         cancellationToken);
             }
-            ConfigureCoreWebView(session, session.CoreWebView);
+            cancellationToken.ThrowIfCancellationRequested();
+            ConfigureCoreWebView(session, session.CoreWebView!);
 
+            cancellationToken.ThrowIfCancellationRequested();
             session.CoreWebView.Navigate(GetValidatedStartUri(session.ServiceInstance).AbsoluteUri);
             Interlocked.Increment(ref _initialNavigationCount);
             Publish(session, WebViewSessionStatus.Navigating);
@@ -301,7 +328,10 @@ public sealed class WebViewSessionManager(
         }
         finally
         {
-            _initializationGate.Release();
+            if (gateEntered)
+            {
+                _initializationGate.Release();
+            }
         }
     }
 
@@ -467,8 +497,20 @@ public sealed class WebViewSessionManager(
     {
         if (_sessions.TryGetValue(serviceInstanceId, out SessionEntry? session))
         {
-            ReleaseSessionCore(session, updateState: true);
+            _ = ReleaseSessionCore(session, updateState: true);
         }
+    }
+
+    public async Task ReleaseSessionAsync(
+        Guid serviceInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_sessions.TryGetValue(serviceInstanceId, out SessionEntry? session))
+        {
+            _ = ReleaseSessionCore(session, updateState: true);
+        }
+
+        await _settlementTracker.WaitAsync(serviceInstanceId, cancellationToken);
     }
 
     public async Task<bool> ClearProfileAsync(
@@ -476,33 +518,57 @@ public sealed class WebViewSessionManager(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(serviceInstance);
-        ValidateProfile(serviceInstance);
-
-        if (_sessions.TryGetValue(serviceInstance.Id, out SessionEntry? session))
+        WebViewProfileIdentity identity = WebViewProfileIdentity.Create(serviceInstance);
+        if (!_profilesBeingCleared.Add(identity.ServiceInstanceId))
         {
+            throw new InvalidOperationException("The WebView2 profile is already being cleared.");
+        }
+
+        try
+        {
+            CoreWebView2Profile? profile = null;
+            if (_sessions.TryGetValue(identity.ServiceInstanceId, out SessionEntry? session))
+            {
+                try
+                {
+                    profile = session.CoreWebView?.Profile;
+                }
+                catch (Exception exception) when (IsUnavailableControlException(exception))
+                {
+                    // Filesystem deletion after settlement remains available.
+                }
+            }
+
+            await ReleaseSessionAsync(identity.ServiceInstanceId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (session.CoreWebView?.Profile is CoreWebView2Profile profile)
+                if (profile is not null)
                 {
                     await profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.AllProfile);
                 }
             }
             catch (Exception exception) when (IsUnavailableControlException(exception) || exception is IOException)
             {
-                // Disposing the controller and deleting its isolated directory is the fallback.
+                // Deleting the isolated directory after settlement is the fallback.
             }
 
-            ReleaseSessionCore(session, updateState: true);
+            return await profileCleaner.TryDeleteProfileAsync(
+                identity.ServiceInstanceId,
+                identity.ProfileName,
+                cancellationToken);
         }
-
-        return await profileCleaner.TryDeleteProfileAsync(serviceInstance.ProfileName, cancellationToken);
+        finally
+        {
+            _profilesBeingCleared.Remove(identity.ServiceInstanceId);
+        }
     }
 
     public void ReleaseAllSessions()
     {
         foreach (SessionEntry session in _sessions.Values.ToArray())
         {
-            ReleaseSessionCore(session, updateState: false);
+            _ = ReleaseSessionCore(session, updateState: false);
         }
 
         DeactivateSession();
@@ -664,6 +730,11 @@ public sealed class WebViewSessionManager(
 
     private void OnDocumentTitleChanged(SessionEntry session, CoreWebView2 coreWebView)
     {
+        if (!IsCurrentSession(session))
+        {
+            return;
+        }
+
         string documentTitle;
         try
         {
@@ -768,6 +839,12 @@ public sealed class WebViewSessionManager(
             eventArgs.Notification.ReportShown,
             eventArgs.Notification.ReportClicked,
             eventArgs.Notification.ReportClosed);
+        if (!IsCurrentSession(session))
+        {
+            lifecycle.CompleteSuppressed();
+            return;
+        }
+
         EventHandler<WebNotificationReceivedEventArgs>? handler = NotificationReceived;
         if (handler is null)
         {
@@ -800,7 +877,7 @@ public sealed class WebViewSessionManager(
 
     private void OnBackgroundNotificationActivityReceived(SessionEntry session)
     {
-        if (_shutdownStarted || !_sessions.ContainsKey(session.ServiceInstance.Id))
+        if (_shutdownStarted || !IsCurrentSession(session))
         {
             return;
         }
@@ -855,6 +932,11 @@ public sealed class WebViewSessionManager(
 
     private void OnProcessFailed(SessionEntry session, CoreWebView2ProcessFailedEventArgs eventArgs)
     {
+        if (!IsCurrentSession(session))
+        {
+            return;
+        }
+
         session.ProcessFailureDetected = true;
         PublishFailure(
             session,
@@ -890,6 +972,11 @@ public sealed class WebViewSessionManager(
         string? errorMessage = null,
         string? errorCode = null)
     {
+        if (!IsCurrentSession(session))
+        {
+            return;
+        }
+
         (bool canGoBack, bool canGoForward) = ReadHistoryState(session);
         session.State = new WebViewSessionState(
             status,
@@ -908,8 +995,11 @@ public sealed class WebViewSessionManager(
         StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(State));
     }
 
-    private void ReleaseSessionCore(SessionEntry session, bool updateState)
+    private Task ReleaseSessionCore(SessionEntry session, bool updateState)
     {
+        Task settlement = session.Lifetime.BeginRelease();
+        _settlementTracker.Track(session.ServiceInstance.Id, settlement);
+
         session.VkBackgroundNotificationMonitor?.Dispose();
         session.VkBackgroundNotificationMonitor = null;
 
@@ -925,14 +1015,19 @@ public sealed class WebViewSessionManager(
             // A crashed or disposed controller has no usable events left to detach.
         }
 
-        if (session.CloseGuard.TryBeginClose())
+        CoreWebView2Controller? controller = session.Controller;
+        if (controller is not null)
         {
-            session.Controller?.Close();
+            CloseController(session, controller);
         }
 
         session.Controller = null;
         session.CoreWebView = null;
-        _sessions.Remove(session.ServiceInstance.Id);
+        if (_sessions.TryGetValue(session.ServiceInstance.Id, out SessionEntry? current)
+            && ReferenceEquals(current, session))
+        {
+            _sessions.Remove(session.ServiceInstance.Id);
+        }
         session.CancelledExternalNavigations.Clear();
 
         if (ReferenceEquals(_activeSession, session))
@@ -945,6 +1040,24 @@ public sealed class WebViewSessionManager(
             }
         }
 
+        return settlement;
+    }
+
+    private static void CloseController(SessionEntry session, CoreWebView2Controller controller)
+    {
+        if (!session.CloseGuard.TryBeginClose())
+        {
+            return;
+        }
+
+        try
+        {
+            controller.Close();
+        }
+        catch (Exception exception) when (IsUnavailableControlException(exception))
+        {
+            // The controller is already unavailable; the close contract is still settled.
+        }
     }
 
     private Uri GetValidatedStartUri(ServiceInstance serviceInstance)
@@ -977,16 +1090,7 @@ public sealed class WebViewSessionManager(
 
     private static void ValidateProfile(ServiceInstance serviceInstance)
     {
-        if (serviceInstance.Id == Guid.Empty)
-        {
-            throw new InvalidOperationException("The service account must have a non-empty identifier.");
-        }
-
-        string expectedProfileName = ProfileNameFactory.Create(serviceInstance.Id);
-        if (!string.Equals(serviceInstance.ProfileName, expectedProfileName, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("The WebView2 profile name is not safe for this service account.");
-        }
+        _ = WebViewProfileIdentity.Create(serviceInstance);
     }
 
     private static void EnsureSameProfile(ServiceInstance existing, ServiceInstance requested)
@@ -1000,8 +1104,15 @@ public sealed class WebViewSessionManager(
 
     private static bool HasInitializedControl(SessionEntry session)
     {
-        return session.Controller is not null && session.CoreWebView is not null;
+        return !session.Lifetime.IsReleased
+            && session.Controller is not null
+            && session.CoreWebView is not null;
     }
+
+    private bool IsCurrentSession(SessionEntry session) =>
+        !session.Lifetime.IsReleased
+        && _sessions.TryGetValue(session.ServiceInstance.Id, out SessionEntry? current)
+        && ReferenceEquals(current, session);
 
     private static (bool CanGoBack, bool CanGoForward) ReadHistoryState(SessionEntry session)
     {
@@ -1043,8 +1154,7 @@ public sealed class WebViewSessionManager(
         public Rectangle Bounds { get; set; } = bounds;
         public CoreWebView2Controller? Controller { get; set; }
         public CoreWebView2? CoreWebView { get; set; }
-        public object InitializationSync { get; } = new();
-        public Task<bool>? InitializationTask { get; set; }
+        public WebViewSessionLifetime Lifetime { get; } = new();
         public TaskCompletionSource<bool> FirstNavigationCompleted { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool PrimeVisibleWhileParentHidden { get; set; }

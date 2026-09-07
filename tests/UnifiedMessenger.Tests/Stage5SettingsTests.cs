@@ -761,6 +761,12 @@ public sealed class Stage5SettingsTests
             _sessions.Remove(serviceInstanceId);
         }
 
+        public Task ReleaseSessionAsync(Guid serviceInstanceId, CancellationToken cancellationToken = default)
+        {
+            ReleaseSession(serviceInstanceId);
+            return Task.CompletedTask;
+        }
+
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default)
         {
             ClearProfileCount++;

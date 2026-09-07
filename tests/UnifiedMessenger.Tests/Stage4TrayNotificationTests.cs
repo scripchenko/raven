@@ -1890,6 +1890,7 @@ public sealed class Stage4TrayNotificationTests
         public void NavigateHome() { }
         public void Retry() { }
         public void ReleaseSession(Guid serviceInstanceId) { }
+        public Task ReleaseSessionAsync(Guid serviceInstanceId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public void ReleaseAllSessions() { }
         public void BeginShutdown() => IsShutdownStarted = true;

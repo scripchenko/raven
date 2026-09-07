@@ -38,6 +38,9 @@ public interface IWebViewSessionManager : IDisposable
     void NavigateHome();
     void Retry();
     void ReleaseSession(Guid serviceInstanceId);
+    Task ReleaseSessionAsync(
+        Guid serviceInstanceId,
+        CancellationToken cancellationToken = default);
     Task<bool> ClearProfileAsync(
         ServiceInstance serviceInstance,
         CancellationToken cancellationToken = default);
