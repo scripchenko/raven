@@ -95,6 +95,23 @@ public sealed class MailHtmlSanitizer : IMailHtmlSanitizer
         SupportedImageTypes.TryGetValue(contentType, out ImageSignatureValidator? validator)
         && validator(bytes);
 
+    internal static bool TryDetectSupportedImageContentType(
+        ReadOnlySpan<byte> bytes,
+        out string contentType)
+    {
+        foreach ((string candidate, ImageSignatureValidator validator) in SupportedImageTypes)
+        {
+            if (validator(bytes))
+            {
+                contentType = candidate;
+                return true;
+            }
+        }
+
+        contentType = string.Empty;
+        return false;
+    }
+
     private static HtmlSanitizer CreateSanitizer()
     {
         HtmlSanitizer sanitizer = new()

@@ -233,12 +233,12 @@ public sealed class RemoteMailImageLoader(
 
                 await using Stream source = await response.Content.ReadAsStreamAsync(timeout.Token);
                 byte[] bytes = await ReadBoundedAsync(source, timeout.Token);
-                if (!MailHtmlSanitizer.IsSupportedImage(contentType, bytes))
+                if (!TryResolveTrustedContentType(contentType, bytes, out string trustedContentType))
                 {
                     return null;
                 }
 
-                return new LoadedImage(image.ImageId, new MailImageContent(contentType, bytes));
+                return new LoadedImage(image.ImageId, new MailImageContent(trustedContentType, bytes));
             }
         }
         catch (Exception exception) when (
@@ -283,6 +283,35 @@ public sealed class RemoteMailImageLoader(
             or HttpStatusCode.RedirectMethod
             or HttpStatusCode.TemporaryRedirect
             or HttpStatusCode.PermanentRedirect;
+
+    private static bool TryResolveTrustedContentType(
+        string responseContentType,
+        ReadOnlySpan<byte> bytes,
+        out string trustedContentType)
+    {
+        if (MailHtmlSanitizer.IsSupportedImage(responseContentType, bytes))
+        {
+            trustedContentType = responseContentType;
+            return true;
+        }
+
+        bool isGenericBinary = string.Equals(
+                responseContentType,
+                "binary/octet-stream",
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                responseContentType,
+                "application/octet-stream",
+                StringComparison.OrdinalIgnoreCase);
+        if (isGenericBinary
+            && MailHtmlSanitizer.TryDetectSupportedImageContentType(bytes, out trustedContentType))
+        {
+            return true;
+        }
+
+        trustedContentType = string.Empty;
+        return false;
+    }
 
     private sealed record LoadedImage(string ImageId, MailImageContent Content);
 }

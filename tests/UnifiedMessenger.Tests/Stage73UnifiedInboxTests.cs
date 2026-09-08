@@ -1078,6 +1078,52 @@ public sealed class Stage73UnifiedInboxTests
         Assert.Empty(loaded);
     }
 
+    [Theory]
+    [InlineData("binary/octet-stream")]
+    [InlineData("application/octet-stream")]
+    public async Task RemoteImage_GenericBinaryMimeWithValidPngSignatureIsRendered(string responseContentType)
+    {
+        Uri source = new("http://assets.example.test/logo.png");
+        Uri redirected = new("https://assets.example.test/logo.png");
+        Queue<HttpResponseMessage> responses = new(
+        [
+            new HttpResponseMessage(HttpStatusCode.MovedPermanently)
+            {
+                Headers = { Location = redirected }
+            },
+            CreateImageResponse(PngBytes, responseContentType)
+        ]);
+        RecordingImageHttpClient client = new(() => responses.Dequeue());
+        RemoteMailImageLoader loader = new(client, new AllowAllImageUriValidator());
+        MimeMessage message = CreateMessage(new TextPart("html")
+        {
+            Text = $"<img src='{source}'>"
+        });
+        MailMessageContent content = CreateExtractor().Extract("generic-binary-png", message, false);
+
+        IReadOnlyDictionary<string, MailImageContent> loaded = await loader.LoadAsync(content.RemoteImages);
+        string document = new MailHtmlDocumentBuilder().Build(content, loaded);
+
+        MailImageContent image = Assert.Single(loaded).Value;
+        Assert.Equal("image/png", image.ContentType);
+        Assert.Equal(PngBytes, image.Bytes.ToArray());
+        Assert.Equal([source, redirected], client.Requests.Select(request => request.RequestUri));
+        Assert.Contains("data:image/png;base64,", document, StringComparison.Ordinal);
+        Assert.DoesNotContain("assets.example.test", document, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RemoteImage_GenericBinaryMimeWithoutSupportedSignatureIsRejected()
+    {
+        RecordingImageHttpClient client = new(CreateImageResponse("not-an-image"u8.ToArray(), "binary/octet-stream"));
+        RemoteMailImageLoader loader = new(client, new AllowAllImageUriValidator());
+
+        IReadOnlyDictionary<string, MailImageContent> loaded = await loader.LoadAsync(
+            [new MailRemoteImageReference("image", new Uri("https://images.example.test/not-image.bin"))]);
+
+        Assert.Empty(loaded);
+    }
+
     [Fact]
     public async Task RemoteImage_OversizedResponseIsRejected()
     {
