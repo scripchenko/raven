@@ -48,6 +48,7 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
     private readonly INotificationPopupService _popupService;
     private readonly INotificationSoundPlayer _soundPlayer;
     private readonly IMailNotificationNavigation _navigation;
+    private readonly IMailInboxFreshnessService _inboxFreshness;
     private bool _shutdown;
     private bool _disposed;
 
@@ -57,7 +58,8 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         IMailActivityCoordinator activityCoordinator,
         INotificationPopupService popupService,
         INotificationSoundPlayer soundPlayer,
-        IMailNotificationNavigation navigation)
+        IMailNotificationNavigation navigation,
+        IMailInboxFreshnessService inboxFreshness)
     {
         _pollingMonitor = pollingMonitor;
         _settingsStore = settingsStore;
@@ -65,6 +67,7 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         _popupService = popupService;
         _soundPlayer = soundPlayer;
         _navigation = navigation;
+        _inboxFreshness = inboxFreshness;
         _pollingMonitor.MailNewMessageDetected += OnMailNewMessageDetected;
         _popupService.Clicked += OnPopupClicked;
         _popupService.Closed += OnPopupClosed;
@@ -114,7 +117,13 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
             return;
         }
 
-        if (IsSelectedAndActive(account))
+        bool isSelectedAndActive = IsSelectedAndActive(account);
+        if (account.Provider is MailProviderType.Gmail)
+        {
+            _inboxFreshness.OnNewMailDetected(account.Id, isSelectedAndActive);
+        }
+
+        if (isSelectedAndActive)
         {
             return;
         }
@@ -209,6 +218,11 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         if (account is not null)
         {
             _activityCoordinator.Clear(account);
+            if (account.Provider is MailProviderType.Gmail)
+            {
+                _inboxFreshness.RequireFreshInbox(account.Id);
+            }
+
             _navigation.OpenInbox(account.Id);
         }
 

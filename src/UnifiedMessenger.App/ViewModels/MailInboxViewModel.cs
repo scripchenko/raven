@@ -15,7 +15,7 @@ public enum MailInboxPresentationMode
     Compose
 }
 
-public sealed class MailInboxViewModel : ObservableObject, IDisposable
+public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInboxFreshnessService
 {
     public const int InitialPageSize = 30;
     public const int MessageBodyCacheCapacity = 20;
@@ -29,6 +29,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private readonly IRemoteImageSenderTrustStore _remoteImageSenderTrustStore;
     private readonly Dictionary<FolderStateKey, FolderState> _folderStates = [];
     private readonly Dictionary<Guid, AccountFolderState> _accountFolderStates = [];
+    private readonly Dictionary<Guid, InboxFreshnessState> _inboxFreshnessStates = [];
     private readonly BoundedLruCache<MessageBodyCacheKey, MailMessageContent> _messageBodyCache =
         new(MessageBodyCacheCapacity);
     private readonly BoundedLruCache<RemoteImageConsentKey, bool> _remoteImageConsents =
@@ -142,6 +143,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     internal Task CurrentReadDwellTask => _currentReadDwellTask;
     internal bool IsReadDwellPending => _readDwellCancellation is not null;
     internal Task CurrentRemoteImageSenderTrustTask { get; private set; } = Task.CompletedTask;
+
+    internal bool IsInboxStale(Guid accountId) =>
+        GetInboxFreshnessState(accountId).IsStale;
+
+    internal Task GetCurrentInboxRefreshTask(Guid accountId) =>
+        GetInboxFreshnessState(accountId).CurrentRefreshTask;
 
     public MailAccount? ActiveAccount
     {
@@ -644,14 +651,27 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         SetSelectedFolderWithoutSwitch(folder);
         FolderState state = GetState(account.Id, folder.Key);
         ApplyState(state);
-        if (!state.HasLoaded)
+        bool requiresFreshInbox = IsTrackedGmailInbox(account, folder) && IsInboxStale(account.Id);
+        if (!state.HasLoaded || requiresFreshInbox)
         {
             if (folder.Kind is not MailFolderKind.Inbox)
             {
                 await RefreshInboxUnreadCountAsync(account, version, _activationCancellation.Token);
             }
 
-            await LoadPageAsync(account, folder, state, true, version, _activationCancellation.Token);
+            if (IsTrackedGmailInbox(account, folder))
+            {
+                await RefreshInboxFirstPageAsync(
+                    account,
+                    folder,
+                    state,
+                    version,
+                    _activationCancellation.Token);
+            }
+            else
+            {
+                await LoadPageAsync(account, folder, state, true, version, _activationCancellation.Token);
+            }
         }
         else
         {
@@ -678,10 +698,51 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
+    void IMailInboxFreshnessService.OnNewMailDetected(
+        Guid mailAccountId,
+        bool isAccountActivelyViewed) =>
+        OnNewMailDetected(mailAccountId, isAccountActivelyViewed);
+
+    void IMailInboxFreshnessService.RequireFreshInbox(Guid mailAccountId) =>
+        RequireFreshInbox(mailAccountId);
+
+    internal void OnNewMailDetected(Guid mailAccountId, bool isAccountActivelyViewed)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        InboxFreshnessState freshness = GetInboxFreshnessState(mailAccountId);
+        freshness.MarkChanged();
+        if (isAccountActivelyViewed && IsActiveGmailInbox(mailAccountId))
+        {
+            freshness.AutoRefreshRequested = true;
+            TryStartInboxAutoRefresh(mailAccountId, freshness);
+        }
+    }
+
+    internal void RequireFreshInbox(Guid mailAccountId)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        InboxFreshnessState freshness = GetInboxFreshnessState(mailAccountId);
+        freshness.MarkChanged();
+        if (IsActiveGmailInbox(mailAccountId))
+        {
+            freshness.AutoRefreshRequested = true;
+            TryStartInboxAutoRefresh(mailAccountId, freshness);
+        }
+    }
+
     public void RemoveAccount(Guid accountId)
     {
         CancelActivation();
         _accountFolderStates.Remove(accountId);
+        _inboxFreshnessStates.Remove(accountId);
         foreach (FolderStateKey key in _folderStates.Keys.Where(key => key.AccountId == accountId).ToArray())
         {
             _folderStates.Remove(key);
@@ -714,6 +775,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         Compose.Dispose();
         _folderStates.Clear();
         _accountFolderStates.Clear();
+        _inboxFreshnessStates.Clear();
         _messageBodyCache.Clear();
         _remoteImageConsents.Clear();
         _messageSourceCache?.Clear();
@@ -751,7 +813,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             SetSelectedFolderWithoutSwitch(selected);
             FolderState state = GetState(account.Id, selected.Key);
             ApplyState(state);
-            await LoadPageAsync(account, selected, state, true, version, cancellationToken);
+            if (IsTrackedGmailInbox(account, selected))
+            {
+                await RefreshInboxFirstPageAsync(account, selected, state, version, cancellationToken);
+            }
+            else
+            {
+                await LoadPageAsync(account, selected, state, true, version, cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -788,9 +857,17 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         AuthorizationMessage = null;
         FolderState state = GetState(account.Id, folder.Key);
         ApplyState(state);
-        if (!state.HasLoaded)
+        bool requiresFreshInbox = IsTrackedGmailInbox(account, folder) && IsInboxStale(account.Id);
+        if (!state.HasLoaded || requiresFreshInbox)
         {
-            await LoadPageAsync(account, folder, state, true, version, GetActivationToken());
+            if (IsTrackedGmailInbox(account, folder))
+            {
+                await RefreshInboxFirstPageAsync(account, folder, state, version, GetActivationToken());
+            }
+            else
+            {
+                await LoadPageAsync(account, folder, state, true, version, GetActivationToken());
+            }
         }
         else
         {
@@ -806,11 +883,18 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
 
         FolderState state = GetState(account.Id, folder.Key);
-        state.PrepareRefresh();
         ContinuationToken = null;
         ListErrorMessage = null;
         FailureKind = null;
-        await LoadPageAsync(account, folder, state, true, _viewVersion, GetActivationToken());
+        if (IsTrackedGmailInbox(account, folder))
+        {
+            await RefreshInboxFirstPageAsync(account, folder, state, _viewVersion, GetActivationToken());
+        }
+        else
+        {
+            state.PrepareRefresh();
+            await LoadPageAsync(account, folder, state, true, _viewVersion, GetActivationToken());
+        }
     }
 
     private async Task LoadMoreAsync()
@@ -938,7 +1022,105 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task LoadPageAsync(
+    private async Task<bool> RefreshInboxFirstPageAsync(
+        MailAccount account,
+        MailFolder folder,
+        FolderState state,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        InboxFreshnessState freshness = GetInboxFreshnessState(account.Id);
+        long refreshGeneration = freshness.ChangeGeneration;
+        state.PrepareRefresh();
+        bool succeeded = await LoadPageAsync(
+            account,
+            folder,
+            state,
+            replace: true,
+            version,
+            cancellationToken);
+        if (succeeded)
+        {
+            freshness.MarkRefreshedThrough(refreshGeneration);
+            TryStartInboxAutoRefresh(account.Id, freshness);
+        }
+        else
+        {
+            freshness.AutoRefreshRequested = false;
+        }
+
+        return succeeded;
+    }
+
+    private void TryStartInboxAutoRefresh(Guid accountId, InboxFreshnessState freshness)
+    {
+        if (_disposed
+            || freshness.IsAutoRefreshRunning
+            || !freshness.AutoRefreshRequested
+            || !freshness.IsStale
+            || IsListLoading
+            || !IsActiveGmailInbox(accountId))
+        {
+            return;
+        }
+
+        freshness.IsAutoRefreshRunning = true;
+        freshness.CurrentRefreshTask = RunInboxAutoRefreshAsync(accountId, freshness);
+    }
+
+    private async Task RunInboxAutoRefreshAsync(Guid accountId, InboxFreshnessState freshness)
+    {
+        try
+        {
+            while (freshness.AutoRefreshRequested
+                && freshness.IsStale
+                && ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true } account
+                && account.Id == accountId
+                && SelectedFolder is { Kind: MailFolderKind.Inbox } folder
+                && !IsComposeOpen)
+            {
+                freshness.AutoRefreshRequested = false;
+                FolderState state = GetState(accountId, folder.Key);
+                bool succeeded = await RefreshInboxFirstPageAsync(
+                    account,
+                    folder,
+                    state,
+                    _viewVersion,
+                    GetActivationToken());
+                if (!succeeded)
+                {
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            freshness.IsAutoRefreshRunning = false;
+        }
+    }
+
+    private bool IsActiveGmailInbox(Guid accountId) =>
+        ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true } account
+        && account.Id == accountId
+        && SelectedFolder?.Kind is MailFolderKind.Inbox
+        && !IsComposeOpen;
+
+    private static bool IsTrackedGmailInbox(MailAccount account, MailFolder folder) =>
+        account.Provider is MailProviderType.Gmail
+        && folder.Kind is MailFolderKind.Inbox;
+
+    private InboxFreshnessState GetInboxFreshnessState(Guid accountId)
+    {
+        if (!_inboxFreshnessStates.TryGetValue(accountId, out InboxFreshnessState? state))
+        {
+            state = new InboxFreshnessState();
+            _inboxFreshnessStates.Add(accountId, state);
+        }
+
+        return state;
+    }
+
+    private async Task<bool> LoadPageAsync(
         MailAccount account,
         MailFolder folder,
         FolderState state,
@@ -966,13 +1148,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
                 cancellationToken);
             if (!IsCurrent(account.Id, folder.Key, version, cancellationToken))
             {
-                return;
+                return false;
             }
 
             int? inboxUnreadCount = await unreadCountTask;
             if (!IsCurrent(account.Id, folder.Key, version, cancellationToken))
             {
-                return;
+                return false;
             }
 
             if (inboxUnreadCount is int exactUnreadCount)
@@ -1024,9 +1206,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             {
                 CurrentMessageLoadTask = LoadSelectedMessageAsync(restored);
             }
+
+            return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            return false;
         }
         catch (MailReadException exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
@@ -1034,6 +1219,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             state.ListErrorMessage = exception.UserMessage;
             state.FailureKind = exception.FailureKind;
             ApplyState(state);
+            return false;
         }
         catch (Exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
@@ -1041,6 +1227,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             state.ListErrorMessage = "Не удалось загрузить почту. Попробуйте ещё раз.";
             state.FailureKind = MailReadFailureKind.ConnectionFailed;
             ApplyState(state);
+            return false;
         }
         finally
         {
@@ -2138,6 +2325,21 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         public List<MailFolder> Folders { get; } = [];
         public string? SelectedFolderKey { get; set; }
         public bool HasLoaded { get; set; }
+    }
+
+    private sealed class InboxFreshnessState
+    {
+        public long ChangeGeneration { get; private set; }
+        public long RefreshedGeneration { get; private set; }
+        public bool AutoRefreshRequested { get; set; }
+        public bool IsAutoRefreshRunning { get; set; }
+        public Task CurrentRefreshTask { get; set; } = Task.CompletedTask;
+        public bool IsStale => RefreshedGeneration < ChangeGeneration;
+
+        public void MarkChanged() => ChangeGeneration++;
+
+        public void MarkRefreshedThrough(long generation) =>
+            RefreshedGeneration = Math.Max(RefreshedGeneration, generation);
     }
 
     private sealed class FolderState

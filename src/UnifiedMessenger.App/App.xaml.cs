@@ -304,6 +304,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MailComposeViewModel>();
         services.AddSingleton<MailInboxViewModel>();
+        services.AddSingleton<IMailInboxFreshnessService>(provider =>
+            provider.GetRequiredService<MailInboxViewModel>());
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<IWebViewEventCoordinator, WebViewEventCoordinator>();
         services.AddSingleton<IApplicationTrayCoordinator, ApplicationTrayCoordinator>();

@@ -89,6 +89,7 @@ public sealed class MailNotificationCoordinatorTests
         Assert.False(fixture.First.HasNewMailActivity);
         Assert.Empty(fixture.Popup.Shown);
         Assert.Empty(fixture.Sound.ServiceTypes);
+        Assert.Equal([(fixture.First.Id, true)], fixture.Freshness.Detections);
     }
 
     [Fact]
@@ -226,7 +227,21 @@ public sealed class MailNotificationCoordinatorTests
 
         Assert.False(fixture.First.HasNewMailActivity);
         Assert.Equal(14, fixture.First.InboxUnreadCount);
+        Assert.Equal([fixture.First.Id], fixture.Freshness.RequiredAccountIds);
         Assert.Equal([fixture.First.Id], fixture.Navigation.OpenedInboxAccountIds);
+    }
+
+    [Fact]
+    public void InactiveGmailDetection_ReusesSignalForInboxFreshnessWithoutChangingPresentation()
+    {
+        using Fixture fixture = new();
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.Equal([(fixture.First.Id, false)], fixture.Freshness.Detections);
+        Assert.Single(fixture.Popup.Shown);
+        Assert.Single(fixture.Sound.ServiceTypes);
+        Assert.True(fixture.First.HasNewMailActivity);
     }
 
     [Fact]
@@ -261,13 +276,15 @@ public sealed class MailNotificationCoordinatorTests
             Popup = new FakePopupService();
             Sound = new FakeSoundPlayer();
             Navigation = new FakeMailNavigation();
+            Freshness = new FakeInboxFreshnessService();
             Coordinator = new MailNotificationCoordinator(
                 _monitor,
                 Settings,
                 Activity,
                 Popup,
                 Sound,
-                Navigation);
+                Navigation,
+                Freshness);
         }
 
         public MailAccount First { get; }
@@ -277,6 +294,7 @@ public sealed class MailNotificationCoordinatorTests
         public FakePopupService Popup { get; }
         public FakeSoundPlayer Sound { get; }
         public FakeMailNavigation Navigation { get; }
+        public FakeInboxFreshnessService Freshness { get; }
         public MailNotificationCoordinator Coordinator { get; }
 
         public void Handle(MailAccount account, int count) =>
@@ -288,6 +306,18 @@ public sealed class MailNotificationCoordinatorTests
             Popup.Dispose();
             _monitor.Dispose();
         }
+    }
+
+    private sealed class FakeInboxFreshnessService : IMailInboxFreshnessService
+    {
+        public List<(Guid AccountId, bool IsActivelyViewed)> Detections { get; } = [];
+        public List<Guid> RequiredAccountIds { get; } = [];
+
+        public void OnNewMailDetected(Guid mailAccountId, bool isAccountActivelyViewed) =>
+            Detections.Add((mailAccountId, isAccountActivelyViewed));
+
+        public void RequireFreshInbox(Guid mailAccountId) =>
+            RequiredAccountIds.Add(mailAccountId);
     }
 
     private sealed class FakePollingMonitor : IMailBackgroundPollingMonitor
