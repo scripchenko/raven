@@ -486,7 +486,7 @@
                     <TextBlock MaxWidth="560"
                                Margin="0,0,0,8"
                                Foreground="#FFB42318"
-                               Text="{Binding ListErrorMessage}"
+                               Text="{Binding ListErrorDescription}"
                                TextAlignment="Center"
                                TextWrapping="Wrap">
                         <TextBlock.Style>
@@ -504,10 +504,22 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
+                    <TextBlock MaxWidth="560"
+                               Margin="0,0,0,8"
+                               Foreground="#FFB42318"
+                               Text="{Binding GmailReauthenticationErrorMessage}"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               Visibility="{Binding HasGmailReauthenticationError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Margin="0,0,0,8"
+                            Command="{Binding ReauthenticateGmailCommand}"
+                            Content="Войти в Google"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Visibility="{Binding RequiresGmailReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Command="{Binding LoadMoreCommand}"
                             Content="Загрузить ещё"
                             Style="{StaticResource MailSecondaryButtonStyle}"
-                            Visibility="{Binding HasMore, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            Visibility="{Binding ShowLoadMoreAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ProgressBar Width="180"
                                  Height="3"
                                  Margin="0,8,0,0"
@@ -546,12 +558,23 @@
                                    TextAlignment="Center" />
                         <TextBlock Margin="0,9,0,16"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="{Binding ListErrorMessage}"
+                                   Text="{Binding ListErrorDescription}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap" />
+                        <TextBlock Margin="0,0,0,16"
+                                   Foreground="#FFB42318"
+                                   Text="{Binding GmailReauthenticationErrorMessage}"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Visibility="{Binding HasGmailReauthenticationError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Button Command="{Binding ReauthenticateGmailCommand}"
+                                Content="Войти в Google"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Visibility="{Binding RequiresGmailReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Button Command="{Binding RetryCommand}"
                                 Content="Повторить"
-                                Style="{StaticResource PrimaryButtonStyle}" />
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Visibility="{Binding ShowTransientRetryAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
                 </Grid>
             </Grid>

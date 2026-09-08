@@ -51,11 +51,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     private bool _isCurrentRemoteImageSenderTrusted;
     private bool _canTrustCurrentRemoteImageSender;
     private bool _isReadStateChanging;
+    private bool _isGmailReauthenticating;
     private bool _hasLoaded;
     private string? _listErrorMessage;
     private string? _messageErrorMessage;
     private string? _readStateErrorMessage;
     private string? _authorizationMessage;
+    private string? _gmailReauthenticationErrorMessage;
     private string? _attachmentStatusMessage;
     private bool _isAttachmentSaving;
     private MailReadFailureKind? _failureKind;
@@ -108,6 +110,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, CanRefresh);
         LoadMoreCommand = new AsyncRelayCommand(LoadMoreAsync, CanLoadMore);
         RetryCommand = new AsyncRelayCommand(RetryAsync, CanRetry);
+        ReauthenticateGmailCommand = new AsyncRelayCommand(ReauthenticateGmailAsync, CanReauthenticateGmail);
         RetryMessageCommand = new AsyncRelayCommand(RetryMessageAsync, CanRetryMessage);
         SetReadStateCommand = new AsyncRelayCommand(SetReadStateAsync, CanSetReadState);
         AuthorizeGmailCommand = new AsyncRelayCommand(AuthorizeGmailAsync, CanAuthorizeGmail);
@@ -123,6 +126,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand RefreshCommand { get; }
     public IAsyncRelayCommand LoadMoreCommand { get; }
     public IAsyncRelayCommand RetryCommand { get; }
+    public IAsyncRelayCommand ReauthenticateGmailCommand { get; }
     public IAsyncRelayCommand RetryMessageCommand { get; }
     public IAsyncRelayCommand SetReadStateCommand { get; }
     public IAsyncRelayCommand AuthorizeGmailCommand { get; }
@@ -150,6 +154,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(AccountDisplayName));
                 OnPropertyChanged(nameof(ProviderDisplayName));
                 OnPropertyChanged(nameof(EmailAddress));
+                OnPropertyChanged(nameof(RequiresGmailReauthentication));
+                OnPropertyChanged(nameof(ShowTransientRetryAction));
                 RaisePresentationStateChanged();
                 BeginRemoteImageSenderTrustLookup();
                 RaiseReadStateChanged();
@@ -321,6 +327,18 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
+    public bool IsGmailReauthenticating
+    {
+        get => _isGmailReauthenticating;
+        private set
+        {
+            if (SetProperty(ref _isGmailReauthenticating, value))
+            {
+                ReauthenticateGmailCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
     public bool HasLoaded
     {
         get => _hasLoaded;
@@ -385,6 +403,18 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         }
     }
 
+    public string? GmailReauthenticationErrorMessage
+    {
+        get => _gmailReauthenticationErrorMessage;
+        private set
+        {
+            if (SetProperty(ref _gmailReauthenticationErrorMessage, value))
+            {
+                OnPropertyChanged(nameof(HasGmailReauthenticationError));
+            }
+        }
+    }
+
     public MailReadFailureKind? FailureKind
     {
         get => _failureKind;
@@ -393,6 +423,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _failureKind, value))
             {
                 OnPropertyChanged(nameof(ErrorTitle));
+                RaiseListStateChanged();
             }
         }
     }
@@ -405,6 +436,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _continuationToken, value))
             {
                 OnPropertyChanged(nameof(HasMore));
+                OnPropertyChanged(nameof(ShowLoadMoreAction));
                 LoadMoreCommand.NotifyCanExecuteChanged();
             }
         }
@@ -423,6 +455,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
     public bool HasMore => !string.IsNullOrWhiteSpace(ContinuationToken);
     public bool HasListError => !string.IsNullOrWhiteSpace(ListErrorMessage);
     public bool HasBlockingListError => HasListError && !HasMessages;
+    public bool HasGmailReauthenticationError => !string.IsNullOrWhiteSpace(GmailReauthenticationErrorMessage);
+    public bool RequiresGmailReauthentication =>
+        ActiveAccount?.Provider is MailProviderType.Gmail
+        && FailureKind is MailReadFailureKind.ReauthorizationRequired
+        && HasListError;
+    public bool ShowTransientRetryAction => HasBlockingListError && !RequiresGmailReauthentication;
+    public bool ShowLoadMoreAction => HasMore && !RequiresGmailReauthentication;
     public bool HasMessageError => !string.IsNullOrWhiteSpace(MessageErrorMessage);
     public bool HasReadStateError => !string.IsNullOrWhiteSpace(ReadStateErrorMessage);
     public bool IsInitialLoading => IsListLoading && !HasMessages;
@@ -522,11 +561,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     public string ErrorTitle => FailureKind switch
     {
-        MailReadFailureKind.ReauthorizationRequired => "Требуется повторный вход в Google",
+        MailReadFailureKind.ReauthorizationRequired => "Требуется вход в Google",
         MailReadFailureKind.AuthenticationFailed or MailReadFailureKind.CredentialMissing => "Не удалось войти в почту",
         MailReadFailureKind.FolderUnavailable => "Папка недоступна",
         _ => "Не удалось загрузить почту"
     };
+    public string? ListErrorDescription => FailureKind is MailReadFailureKind.ReauthorizationRequired
+        ? "Срок действия подключения истёк или доступ был отозван. Войдите в Google снова, чтобы продолжить получать почту."
+        : ListErrorMessage;
 
     public void SetRemoteImageLoading(bool isLoading)
     {
@@ -576,6 +618,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         IsMessageLoading = false;
         ReadStateErrorMessage = null;
         AuthorizationMessage = null;
+        GmailReauthenticationErrorMessage = null;
 
         if (account is null || !account.IsEnabled)
         {
@@ -815,6 +858,75 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         {
             await LoadPageAsync(account, folder, state, false, _viewVersion, GetActivationToken());
         }
+    }
+
+    private async Task ReauthenticateGmailAsync()
+    {
+        if (ActiveAccount is not { Provider: MailProviderType.Gmail, IsEnabled: true } account
+            || _providerFactory.GmailReauthenticationService is not IGmailReauthenticationService reauthenticationService)
+        {
+            return;
+        }
+
+        Guid accountId = account.Id;
+        long version = _viewVersion;
+        CancellationToken cancellationToken = GetActivationToken();
+        IsGmailReauthenticating = true;
+        GmailReauthenticationErrorMessage = null;
+        try
+        {
+            GmailReauthenticationResult result = await reauthenticationService.ReauthenticateAsync(
+                account,
+                cancellationToken);
+            if (!IsCurrentAccount(accountId, version, cancellationToken))
+            {
+                return;
+            }
+
+            if (result.Outcome is GmailReauthenticationOutcome.Canceled)
+            {
+                return;
+            }
+
+            if (!result.IsSuccess)
+            {
+                GmailReauthenticationErrorMessage = result.UserMessage
+                    ?? "Не удалось войти в Google. Попробуйте ещё раз.";
+                return;
+            }
+
+            await RefreshAfterGmailReauthenticationAsync(account, version, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Account changes cancel stale OAuth UI without altering the account or its error state.
+        }
+        finally
+        {
+            IsGmailReauthenticating = false;
+        }
+    }
+
+    private async Task RefreshAfterGmailReauthenticationAsync(
+        MailAccount account,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        GmailReauthenticationErrorMessage = null;
+        ListErrorMessage = null;
+        FailureKind = null;
+        AccountFolderState accountState = GetAccountFolderState(account.Id);
+        if (!HasFolders || SelectedFolder is not MailFolder folder)
+        {
+            accountState.HasLoaded = false;
+            await LoadFoldersAsync(account, accountState, version, cancellationToken);
+            return;
+        }
+
+        FolderState state = GetState(account.Id, folder.Key);
+        state.PrepareRefresh();
+        ContinuationToken = null;
+        await LoadPageAsync(account, folder, state, true, version, cancellationToken);
     }
 
     private async Task RetryMessageAsync()
@@ -1367,6 +1479,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
             ListErrorMessage = null;
             MessageErrorMessage = null;
             ReadStateErrorMessage = null;
+            GmailReauthenticationErrorMessage = null;
             FailureKind = null;
             _readStateCapability = MailReadStateCapability.Unsupported;
             RaiseListStateChanged();
@@ -1535,8 +1648,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
 
     private CancellationToken GetActivationToken() => _activationCancellation?.Token ?? CancellationToken.None;
     private bool CanRefresh() => IsActive && SelectedFolder is not null && !IsListLoading;
-    private bool CanLoadMore() => IsActive && HasMore && !IsListLoading;
-    private bool CanRetry() => IsActive && HasListError && !IsListLoading;
+    private bool CanLoadMore() => IsActive && ShowLoadMoreAction && !IsListLoading;
+    private bool CanRetry() => IsActive && HasListError && !RequiresGmailReauthentication && !IsListLoading;
+    private bool CanReauthenticateGmail() =>
+        IsActive
+        && RequiresGmailReauthentication
+        && !IsGmailReauthenticating
+        && _providerFactory.GmailReauthenticationService is not null;
     private bool CanRetryMessage() => IsActive && HasMessageError && !IsMessageLoading;
     private bool CanSetReadState() => CanChangeReadState;
     private bool CanAuthorizeGmail() => RequiresGmailAuthorization && !IsReadStateChanging && _providerFactory.GmailScopeUpgradeService is not null;
@@ -1605,11 +1723,16 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasMessages));
         OnPropertyChanged(nameof(HasListError));
         OnPropertyChanged(nameof(HasBlockingListError));
+        OnPropertyChanged(nameof(RequiresGmailReauthentication));
+        OnPropertyChanged(nameof(ShowTransientRetryAction));
+        OnPropertyChanged(nameof(ShowLoadMoreAction));
+        OnPropertyChanged(nameof(ListErrorDescription));
         OnPropertyChanged(nameof(IsInitialLoading));
         OnPropertyChanged(nameof(IsEmpty));
         RefreshCommand.NotifyCanExecuteChanged();
         LoadMoreCommand.NotifyCanExecuteChanged();
         RetryCommand.NotifyCanExecuteChanged();
+        ReauthenticateGmailCommand.NotifyCanExecuteChanged();
         OpenMessageCommand.NotifyCanExecuteChanged();
     }
 
@@ -1675,6 +1798,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable
         RefreshCommand.NotifyCanExecuteChanged();
         LoadMoreCommand.NotifyCanExecuteChanged();
         RetryCommand.NotifyCanExecuteChanged();
+        ReauthenticateGmailCommand.NotifyCanExecuteChanged();
         RetryMessageCommand.NotifyCanExecuteChanged();
         SetReadStateCommand.NotifyCanExecuteChanged();
         AuthorizeGmailCommand.NotifyCanExecuteChanged();

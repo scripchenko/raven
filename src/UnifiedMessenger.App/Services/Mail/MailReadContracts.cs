@@ -121,10 +121,49 @@ public interface IGmailScopeUpgradeService
         CancellationToken cancellationToken = default);
 }
 
+public enum GmailReauthenticationOutcome
+{
+    Success,
+    Canceled,
+    Failed,
+    WrongAccount
+}
+
+public sealed record GmailReauthenticationResult(
+    GmailReauthenticationOutcome Outcome,
+    string? UserMessage = null)
+{
+    public bool IsSuccess => Outcome is GmailReauthenticationOutcome.Success;
+
+    public static GmailReauthenticationResult Success() =>
+        new(GmailReauthenticationOutcome.Success);
+
+    public static GmailReauthenticationResult Canceled() =>
+        new(GmailReauthenticationOutcome.Canceled);
+
+    public static GmailReauthenticationResult Failure() =>
+        new(
+            GmailReauthenticationOutcome.Failed,
+            "Не удалось войти в Google. Попробуйте ещё раз.");
+
+    public static GmailReauthenticationResult WrongAccount(string expectedEmail) =>
+        new(
+            GmailReauthenticationOutcome.WrongAccount,
+            $"Вы вошли в другой аккаунт Google. Войдите как {expectedEmail}.");
+}
+
+public interface IGmailReauthenticationService
+{
+    Task<GmailReauthenticationResult> ReauthenticateAsync(
+        MailAccount account,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IMailReadProviderFactory
 {
     IMailReadProvider Get(MailProviderType providerType);
     IGmailScopeUpgradeService? GmailScopeUpgradeService => null;
+    IGmailReauthenticationService? GmailReauthenticationService => null;
 }
 
 public interface IMailContentExtractor

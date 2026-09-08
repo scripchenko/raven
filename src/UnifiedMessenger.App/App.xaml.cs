@@ -228,6 +228,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IGoogleOAuthProtocolClient, GoogleOAuthProtocolClient>();
         services.AddSingleton<IGmailOAuthService, GmailOAuthService>();
         services.AddSingleton<IGmailScopeUpgradeService, GmailScopeUpgradeService>();
+        services.AddSingleton<IGmailReauthenticationService, GmailReauthenticationService>();
         services.AddSingleton<IMailProvider, GmailApiProvider>();
         services.AddSingleton<IMailProvider, YandexMailProvider>();
         services.AddSingleton<IMailProvider, MailRuMailProvider>();

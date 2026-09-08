@@ -4,12 +4,14 @@ namespace UnifiedMessenger.App.Services.Mail;
 
 public sealed class MailReadProviderFactory(
     IEnumerable<IMailReadProvider> providers,
-    IGmailScopeUpgradeService? gmailScopeUpgradeService = null)
+    IGmailScopeUpgradeService? gmailScopeUpgradeService = null,
+    IGmailReauthenticationService? gmailReauthenticationService = null)
     : IMailReadProviderFactory
 {
     private readonly IReadOnlyList<IMailReadProvider> _providers = providers.ToArray();
 
     public IGmailScopeUpgradeService? GmailScopeUpgradeService { get; } = gmailScopeUpgradeService;
+    public IGmailReauthenticationService? GmailReauthenticationService { get; } = gmailReauthenticationService;
 
     public IMailReadProvider Get(MailProviderType providerType)
     {
