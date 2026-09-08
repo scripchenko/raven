@@ -170,6 +170,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     private bool _isSending;
     private string? _errorMessage;
     private string? _statusMessage;
+    private MailSendFailureKind? _failureKind;
     private int _sendGate;
     private bool _disposed;
 
@@ -214,6 +215,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _activeAccount, value))
             {
                 OnPropertyChanged(nameof(FromAddress));
+                OnPropertyChanged(nameof(RequiresGmailReauthentication));
                 NotifyOpenState();
                 NotifyCommandStates();
             }
@@ -255,6 +257,19 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _errorMessage, value))
             {
                 OnPropertyChanged(nameof(HasError));
+                OnPropertyChanged(nameof(RequiresGmailReauthentication));
+            }
+        }
+    }
+
+    public MailSendFailureKind? FailureKind
+    {
+        get => _failureKind;
+        private set
+        {
+            if (SetProperty(ref _failureKind, value))
+            {
+                OnPropertyChanged(nameof(RequiresGmailReauthentication));
             }
         }
     }
@@ -275,6 +290,10 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     public bool IsClosed => !IsOpen;
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
     public bool HasStatus => !string.IsNullOrWhiteSpace(StatusMessage);
+    public bool RequiresGmailReauthentication =>
+        ActiveAccount?.Provider is MailProviderType.Gmail
+        && FailureKind is MailSendFailureKind.ReauthorizationRequired
+        && HasError;
     public bool CanEdit => IsOpen && !IsSending;
     public string FromAddress => ActiveAccount?.EmailAddress ?? string.Empty;
     public string SendButtonText => IsSending ? "Отправляем…" : "Отправить";
@@ -283,12 +302,13 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     public void ActivateAccount(MailAccount? account)
     {
         ThrowIfDisposed();
+        FailureKind = null;
+        ErrorMessage = null;
+        StatusMessage = null;
         ActiveAccount = account is { IsEnabled: true } ? account : null;
         Draft = ActiveAccount is not null && _drafts.TryGetValue(ActiveAccount.Id, out MailComposeDraft? draft)
             ? draft
             : null;
-        ErrorMessage = null;
-        StatusMessage = null;
     }
 
     public void RemoveAccount(Guid accountId)
@@ -309,6 +329,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         }
 
         StatusMessage = null;
+        FailureKind = null;
         ErrorMessage = null;
         if (!_drafts.TryGetValue(account.Id, out MailComposeDraft? draft))
         {
@@ -365,6 +386,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         MailComposeDraft draft = new(template, account.Id);
         _drafts[account.Id] = draft;
         Draft = draft;
+        FailureKind = null;
         ErrorMessage = null;
         StatusMessage = null;
     }
@@ -382,6 +404,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         }
 
         IsSending = true;
+        FailureKind = null;
         ErrorMessage = null;
         StatusMessage = null;
         try
@@ -399,6 +422,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             }
             catch (MailComposeValidationException exception)
             {
+                FailureKind = MailSendFailureKind.InvalidRequest;
                 ErrorMessage = exception.UserMessage;
                 return;
             }
@@ -440,6 +464,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
 
             if (!result.IsMessageSent)
             {
+                FailureKind = result.FailureKind;
                 ErrorMessage = result.UserMessage;
                 return;
             }
@@ -470,10 +495,14 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         {
             IReadOnlyList<OutgoingMailAttachment> attachments = _attachmentDialogService.SelectOutgoingAttachments();
             draft.AddLocalAttachments(attachments);
+            FailureKind = null;
             ErrorMessage = null;
         }
         catch (MailAttachmentException exception)
         {
+            FailureKind = exception.FailureKind is MailAttachmentFailureKind.MessageTooLarge
+                ? MailSendFailureKind.MessageTooLarge
+                : MailSendFailureKind.AttachmentUnavailable;
             ErrorMessage = exception.UserMessage;
         }
         catch (Exception exception) when (
@@ -483,6 +512,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 or ArgumentException
                 or NotSupportedException)
         {
+            FailureKind = MailSendFailureKind.AttachmentUnavailable;
             ErrorMessage = "Не удалось прочитать выбранный файл.";
         }
     }
@@ -510,7 +540,17 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
 
         _drafts.Remove(account.Id);
         Draft = null;
+        FailureKind = null;
         ErrorMessage = null;
+    }
+
+    internal void ClearGmailReauthenticationError(Guid accountId)
+    {
+        if (ActiveAccount?.Id == accountId && RequiresGmailReauthentication)
+        {
+            FailureKind = null;
+            ErrorMessage = null;
+        }
     }
 
     private bool CanStartNewMessage() => ActiveAccount is not null && !IsSending;

@@ -204,6 +204,65 @@ public sealed class GmailReauthenticationTests
     }
 
     [Fact]
+    public async Task ConcurrentReauthenticationForSameAccount_UsesSingleOAuthFlow()
+    {
+        MailAccount account = GmailAccount("same@gmail.test");
+        RecordingCredentialStore store = new((
+            account.CredentialKey,
+            Credential("old-refresh", GmailOAuthConstants.ModifyScope)));
+        ControlledOAuthService oauth = new((
+            account.EmailAddress,
+            Credential("new-refresh", GmailOAuthConstants.ModifyScope)));
+        GmailReauthenticationService service = new(store, oauth);
+
+        Task<GmailReauthenticationResult> first = service.ReauthenticateAsync(account);
+        Task<GmailReauthenticationResult> second = service.ReauthenticateAsync(account);
+
+        Assert.Equal(1, oauth.AuthorizationCount);
+        oauth.CompleteAuthorization(0);
+        GmailReauthenticationResult[] results = await Task.WhenAll(first, second);
+
+        Assert.All(results, result => Assert.True(result.IsSuccess));
+        Assert.Equal(1, oauth.AuthorizationCount);
+        Assert.Equal([account.CredentialKey], store.SavedKeys);
+    }
+
+    [Fact]
+    public async Task ConcurrentReauthenticationForDifferentAccounts_UsesIndependentOAuthFlows()
+    {
+        MailAccount firstAccount = GmailAccount("first@gmail.test");
+        MailAccount secondAccount = GmailAccount("second@gmail.test");
+        RecordingCredentialStore store = new(
+            (
+                firstAccount.CredentialKey,
+                Credential("first-old", GmailOAuthConstants.ModifyScope)),
+            (
+                secondAccount.CredentialKey,
+                Credential("second-old", GmailOAuthConstants.ModifyScope)));
+        ControlledOAuthService oauth = new(
+            (
+                firstAccount.EmailAddress,
+                Credential("first-new", GmailOAuthConstants.ModifyScope)),
+            (
+                secondAccount.EmailAddress,
+                Credential("second-new", GmailOAuthConstants.ModifyScope)));
+        GmailReauthenticationService service = new(store, oauth);
+
+        Task<GmailReauthenticationResult> first = service.ReauthenticateAsync(firstAccount);
+        Task<GmailReauthenticationResult> second = service.ReauthenticateAsync(secondAccount);
+
+        Assert.Equal(2, oauth.AuthorizationCount);
+        oauth.CompleteAuthorization(1);
+        Assert.True((await second).IsSuccess);
+        Assert.False(first.IsCompleted);
+
+        oauth.CompleteAuthorization(0);
+        Assert.True((await first).IsSuccess);
+        Assert.Contains(firstAccount.CredentialKey, store.SavedKeys);
+        Assert.Contains(secondAccount.CredentialKey, store.SavedKeys);
+    }
+
+    [Fact]
     public async Task NonGmailService_IsRejectedWithoutOAuthOrCredentialChanges()
     {
         MailAccount account = GmailAccount("imap@example.test");
@@ -234,6 +293,10 @@ public sealed class GmailReauthenticationTests
         Assert.Contains("Command=\"{Binding ReauthenticateGmailCommand}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Повторить\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding ShowTransientRetryAction", xaml, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding RequiresGmailMessageReauthentication", xaml, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding RequiresGmailReadStateReauthentication", xaml, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding RequiresGmailComposeReauthentication", xaml, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding ShowMessageRetryAction", xaml, StringComparison.Ordinal);
     }
 
     private static MailInboxViewModel ViewModel(
@@ -416,5 +479,57 @@ public sealed class GmailReauthenticationTests
             GmailOAuthSession session,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(_profile);
+    }
+
+    private sealed class ControlledOAuthService : IGmailOAuthService
+    {
+        private readonly (GmailOAuthSession Session, GmailProfileResult Profile)[] _calls;
+        private readonly TaskCompletionSource<GmailOAuthAuthorizationResult>[] _authorizations;
+        private int _authorizationCount;
+
+        public ControlledOAuthService(params (string Email, MailCredential Credential)[] calls)
+        {
+            _calls = calls
+                .Select((call, index) =>
+                {
+                    GmailOAuthSession session = new($"access-{index}", call.Credential);
+                    return (
+                        session,
+                        GmailProfileResult.Success(new GmailUserProfile(call.Email, null)));
+                })
+                .ToArray();
+            _authorizations = calls
+                .Select(_ => new TaskCompletionSource<GmailOAuthAuthorizationResult>(
+                    TaskCreationOptions.RunContinuationsAsynchronously))
+                .ToArray();
+        }
+
+        public int AuthorizationCount => Volatile.Read(ref _authorizationCount);
+
+        public Task<GmailOAuthAuthorizationResult> AuthorizeAsync(
+            CancellationToken cancellationToken = default) =>
+            AuthorizeAsync(GmailOAuthConstants.ReadOnlyScope, cancellationToken);
+
+        public Task<GmailOAuthAuthorizationResult> AuthorizeAsync(
+            string scope,
+            CancellationToken cancellationToken = default)
+        {
+            int index = Interlocked.Increment(ref _authorizationCount) - 1;
+            return _authorizations[index].Task.WaitAsync(cancellationToken);
+        }
+
+        public Task<GmailProfileResult> GetProfileAsync(
+            GmailOAuthSession session,
+            CancellationToken cancellationToken = default)
+        {
+            int index = Array.FindIndex(
+                _calls,
+                call => ReferenceEquals(call.Session, session));
+            return Task.FromResult(_calls[index].Profile);
+        }
+
+        public void CompleteAuthorization(int index) =>
+            _authorizations[index].TrySetResult(
+                GmailOAuthAuthorizationResult.Success(_calls[index].Session));
     }
 }

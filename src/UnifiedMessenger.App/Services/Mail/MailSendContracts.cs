@@ -10,6 +10,7 @@ public enum MailSendFailureKind
     InvalidRequest,
     CredentialMissing,
     AuthenticationFailed,
+    ReauthorizationRequired,
     CapabilityUnavailable,
     ConnectionFailed,
     SenderRejected,

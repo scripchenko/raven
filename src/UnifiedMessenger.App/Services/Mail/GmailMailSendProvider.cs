@@ -55,8 +55,8 @@ internal sealed class GmailMailSendProvider(
         if (credential is not { Kind: MailCredentialKind.GmailOAuthRefreshToken } || !credential.IsValid())
         {
             return MailSendResult.Failure(
-                MailSendFailureKind.CredentialMissing,
-                "Требуется повторный вход в Google.");
+                MailSendFailureKind.ReauthorizationRequired,
+                "Требуется вход в Google. Войдите снова и затем нажмите «Отправить».");
         }
 
         if (!credential.HasGmailModifyScope)
@@ -131,8 +131,8 @@ internal sealed class GmailApiSendClient : IGmailApiSendClient
                 || string.IsNullOrWhiteSpace(userCredential.Token.AccessToken))
             {
                 throw new MailSubmissionException(
-                    MailSendFailureKind.AuthenticationFailed,
-                    "Требуется повторный вход в Google.");
+                    MailSendFailureKind.ReauthorizationRequired,
+                    "Требуется вход в Google. Войдите снова и затем нажмите «Отправить».");
             }
 
             service = new GmailService(
@@ -164,11 +164,11 @@ internal sealed class GmailApiSendClient : IGmailApiSendClient
                     "Отправка отменена до передачи письма.",
                     exception);
         }
-        catch (Exception exception) when (IsAuthenticationFailure(exception))
+        catch (Exception exception) when (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
             throw new MailSubmissionException(
-                MailSendFailureKind.AuthenticationFailed,
-                "Google отклонил текущую авторизацию. Выполните повторный вход.",
+                MailSendFailureKind.ReauthorizationRequired,
+                "Требуется вход в Google. Войдите снова и затем нажмите «Отправить».",
                 exception);
         }
         catch (GoogleApiException exception) when (exception.HttpStatusCode is >= HttpStatusCode.BadRequest and < HttpStatusCode.InternalServerError)
@@ -213,11 +213,6 @@ internal sealed class GmailApiSendClient : IGmailApiSendClient
                 },
                 Scopes = [GmailOAuthConstants.ModifyScope]
             });
-
-    private static bool IsAuthenticationFailure(Exception exception) =>
-        exception is TokenResponseException
-        || exception is GoogleApiException apiException
-            && apiException.HttpStatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
     private static bool IsAmbiguousTransportFailure(Exception exception) =>
         exception is GoogleApiException apiException && apiException.HttpStatusCode >= HttpStatusCode.InternalServerError

@@ -7,11 +7,67 @@ public sealed class GmailReauthenticationService(
     IMailCredentialStore credentialStore,
     IGmailOAuthService oauthService) : IGmailReauthenticationService
 {
-    public async Task<GmailReauthenticationResult> ReauthenticateAsync(
+    private readonly object _operationSync = new();
+    private readonly Dictionary<Guid, Task<GmailReauthenticationResult>> _operations = [];
+
+    public Task<GmailReauthenticationResult> ReauthenticateAsync(
         MailAccount account,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(account);
+        Task<GmailReauthenticationResult> operation;
+        lock (_operationSync)
+        {
+            if (!_operations.TryGetValue(account.Id, out operation!))
+            {
+                TaskCompletionSource<GmailReauthenticationResult> completion =
+                    new(TaskCreationOptions.RunContinuationsAsynchronously);
+                operation = completion.Task;
+                _operations.Add(account.Id, operation);
+                _ = CompleteOperationAsync(account, cancellationToken, operation, completion);
+            }
+        }
+
+        return cancellationToken.CanBeCanceled
+            ? operation.WaitAsync(cancellationToken)
+            : operation;
+    }
+
+    private async Task CompleteOperationAsync(
+        MailAccount account,
+        CancellationToken cancellationToken,
+        Task<GmailReauthenticationResult> operation,
+        TaskCompletionSource<GmailReauthenticationResult> completion)
+    {
+        try
+        {
+            completion.TrySetResult(await ReauthenticateCoreAsync(account, cancellationToken));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            completion.TrySetCanceled(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
+        }
+        finally
+        {
+            lock (_operationSync)
+            {
+                if (_operations.TryGetValue(account.Id, out Task<GmailReauthenticationResult>? current)
+                    && ReferenceEquals(current, operation))
+                {
+                    _operations.Remove(account.Id);
+                }
+            }
+        }
+    }
+
+    private async Task<GmailReauthenticationResult> ReauthenticateCoreAsync(
+        MailAccount account,
+        CancellationToken cancellationToken)
+    {
         if (account.Provider is not MailProviderType.Gmail)
         {
             return GmailReauthenticationResult.Failure();

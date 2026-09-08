@@ -804,6 +804,12 @@
                                        Text="{Binding ReadStateErrorMessage}"
                                        TextWrapping="Wrap"
                                        Visibility="{Binding HasReadStateError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Margin="0,8,0,0"
+                                    HorizontalAlignment="Left"
+                                    Command="{Binding ReauthenticateGmailCommand}"
+                                    Content="Войти в Google"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Visibility="{Binding RequiresGmailReadStateReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -885,9 +891,20 @@
                                    Text="{Binding MessageErrorMessage}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap" />
+                        <TextBlock Margin="0,0,0,16"
+                                   Foreground="#FFB42318"
+                                   Text="{Binding GmailReauthenticationErrorMessage}"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Visibility="{Binding HasGmailReauthenticationError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Button Command="{Binding ReauthenticateGmailCommand}"
+                                Content="Войти в Google"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Visibility="{Binding RequiresGmailMessageReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Button Command="{Binding RetryMessageCommand}"
                                 Content="Повторить"
-                                Style="{StaticResource PrimaryButtonStyle}" />
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Visibility="{Binding ShowMessageRetryAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
                 </Grid>
             </Grid>
@@ -1072,6 +1089,22 @@
                                    Text="{Binding Compose.ErrorMessage}"
                                    TextWrapping="Wrap"
                                    Visibility="{Binding Compose.HasError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                        <StackPanel Grid.Row="6"
+                                    Grid.ColumnSpan="2"
+                                    Margin="0,18,16,0"
+                                    HorizontalAlignment="Left"
+                                    Visibility="{Binding RequiresGmailComposeReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Foreground="#FFB42318"
+                                       Text="{Binding GmailReauthenticationErrorMessage}"
+                                       TextWrapping="Wrap"
+                                       Visibility="{Binding HasGmailReauthenticationError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Margin="0,8,0,0"
+                                    HorizontalAlignment="Left"
+                                    Command="{Binding ReauthenticateGmailCommand}"
+                                    Content="Войти в Google"
+                                    Style="{StaticResource PrimaryButtonStyle}" />
+                        </StackPanel>
 
                         <StackPanel Grid.Row="6"
                                     Grid.ColumnSpan="3"

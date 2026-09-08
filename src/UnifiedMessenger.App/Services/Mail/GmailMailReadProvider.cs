@@ -614,7 +614,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
         {
             throw;
         }
-        catch (Exception exception) when (IsAuthenticationException(exception))
+        catch (Exception exception) when (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
             throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
         }
@@ -642,7 +642,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
         {
             throw;
         }
-        catch (Exception exception) when (IsAuthenticationException(exception))
+        catch (Exception exception) when (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
             throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
         }
@@ -813,14 +813,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
     }
 
     private static MailReadException MapListException(Exception exception) =>
-        IsAuthenticationException(exception)
+        GmailAuthorizationFailureClassifier.RequiresReauthorization(exception)
             ? new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.")
             : new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось загрузить почту. Проверьте подключение к сети.");
-
-    private static bool IsAuthenticationException(Exception exception) =>
-        exception is TokenResponseException
-        || exception is GoogleApiException apiException
-            && apiException.HttpStatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
     private static bool IsExpectedApiException(Exception exception) =>
         exception is GoogleApiException
