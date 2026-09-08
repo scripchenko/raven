@@ -5,6 +5,7 @@ using UnifiedMessenger.App.Services.Mail;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Tray;
+using UnifiedMessenger.App.ViewModels;
 
 namespace UnifiedMessenger.Tests;
 
@@ -90,6 +91,62 @@ public sealed class MailNotificationCoordinatorTests
         Assert.Empty(fixture.Popup.Shown);
         Assert.Empty(fixture.Sound.ServiceTypes);
         Assert.Equal([(fixture.First.Id, true)], fixture.Freshness.Detections);
+    }
+
+    [Fact]
+    public void SelectedVisibleButUnfocusedGmail_RefreshesInboxAndKeepsNotificationPresentation()
+    {
+        using Fixture fixture = new();
+        fixture.Navigation.ActiveAccountId = fixture.First.Id;
+        fixture.Navigation.IsMainWindowVisible = true;
+        fixture.Navigation.IsMainWindowActive = false;
+
+        fixture.Handle(fixture.First, 1);
+
+        Assert.Equal([(fixture.First.Id, true)], fixture.Freshness.Detections);
+        Assert.True(fixture.First.HasNewMailActivity);
+        Assert.Single(fixture.Popup.Shown);
+        Assert.Single(fixture.Sound.ServiceTypes);
+    }
+
+    [Fact]
+    public async Task SelectedLoadedInbox_NewMailRefreshesWithoutNavigationOrWindowFocus()
+    {
+        MailAccount account = Account();
+        QueueInboxReadProvider readProvider = new(
+            Page("cached"),
+            Page("new"));
+        using MailInboxViewModel inbox = new(new SingleReadProviderFactory(readProvider));
+        await inbox.ActivateAsync(account);
+        using FakePollingMonitor monitor = new();
+        TestSettingsStore settings = new(new AppSettings { MailAccounts = [account] });
+        MailActivityCoordinator activity = new();
+        using FakePopupService popup = new();
+        FakeSoundPlayer sound = new();
+        FakeMailNavigation navigation = new()
+        {
+            ActiveAccountId = account.Id,
+            IsMainWindowVisible = true,
+            IsMainWindowActive = false
+        };
+        using MailNotificationCoordinator coordinator = new(
+            monitor,
+            settings,
+            activity,
+            popup,
+            sound,
+            navigation,
+            inbox);
+
+        monitor.Raise(new MailNewMessageDetectedEventArgs(account.Id, 1));
+        await inbox.GetCurrentInboxRefreshTask(account.Id);
+
+        Assert.Equal(2, readProvider.PageCallCount);
+        Assert.Equal("new", Assert.Single(inbox.Messages).MessageKey);
+        Assert.False(inbox.IsInboxStale(account.Id));
+        Assert.Equal(account.Id, navigation.ActiveAccountId);
+        Assert.Single(popup.Shown);
+        Assert.Single(sound.ServiceTypes);
     }
 
     [Fact]
@@ -263,6 +320,18 @@ public sealed class MailNotificationCoordinatorTests
         CredentialKey = "credential"
     };
 
+    private static MailPage<MailMessageSummary> Page(string key) =>
+        new(
+            [new MailMessageSummary(
+                key,
+                $"Subject {key}",
+                "Sender",
+                "sender@example.test",
+                DateTimeOffset.UtcNow,
+                "Preview",
+                true)],
+            null);
+
     private sealed class Fixture : IDisposable
     {
         private readonly FakePollingMonitor _monitor = new();
@@ -320,6 +389,35 @@ public sealed class MailNotificationCoordinatorTests
             RequiredAccountIds.Add(mailAccountId);
     }
 
+    private sealed class SingleReadProviderFactory(IMailReadProvider provider) : IMailReadProviderFactory
+    {
+        public IMailReadProvider Get(MailProviderType providerType) => provider;
+    }
+
+    private sealed class QueueInboxReadProvider(params MailPage<MailMessageSummary>[] pages) : IMailReadProvider
+    {
+        private readonly Queue<MailPage<MailMessageSummary>> _pages = new(pages);
+
+        public int PageCallCount { get; private set; }
+        public bool Supports(MailProviderType providerType) => providerType is MailProviderType.Gmail;
+
+        public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
+            MailAccount account,
+            string? continuationToken,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+        {
+            PageCallCount++;
+            return Task.FromResult(_pages.Dequeue());
+        }
+
+        public Task<MailMessageContent> GetMessageAsync(
+            MailAccount account,
+            string messageKey,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
     private sealed class FakePollingMonitor : IMailBackgroundPollingMonitor
     {
         public event EventHandler<MailNewMessageDetectedEventArgs>? MailNewMessageDetected;
@@ -335,10 +433,14 @@ public sealed class MailNotificationCoordinatorTests
     {
         public Guid? ActiveAccountId { get; set; }
         public bool IsMainWindowActive { get; set; }
+        public bool IsMainWindowVisible { get; set; } = true;
         public List<Guid> OpenedInboxAccountIds { get; } = [];
 
         public bool IsAccountActivelyViewed(Guid mailAccountId) =>
             IsMainWindowActive && ActiveAccountId == mailAccountId;
+
+        public bool IsAccountSelectedInMailUi(Guid mailAccountId) =>
+            IsMainWindowVisible && ActiveAccountId == mailAccountId;
 
         public void OpenInbox(Guid mailAccountId) => OpenedInboxAccountIds.Add(mailAccountId);
     }

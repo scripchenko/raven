@@ -15,6 +15,7 @@ public interface IMailNotificationCoordinator : IDisposable
 public interface IMailNotificationNavigation
 {
     bool IsAccountActivelyViewed(Guid mailAccountId);
+    bool IsAccountSelectedInMailUi(Guid mailAccountId);
     void OpenInbox(Guid mailAccountId);
 }
 
@@ -26,6 +27,11 @@ public sealed class MailNotificationNavigation(
     public bool IsAccountActivelyViewed(Guid mailAccountId) =>
         !mainWindowViewModel.IsSettingsOpen
         && windowActivation.IsMainWindowActive
+        && mainWindowViewModel.SelectedMailAccount?.Id == mailAccountId;
+
+    public bool IsAccountSelectedInMailUi(Guid mailAccountId) =>
+        !mainWindowViewModel.IsSettingsOpen
+        && windowActivation.IsMainWindowVisible
         && mainWindowViewModel.SelectedMailAccount?.Id == mailAccountId;
 
     public void OpenInbox(Guid mailAccountId)
@@ -120,7 +126,9 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         bool isSelectedAndActive = IsSelectedAndActive(account);
         if (account.Provider is MailProviderType.Gmail)
         {
-            _inboxFreshness.OnNewMailDetected(account.Id, isSelectedAndActive);
+            _inboxFreshness.OnNewMailDetected(
+                account.Id,
+                _navigation.IsAccountSelectedInMailUi(account.Id));
         }
 
         if (isSelectedAndActive)
