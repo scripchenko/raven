@@ -18,7 +18,44 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
     public MailComposeTemplate CreateReply(MailMessageContent source)
     {
         ArgumentNullException.ThrowIfNull(source);
-        string recipient = ResolveReplyRecipient(source);
+        return CreateReplyTemplate(source, ResolveReplyRecipient(source), string.Empty);
+    }
+
+    public MailComposeTemplate CreateReplyAll(MailMessageContent source, MailAccount account)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(account);
+
+        string primaryRecipient = ResolveReplyRecipient(source);
+        List<MailMessageAddress> to = [];
+        List<MailMessageAddress> cc = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        string ownAddress = account.EmailAddress.Trim();
+        bool primaryIsValid = TryParseValidAddresses(primaryRecipient, out IReadOnlyList<MailMessageAddress> primary);
+        if (primaryIsValid)
+        {
+            AddUniqueValidAddresses(to, primary, ownAddress, seen);
+        }
+
+        AddUniqueValidAddresses(to, source.ReplyMetadata?.OriginalTo ?? [], ownAddress, seen);
+        AddUniqueValidAddresses(cc, source.ReplyMetadata?.OriginalCc ?? [], ownAddress, seen);
+
+        string formattedTo = FormatAddresses(to);
+        if (!primaryIsValid && !string.IsNullOrWhiteSpace(primaryRecipient))
+        {
+            formattedTo = string.IsNullOrWhiteSpace(formattedTo)
+                ? primaryRecipient
+                : $"{primaryRecipient}, {formattedTo}";
+        }
+
+        return CreateReplyTemplate(source, formattedTo, FormatAddresses(cc));
+    }
+
+    private static MailComposeTemplate CreateReplyTemplate(
+        MailMessageContent source,
+        string to,
+        string cc)
+    {
         MailReplyMetadata? metadata = source.ReplyMetadata;
         List<string> references = metadata?.References
             .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -42,8 +79,8 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
                 ProviderThreadId = metadata!.ProviderThreadId
             };
         return new MailComposeTemplate(
-            recipient,
-            string.Empty,
+            to,
+            cc,
             string.Empty,
             NormalizeReplySubject(source.Subject),
             BuildReplyBody(source),
@@ -104,8 +141,39 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
         }
     }
 
-    private static bool IsValidAddressList(string value)
+    private static void AddUniqueValidAddresses(
+        ICollection<MailMessageAddress> destination,
+        IEnumerable<MailMessageAddress> candidates,
+        string ownAddress,
+        ISet<string> seen)
     {
+        foreach (MailMessageAddress candidate in candidates)
+        {
+            string address = candidate.Address.Trim();
+            if (!MailComposeRequestFactory.IsValidMailboxAddress(address)
+                || string.Equals(address, ownAddress, StringComparison.OrdinalIgnoreCase)
+                || !seen.Add(address))
+            {
+                continue;
+            }
+
+            destination.Add(new MailMessageAddress(candidate.DisplayName.Trim(), address));
+        }
+    }
+
+    private static string FormatAddresses(IEnumerable<MailMessageAddress> addresses) =>
+        string.Join(
+            ", ",
+            addresses.Select(address => new MailboxAddress(address.DisplayName, address.Address).ToString()));
+
+    private static bool IsValidAddressList(string value) =>
+        TryParseValidAddresses(value, out _);
+
+    private static bool TryParseValidAddresses(
+        string value,
+        out IReadOnlyList<MailMessageAddress> addresses)
+    {
+        addresses = [];
         if (string.IsNullOrWhiteSpace(value) || value.IndexOfAny(['\r', '\n']) >= 0)
         {
             return false;
@@ -113,11 +181,21 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
 
         try
         {
-            MailboxAddress[] addresses = InternetAddressList.Parse(value).Mailboxes.ToArray();
-            return addresses.Length > 0
-                && addresses.All(address => MailComposeRequestFactory.IsValidMailboxAddress(address.Address));
+            MailMessageAddress[] parsed = InternetAddressList.Parse(value).Mailboxes
+                .Select(address => new MailMessageAddress(
+                    address.Name?.Trim() ?? string.Empty,
+                    address.Address?.Trim() ?? string.Empty))
+                .ToArray();
+            if (parsed.Length == 0
+                || parsed.Any(address => !MailComposeRequestFactory.IsValidMailboxAddress(address.Address)))
+            {
+                return false;
+            }
+
+            addresses = parsed;
+            return true;
         }
-        catch (ParseException)
+        catch (Exception exception) when (exception is ParseException or ArgumentException)
         {
             return false;
         }

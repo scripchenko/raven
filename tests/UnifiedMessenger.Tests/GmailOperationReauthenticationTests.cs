@@ -260,6 +260,69 @@ public sealed class GmailOperationReauthenticationTests
     }
 
     [Fact]
+    public async Task ReplyAllDraft_IsPreservedAndIsNotAutomaticallySentAfterAuthenticationRecovery()
+    {
+        OperationReadProvider readProvider = new();
+        QueueSendProvider sendProvider = new(
+            AuthSendFailure(),
+            MailSendResult.Success("sent-id"));
+        MailComposeViewModel compose = CreateCompose(sendProvider);
+        RecordingReauthenticationService reauthentication = new(GmailReauthenticationResult.Success());
+        using MailInboxViewModel viewModel = CreateViewModel(readProvider, reauthentication, compose);
+        MailAccount account = Account(1);
+        await viewModel.ActivateAsync(account);
+        MailMessageContent source = Content("source", unread: false) with
+        {
+            ReplyMetadata = new MailReplyMetadata(
+                "Reply Target <reply@example.test>",
+                "source-message@example.test",
+                ["older@example.test"])
+            {
+                OriginalTo =
+                [
+                    new MailMessageAddress("Current user", account.EmailAddress),
+                    new MailMessageAddress("Second recipient", "second@example.test")
+                ],
+                OriginalCc = [new MailMessageAddress("Copy", "copy@example.test")],
+                ProviderThreadId = "thread-id"
+            }
+        };
+        await compose.ReplyAllCommand.ExecuteAsync(source);
+        compose.Draft!.AddLocalAttachments(
+        [
+            new OutgoingMailAttachment("attachment-id", "reply-all.txt", "text/plain", 4)
+        ]);
+        MailComposeDraft draft = compose.Draft;
+        string to = draft.To;
+        string cc = draft.Cc;
+        string subject = draft.Subject;
+        string body = draft.TextBody;
+        MailReplyContext? replyContext = draft.ReplyContext;
+
+        await compose.SendCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.RequiresGmailComposeReauthentication);
+        Assert.Equal(1, sendProvider.SendCount);
+        Assert.Same(draft, compose.Draft);
+
+        await viewModel.ReauthenticateGmailCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, sendProvider.SendCount);
+        Assert.Same(draft, compose.Draft);
+        Assert.Equal(to, draft.To);
+        Assert.Equal(cc, draft.Cc);
+        Assert.Equal(subject, draft.Subject);
+        Assert.Equal(body, draft.TextBody);
+        Assert.Same(replyContext, draft.ReplyContext);
+        Assert.Equal("reply-all.txt", Assert.Single(draft.Attachments).FileName);
+
+        await compose.SendCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, sendProvider.SendCount);
+        Assert.False(compose.IsOpen);
+    }
+
+    [Fact]
     public async Task GmailAuthenticationStateAndDraft_AreIsolatedPerAccount()
     {
         OperationReadProvider readProvider = new();

@@ -1373,6 +1373,11 @@ public sealed class Stage75MailSendTests
                 && (string?)element.Attribute("ToolTip") == "Ответить");
         Assert.Contains(
             view.Descendants(presentation + "Button"),
+            element => (string?)element.Attribute("Command") == "{Binding Compose.ReplyAllCommand}"
+                && (string?)element.Attribute("ToolTip") == "Ответить всем"
+                && (string?)element.Attribute("AutomationProperties.Name") == "Ответить всем");
+        Assert.Contains(
+            view.Descendants(presentation + "Button"),
             element => (string?)element.Attribute("Command") == "{Binding Compose.ForwardCommand}"
                 && (string?)element.Attribute("ToolTip") == "Переслать");
         Assert.Contains("{Binding Compose.SendButtonText}", buttonContents);

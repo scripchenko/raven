@@ -72,7 +72,11 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
                     .Where(value => value is not null)
                     .Select(value => value!)
                     .Distinct(StringComparer.Ordinal)
-                    .ToArray()))
+                    .ToArray())
+            {
+                OriginalTo = GetMailboxes(message.To),
+                OriginalCc = GetMailboxes(message.Cc)
+            })
         {
             Attachments = attachments,
             HasUnambiguousFromAddress = message.From.Count == 1 && message.From[0] is MailboxAddress
@@ -107,6 +111,14 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
                     : $"{mailbox.Name} <{mailbox.Address}>")
             .Where(value => !string.IsNullOrWhiteSpace(value)));
     }
+
+    private static IReadOnlyList<MailMessageAddress> GetMailboxes(InternetAddressList? addresses) =>
+        addresses?.Mailboxes
+            .Select(mailbox => new MailMessageAddress(
+                mailbox.Name?.Trim() ?? string.Empty,
+                mailbox.Address?.Trim() ?? string.Empty))
+            .ToArray()
+        ?? [];
 
     internal static string NormalizeSubject(string? subject) =>
         string.IsNullOrWhiteSpace(subject) ? "(без темы)" : subject.Trim();

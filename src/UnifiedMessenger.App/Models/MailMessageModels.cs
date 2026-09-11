@@ -214,11 +214,17 @@ public sealed record MailImageContent(
         $"data:{ContentType};base64,{Convert.ToBase64String(Bytes.Span)}";
 }
 
+public sealed record MailMessageAddress(
+    string DisplayName,
+    string Address);
+
 public sealed record MailReplyMetadata(
     string ReplyTo,
     string? MessageId,
     IReadOnlyList<string> References)
 {
+    public IReadOnlyList<MailMessageAddress> OriginalTo { get; init; } = [];
+    public IReadOnlyList<MailMessageAddress> OriginalCc { get; init; } = [];
     internal string? ProviderThreadId { get; init; }
 }
 

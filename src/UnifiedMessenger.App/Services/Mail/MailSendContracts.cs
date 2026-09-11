@@ -136,6 +136,7 @@ public interface IMailComposeRequestFactory
 public interface IMailComposePreparationService
 {
     MailComposeTemplate CreateReply(MailMessageContent source);
+    MailComposeTemplate CreateReplyAll(MailMessageContent source, MailAccount account);
     MailComposeTemplate CreateForward(MailMessageContent source);
 }
 

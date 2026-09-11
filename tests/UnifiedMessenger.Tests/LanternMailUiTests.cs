@@ -268,6 +268,7 @@ public sealed class LanternMailUiTests
         Assert.Contains("BackToMessageListCommand", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("SetReadStateCommand", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("Compose.ReplyCommand", detailMarkup, StringComparison.Ordinal);
+        Assert.Contains("Compose.ReplyAllCommand", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("Compose.ForwardCommand", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("Print_Click", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("CanPrintMessage", detailMarkup, StringComparison.Ordinal);
@@ -439,6 +440,7 @@ public sealed class LanternMailUiTests
             button => Assert.Equal("{Binding OpenLabelsForDetailCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding SetReadStateCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding Compose.ReplyCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding Compose.ReplyAllCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding Compose.ForwardCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("Print_Click", (string?)button.Attribute("Click")));
         Assert.Equal("Left", (string?)stack.Attribute("HorizontalAlignment"));
@@ -475,7 +477,7 @@ public sealed class LanternMailUiTests
         XElement[] vectorButtons = buttons
             .Where(button => button.Elements(presentation + "Viewbox").Any())
             .ToArray();
-        Assert.Equal(8, vectorButtons.Length);
+        Assert.Equal(9, vectorButtons.Length);
         Assert.All(vectorButtons, button =>
         {
             XElement viewbox = Assert.Single(button.Elements(presentation + "Viewbox"));
@@ -535,6 +537,8 @@ public sealed class LanternMailUiTests
 
         Assert.True(viewModel.BackToMessageListCommand.CanExecute(null));
         Assert.True(viewModel.Compose.ReplyCommand.CanExecute(viewModel.SelectedMessageContent));
+        Assert.False(viewModel.Compose.IsReplyAllAvailable);
+        Assert.False(viewModel.Compose.ReplyAllCommand.CanExecute(viewModel.SelectedMessageContent));
         Assert.True(viewModel.Compose.ForwardCommand.CanExecute(viewModel.SelectedMessageContent));
 
         viewModel.SelectedFolder = viewModel.Folders.Single(folder => folder.Kind is MailFolderKind.Drafts);

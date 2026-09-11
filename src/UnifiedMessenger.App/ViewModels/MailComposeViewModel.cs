@@ -189,6 +189,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         NewMessageCommand = new RelayCommand(StartNewMessage, CanStartNewMessage);
         RevealCopyFieldsCommand = new RelayCommand(RevealCopyFields, CanRevealCopyFields);
         ReplyCommand = new AsyncRelayCommand<MailMessageContent>(StartReplyAsync, CanPrepareFromMessage);
+        ReplyAllCommand = new AsyncRelayCommand<MailMessageContent>(StartReplyAllAsync, CanPrepareReplyAllFromMessage);
         ForwardCommand = new AsyncRelayCommand<MailMessageContent>(StartForwardAsync, CanPrepareFromMessage);
         SendCommand = new AsyncRelayCommand(SendAsync, CanSend);
         CancelCommand = new AsyncRelayCommand(CancelAsync, CanCancel);
@@ -201,6 +202,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     public IRelayCommand NewMessageCommand { get; }
     public IRelayCommand RevealCopyFieldsCommand { get; }
     public IAsyncRelayCommand<MailMessageContent> ReplyCommand { get; }
+    public IAsyncRelayCommand<MailMessageContent> ReplyAllCommand { get; }
     public IAsyncRelayCommand<MailMessageContent> ForwardCommand { get; }
     public IAsyncRelayCommand SendCommand { get; }
     public IAsyncRelayCommand CancelCommand { get; }
@@ -215,6 +217,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _activeAccount, value))
             {
                 OnPropertyChanged(nameof(FromAddress));
+                OnPropertyChanged(nameof(IsReplyAllAvailable));
                 OnPropertyChanged(nameof(RequiresGmailReauthentication));
                 NotifyOpenState();
                 NotifyCommandStates();
@@ -296,6 +299,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         && HasError;
     public bool CanEdit => IsOpen && !IsSending;
     public string FromAddress => ActiveAccount?.EmailAddress ?? string.Empty;
+    public bool IsReplyAllAvailable => ActiveAccount?.Provider is MailProviderType.Gmail;
     public string SendButtonText => IsSending ? "Отправляем…" : "Отправить";
     internal int DraftCount => _drafts.Count;
 
@@ -553,9 +557,23 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task StartReplyAllAsync(MailMessageContent? source)
+    {
+        if (source is not null && ActiveAccount is MailAccount account)
+        {
+            MailComposeTemplate template = _preparationService.CreateReplyAll(source, account);
+            if (!string.IsNullOrWhiteSpace(template.To) || !string.IsNullOrWhiteSpace(template.Cc))
+            {
+                await ReplaceWithTemplateAsync(template);
+            }
+        }
+    }
+
     private bool CanStartNewMessage() => ActiveAccount is not null && !IsSending;
     private bool CanRevealCopyFields() => Draft is { AreCopyFieldsVisible: false } && !IsSending;
     private bool CanPrepareFromMessage(MailMessageContent? source) => ActiveAccount is not null && source is not null && !IsSending;
+    private bool CanPrepareReplyAllFromMessage(MailMessageContent? source) =>
+        IsReplyAllAvailable && source is not null && !IsSending;
     private bool CanSend() => IsOpen && !IsSending;
     private bool CanCancel() => IsOpen && !IsSending;
     private bool CanAttachFiles() => IsOpen && !IsSending && _attachmentDialogService is not null;
@@ -566,6 +584,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         NewMessageCommand.NotifyCanExecuteChanged();
         RevealCopyFieldsCommand.NotifyCanExecuteChanged();
         ReplyCommand.NotifyCanExecuteChanged();
+        ReplyAllCommand.NotifyCanExecuteChanged();
         ForwardCommand.NotifyCanExecuteChanged();
         SendCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
