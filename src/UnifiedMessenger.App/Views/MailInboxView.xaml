@@ -7,10 +7,18 @@
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
 
         <Geometry x:Key="MailFolderInboxGeometry">M2,3 L16,3 16,15 2,15 Z M2,10 L6,10 7.5,12 10.5,12 12,10 16,10</Geometry>
+        <Geometry x:Key="MailFolderStarredGeometry">M9,1.8 L11.2,6.2 16.1,6.9 12.5,10.4 13.4,15.3 9,13 4.6,15.3 5.5,10.4 1.9,6.9 6.8,6.2 Z</Geometry>
         <Geometry x:Key="MailFolderSentGeometry">M2,9 L16,2 11,16 8,10 Z M8,10 L16,2</Geometry>
         <Geometry x:Key="MailFolderDraftGeometry">M4,2 L11,2 15,6 15,16 4,16 Z M11,2 L11,6 15,6 M7,9 L12,9 M7,12 L12,12</Geometry>
         <Geometry x:Key="MailFolderSpamGeometry">M9,2 L17,16 1,16 Z M9,7 L9,11 M9,13 L9,14</Geometry>
         <Geometry x:Key="MailFolderTrashGeometry">M4,5 L14,5 13,16 5,16 Z M3,5 L15,5 M6,5 L6,3 12,3 12,5 M7,8 L7,13 M11,8 L11,13</Geometry>
+        <Geometry x:Key="MailActionArchiveGeometry">M4,5 L20,5 L20,9 L4,9 Z M6,9 L6,20 L18,20 L18,9 M12,11 L12,17 M9,14 L12,17 L15,14</Geometry>
+        <Geometry x:Key="MailActionTrashGeometry">M4,7 L20,7 M9,4 L15,4 L16,7 M7,7 L8,20 L16,20 L17,7 M10,10 L10.5,17 M14,10 L13.5,17</Geometry>
+        <Geometry x:Key="MailActionMarkReadGeometry">M3.5,10 L12,4 L20.5,10 L20.5,19.5 L3.5,19.5 Z M4,10 L12,16 L20,10</Geometry>
+        <Geometry x:Key="MailActionMarkUnreadGeometry">M3.5,6.5 L20.5,6.5 L20.5,17.5 L3.5,17.5 Z M4,7 L12,13 L20,7</Geometry>
+        <Geometry x:Key="MailActionLabelGeometry">M4,5 L13,5 L20,12 L12,20 L4,12 Z M8,9 L8.1,9</Geometry>
+        <Geometry x:Key="MailActionClearSelectionGeometry">M6,6 L18,18 M18,6 L6,18</Geometry>
+        <Geometry x:Key="MailActionRefreshGeometry">M20,4 L20,10 L14,10 M20,10 A8,8 0 0 0 6.3,5.3 M4,20 L4,14 L10,14 M4,14 A8,8 0 0 0 17.7,18.7</Geometry>
 
         <Style x:Key="MailFolderItemStyle" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="0,1" />
@@ -152,6 +160,40 @@
             <Setter Property="StretchDirection" Value="Both" />
         </Style>
 
+        <Style x:Key="MailActionToolbarButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="MinWidth" Value="32" />
+            <Setter Property="Margin" Value="3,0,0,0" />
+            <Setter Property="Padding" Value="9,0" />
+            <Setter Property="Foreground" Value="#FF34445A" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ActionBackground"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ActionBackground" Property="Background" Value="#FFF0F3F7" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="MailComposeButtonStyle" TargetType="Button">
             <Setter Property="MinHeight" Value="46" />
             <Setter Property="Padding" Value="16,0" />
@@ -260,6 +302,9 @@
                                 <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Sent}">
                                     <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderSentGeometry}" />
                                 </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Starred}">
+                                    <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderStarredGeometry}" />
+                                </DataTrigger>
                                 <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Drafts}">
                                     <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderDraftGeometry}" />
                                 </DataTrigger>
@@ -291,15 +336,123 @@
                         Background="White"
                         BorderBrush="{DynamicResource DividerBrush}"
                         BorderThickness="0,0,0,1">
-                    <Button Width="34"
-                            Height="34"
-                            HorizontalAlignment="Left"
-                            AutomationProperties.Name="Обновить"
-                            Command="{Binding RefreshCommand}"
-                            Content="↻"
-                            FontSize="18"
-                            Style="{StaticResource ToolbarButtonStyle}"
-                            ToolTip="Обновить" />
+                    <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center" Orientation="Horizontal">
+                        <CheckBox Margin="0,0,8,0"
+                                  VerticalAlignment="Center"
+                                  AutomationProperties.Name="Выбрать все загруженные письма"
+                                  Command="{Binding SelectAllLoadedCommand}"
+                                  IsChecked="{Binding LoadedSelectionState, Mode=OneWay}"
+                                  IsThreeState="True"
+                                  ToolTip="Выбрать все загруженные письма"
+                                  Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Button Margin="0,0,4,0"
+                                AutomationProperties.Name="Обновить"
+                                Command="{Binding RefreshCommand}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Обновить">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="{StaticResource MailActionRefreshGeometry}"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeThickness="1.8" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <StackPanel Orientation="Horizontal"
+                                    Visibility="{Binding HasSelectedMessages, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="Архивировать"
+                                    Command="{Binding ArchiveSelectedCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="Архивировать">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionArchiveGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.6" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="Удалить"
+                                    Command="{Binding DeleteSelectedCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="Удалить">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionTrashGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.6" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="Пометить как прочитанное"
+                                    Command="{Binding MarkSelectedReadCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="Пометить как прочитанное">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionMarkReadGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.65" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="Пометить как непрочитанное"
+                                    Command="{Binding MarkSelectedUnreadCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="Пометить как непрочитанное">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionMarkUnreadGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.65" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="{Binding SelectedStarActionText}"
+                                    Command="{Binding ToggleSelectedStarCommand}"
+                                    FontSize="20"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="{Binding SelectedStarActionText}">
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="☆" />
+                                            <Setter Property="Foreground" Value="#FF6B7280" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding AreAllSelectedMessagesStarred}" Value="True">
+                                                    <Setter Property="Text" Value="★" />
+                                                    <Setter Property="Foreground" Value="#FFF4B400" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="Ярлыки"
+                                    Command="{Binding OpenLabelsForSelectionCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="Ярлыки">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionLabelGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.7" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="Снять выделение"
+                                    Command="{Binding ClearSelectionCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="Снять выделение">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionClearSelectionGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeThickness="1.7" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
                 </Border>
 
                 <ListBox Grid.Row="1"
@@ -326,7 +479,51 @@
                     </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Button x:Name="MessageButton"
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <CheckBox Margin="8,0"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          AutomationProperties.Name="Выбрать письмо"
+                                          Command="{Binding DataContext.ToggleMessageSelectionCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                          CommandParameter="{Binding}"
+                                          IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                          Visibility="{Binding DataContext.IsGmailMailboxAvailable, RelativeSource={RelativeSource AncestorType=ListBox}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <Button Grid.Column="1"
+                                         Width="32"
+                                         Height="32"
+                                         Margin="4,0"
+                                         HorizontalAlignment="Center"
+                                         Padding="0"
+                                         VerticalAlignment="Center"
+                                         AutomationProperties.Name="{Binding StarActionText}"
+                                         Command="{Binding DataContext.ToggleStarCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                         CommandParameter="{Binding}"
+                                         FontSize="20"
+                                         Style="{StaticResource MailActionToolbarButtonStyle}"
+                                         ToolTip="{Binding StarActionText}"
+                                         Visibility="{Binding DataContext.IsGmailMailboxAvailable, RelativeSource={RelativeSource AncestorType=ListBox}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="☆" />
+                                                <Setter Property="Foreground" Value="#FF6B7280" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsStarred}" Value="True">
+                                                        <Setter Property="Text" Value="★" />
+                                                        <Setter Property="Foreground" Value="#FFF4B400" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Button>
+                                <Button x:Name="MessageButton"
+                                    Grid.Column="2"
                                     Command="{Binding DataContext.OpenMessageCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                     CommandParameter="{Binding}"
                                     Style="{StaticResource MailMessageButtonStyle}">
@@ -468,12 +665,16 @@
                                                    Text="{Binding DisplayDate}" />
                                     </Grid>
                                 </Border>
-                            </Button>
+                                </Button>
+                            </Grid>
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsUnread}" Value="True">
                                     <Setter TargetName="MessageButton" Property="Background" Value="#FFF2F6FC" />
                                     <Setter TargetName="SenderText" Property="FontWeight" Value="SemiBold" />
                                     <Setter TargetName="SubjectText" Property="FontWeight" Value="SemiBold" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                    <Setter TargetName="MessageButton" Property="Background" Value="#FFE7F0FF" />
                                 </DataTrigger>
                             </DataTemplate.Triggers>
                         </DataTemplate>
@@ -483,6 +684,13 @@
                 <StackPanel Grid.Row="2"
                             Margin="18,10"
                             HorizontalAlignment="Center">
+                    <TextBlock MaxWidth="560"
+                               Margin="0,0,0,8"
+                               Foreground="#FFB42318"
+                               Text="{Binding MailboxActionErrorMessage}"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               Visibility="{Binding HasMailboxActionError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <TextBlock MaxWidth="560"
                                Margin="0,0,0,8"
                                Foreground="#FFB42318"
@@ -516,6 +724,11 @@
                             Content="Войти в Google"
                             Style="{StaticResource PrimaryButtonStyle}"
                             Visibility="{Binding RequiresGmailReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Margin="0,0,0,8"
+                            Command="{Binding AuthorizeGmailCommand}"
+                            Content="Разрешить управление почтой"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Visibility="{Binding RequiresGmailAuthorization, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Command="{Binding LoadMoreCommand}"
                             Content="Загрузить ещё"
                             Style="{StaticResource MailSecondaryButtonStyle}"
@@ -611,6 +824,83 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="Архивировать"
+                                Command="{Binding ArchiveDetailCommand}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Архивировать"
+                                Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="{StaticResource MailActionArchiveGeometry}"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeThickness="1.6" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="Удалить"
+                                Command="{Binding DeleteDetailCommand}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Удалить"
+                                Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="{StaticResource MailActionTrashGeometry}"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeThickness="1.6" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="{Binding DetailStarActionText}"
+                                Command="{Binding ToggleStarCommand}"
+                                CommandParameter="{Binding SelectedMessageSummary}"
+                                FontSize="20"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="{Binding DetailStarActionText}"
+                                Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock>
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="☆" />
+                                        <Setter Property="Foreground" Value="#FF6B7280" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedMessageSummary.IsStarred}" Value="True">
+                                                <Setter Property="Text" Value="★" />
+                                                <Setter Property="Foreground" Value="#FFF4B400" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="Ярлыки"
+                                Command="{Binding OpenLabelsForDetailCommand}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Ярлыки"
+                                Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="{StaticResource MailActionLabelGeometry}"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeThickness="1.7" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
                                 AutomationProperties.Name="{Binding ReadStateActionText}"
                                 Command="{Binding SetReadStateCommand}"
                                 IsEnabled="{Binding CanChangeReadState}"
@@ -627,10 +917,10 @@
                                           StrokeThickness="1.65">
                                         <Path.Style>
                                             <Style TargetType="Path">
-                                                <Setter Property="Data" Value="M3.5,6.5 L20.5,6.5 L20.5,17.5 L3.5,17.5 Z M4,7 L12,13 L20,7" />
+                                                <Setter Property="Data" Value="{StaticResource MailActionMarkUnreadGeometry}" />
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding SelectedMessageSummary.IsUnread}" Value="True">
-                                                        <Setter Property="Data" Value="M3.5,10 L12,4 L20.5,10 L20.5,19.5 L3.5,19.5 Z M4,10 L12,16 L20,10" />
+                                                        <Setter Property="Data" Value="{StaticResource MailActionMarkReadGeometry}" />
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -804,6 +1094,17 @@
                                        Text="{Binding ReadStateErrorMessage}"
                                        TextWrapping="Wrap"
                                        Visibility="{Binding HasReadStateError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <TextBlock Margin="0,8,0,0"
+                                       Foreground="#FFB42318"
+                                       Text="{Binding MailboxActionErrorMessage}"
+                                       TextWrapping="Wrap"
+                                       Visibility="{Binding HasMailboxActionError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Margin="0,8,0,0"
+                                    HorizontalAlignment="Left"
+                                    Command="{Binding ReauthenticateGmailCommand}"
+                                    Content="Войти в Google"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Visibility="{Binding RequiresGmailReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,8,0,0"
                                     HorizontalAlignment="Left"
                                     Command="{Binding ReauthenticateGmailCommand}"
@@ -1123,6 +1424,82 @@
                     </Grid>
                 </Border>
             </Grid>
+
+            <Border Panel.ZIndex="100"
+                    Width="320"
+                    MaxHeight="420"
+                    Margin="56,48,0,0"
+                    Padding="14"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Background="White"
+                    BorderBrush="#FFD5DAE1"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Visibility="{Binding IsLabelMenuOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="18" Opacity="0.18" ShadowDepth="3" />
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock FontSize="15"
+                               FontWeight="SemiBold"
+                               Text="{Binding LabelMenuTitle}" />
+                    <ScrollViewer Grid.Row="1"
+                                  MaxHeight="300"
+                                  Margin="0,10,0,10"
+                                  VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding UserLabels}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Margin="0,1"
+                                            Padding="8,6"
+                                            HorizontalContentAlignment="Left"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Command="{Binding DataContext.ToggleUserLabelCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <CheckBox Margin="0,0,8,0"
+                                                      VerticalAlignment="Center"
+                                                      IsChecked="{Binding IsApplied, Mode=OneWay}"
+                                                      IsHitTestVisible="False"
+                                                      IsThreeState="True" />
+                                            <TextBlock VerticalAlignment="Center"
+                                                       Text="{Binding DisplayName}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="1"
+                               Margin="0,12"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               Text="Пользовательских ярлыков нет.">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasUserLabels}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <Button Grid.Row="2"
+                            HorizontalAlignment="Right"
+                            Command="{Binding CloseLabelsCommand}"
+                            Content="Готово"
+                            Style="{StaticResource MailSecondaryButtonStyle}" />
+                </Grid>
+            </Border>
         </Grid>
     </Grid>
 </UserControl>

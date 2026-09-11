@@ -12,6 +12,7 @@ public sealed class Stage74MailFoldersReadStateTests
 {
     [Theory]
     [InlineData("INBOX", MailFolderKind.Inbox, "Входящие")]
+    [InlineData("STARRED", MailFolderKind.Starred, "Помеченные")]
     [InlineData("SENT", MailFolderKind.Sent, "Отправленные")]
     [InlineData("DRAFT", MailFolderKind.Drafts, "Черновики")]
     [InlineData("SPAM", MailFolderKind.Spam, "Спам")]
@@ -42,18 +43,19 @@ public sealed class Stage74MailFoldersReadStateTests
     {
         FakeGmailClient client = new()
         {
-            Labels = new HashSet<string>(["INBOX", "SENT", "DRAFT", "SPAM", "TRASH", "CATEGORY_SOCIAL"])
+            Labels = new HashSet<string>(["INBOX", "STARRED", "SENT", "DRAFT", "SPAM", "TRASH", "CATEGORY_SOCIAL"])
         };
         GmailMailReadProvider provider = CreateGmailProvider(client, modifyScope: false);
 
         IReadOnlyList<MailFolder> folders = await provider.GetFoldersAsync(GmailAccount());
 
-        Assert.Equal(5, folders.Count);
+        Assert.Equal(6, folders.Count);
         Assert.DoesNotContain(folders, folder => folder.ProviderLocator == "CATEGORY_SOCIAL");
     }
 
     [Theory]
     [InlineData(MailFolderKind.Inbox, "INBOX", false)]
+    [InlineData(MailFolderKind.Starred, "STARRED", false)]
     [InlineData(MailFolderKind.Sent, "SENT", false)]
     [InlineData(MailFolderKind.Drafts, "DRAFT", false)]
     [InlineData(MailFolderKind.Spam, "SPAM", true)]

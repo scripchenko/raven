@@ -35,6 +35,10 @@ internal sealed record GmailApiInboxTechnicalSnapshot(
     IReadOnlyList<string> MessageIds);
 
 internal sealed record GmailApiRawMessage(byte[] RawMime, bool IsUnread, string? ThreadId = null);
+internal sealed record GmailApiUserLabel(string Id, string Name);
+internal sealed record GmailApiTrashResult(
+    IReadOnlySet<string> SucceededMessageIds,
+    IReadOnlyDictionary<string, Exception> FailedMessages);
 
 internal interface IGmailApiReadClient
 {
@@ -97,24 +101,54 @@ internal interface IGmailApiReadClient
             new MailReadException(
                 MailReadFailureKind.MutationFailed,
                 "Не удалось изменить статус письма Gmail."));
+
+}
+
+internal interface IGmailMailboxApiClient
+{
+    Task<IReadOnlyList<GmailApiUserLabel>> GetUserLabelsAsync(
+        MailCredential credential,
+        Guid accountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<GmailApiUserLabel>>([]);
+
+    Task ModifyLabelsAsync(
+        MailCredential credential,
+        Guid accountId,
+        IReadOnlyCollection<string> messageIds,
+        IReadOnlyCollection<string> addLabelIds,
+        IReadOnlyCollection<string> removeLabelIds,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException(new NotSupportedException());
+
+    Task<GmailApiTrashResult> MoveToTrashAsync(
+        MailCredential credential,
+        Guid accountId,
+        IReadOnlyCollection<string> messageIds,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new GmailApiTrashResult(
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, Exception>(StringComparer.Ordinal)));
 }
 
 internal static class GmailSystemFolders
 {
     public const string Inbox = "INBOX";
+    public const string Starred = "STARRED";
     public const string Sent = "SENT";
     public const string Draft = "DRAFT";
     public const string Spam = "SPAM";
     public const string Trash = "TRASH";
     public const string Unread = "UNREAD";
 
-    public static IReadOnlyList<string> LabelIds { get; } = [Inbox, Sent, Draft, Spam, Trash];
+    public static IReadOnlyList<string> LabelIds { get; } = [Inbox, Starred, Sent, Draft, Spam, Trash];
 
     public static IReadOnlyList<MailFolder> Map(IReadOnlySet<string> availableLabels)
     {
         (MailFolderKind Kind, string Label)[] definitions =
         [
             (MailFolderKind.Inbox, Inbox),
+            (MailFolderKind.Starred, Starred),
             (MailFolderKind.Sent, Sent),
             (MailFolderKind.Drafts, Draft),
             (MailFolderKind.Spam, Spam),
@@ -374,7 +408,9 @@ internal sealed class GmailMailReadProvider(
             MailContentExtractor.NormalizePreview(WebUtility.HtmlDecode(item.Snippet ?? string.Empty)),
             item.LabelIds.Contains(GmailSystemFolders.Unread, StringComparer.Ordinal))
         {
-            AttachmentSummary = item.AttachmentSummary
+            AttachmentSummary = item.AttachmentSummary,
+            IsStarred = item.LabelIds.Contains(GmailSystemFolders.Starred, StringComparer.Ordinal),
+            ProviderLabelIds = item.LabelIds.ToHashSet(StringComparer.Ordinal)
         };
     }
 
@@ -407,7 +443,7 @@ internal sealed class GmailMailReadProvider(
         }
     }
 
-    private static string ParseMessageKey(string messageKey)
+    internal static string ParseMessageKey(string messageKey)
     {
         if (string.IsNullOrWhiteSpace(messageKey)
             || !messageKey.StartsWith(MessageKeyPrefix, StringComparison.Ordinal)
@@ -437,9 +473,10 @@ internal sealed class GmailMailReadProvider(
     }
 }
 
-internal sealed class GmailApiReadClient : IGmailApiReadClient
+internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApiClient
 {
     internal const int MaximumMetadataConcurrency = 5;
+    internal const int MaximumTrashConcurrency = 4;
     internal const int MetadataMimeTreeDepth = 8;
     internal const int BackgroundSnapshotMessageLimit = 100;
     internal const string InboxLabel = GmailSystemFolders.Inbox;
@@ -633,10 +670,13 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
     {
         try
         {
-            using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(credential, accountId, cancellationToken);
-            GmailService service = session.Service;
-            ModifyMessageRequest body = CreateReadStateRequest(isRead);
-            await service.Users.Messages.Modify(body, "me", messageId).ExecuteAsync(cancellationToken);
+            await ModifyLabelsAsync(
+                credential,
+                accountId,
+                [messageId],
+                isRead ? [] : [GmailSystemFolders.Unread],
+                isRead ? [GmailSystemFolders.Unread] : [],
+                cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -650,6 +690,108 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient
         {
             throw new MailReadException(MailReadFailureKind.MutationFailed, "Не удалось изменить статус письма Gmail.");
         }
+    }
+
+    public async Task<IReadOnlyList<GmailApiUserLabel>> GetUserLabelsAsync(
+        MailCredential credential,
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(
+            credential,
+            accountId,
+            cancellationToken);
+        ListLabelsResponse response = await session.Service.Users.Labels.List("me").ExecuteAsync(cancellationToken);
+        return response.Labels?
+            .Where(label => label.Type is "user"
+                && !string.IsNullOrWhiteSpace(label.Id)
+                && !string.IsNullOrWhiteSpace(label.Name))
+            .Select(label => new GmailApiUserLabel(label.Id, label.Name))
+            .OrderBy(label => label.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray()
+            ?? [];
+    }
+
+    public async Task ModifyLabelsAsync(
+        MailCredential credential,
+        Guid accountId,
+        IReadOnlyCollection<string> messageIds,
+        IReadOnlyCollection<string> addLabelIds,
+        IReadOnlyCollection<string> removeLabelIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (messageIds.Count == 0)
+        {
+            return;
+        }
+
+        using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(
+            credential,
+            accountId,
+            cancellationToken);
+        if (messageIds.Count == 1)
+        {
+            ModifyMessageRequest body = new()
+            {
+                AddLabelIds = addLabelIds.ToArray(),
+                RemoveLabelIds = removeLabelIds.ToArray()
+            };
+            await session.Service.Users.Messages.Modify(body, "me", messageIds.Single())
+                .ExecuteAsync(cancellationToken);
+            return;
+        }
+
+        BatchModifyMessagesRequest batch = new()
+        {
+            Ids = messageIds.ToArray(),
+            AddLabelIds = addLabelIds.ToArray(),
+            RemoveLabelIds = removeLabelIds.ToArray()
+        };
+        await session.Service.Users.Messages.BatchModify(batch, "me").ExecuteAsync(cancellationToken);
+    }
+
+    public async Task<GmailApiTrashResult> MoveToTrashAsync(
+        MailCredential credential,
+        Guid accountId,
+        IReadOnlyCollection<string> messageIds,
+        CancellationToken cancellationToken = default)
+    {
+        using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(
+            credential,
+            accountId,
+            cancellationToken);
+        using SemaphoreSlim gate = new(MaximumTrashConcurrency, MaximumTrashConcurrency);
+        Task<(string Id, Exception? Error)>[] tasks = messageIds
+            .Distinct(StringComparer.Ordinal)
+            .Select(async messageId =>
+            {
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    await session.Service.Users.Messages.Trash("me", messageId).ExecuteAsync(cancellationToken);
+                    return (messageId, (Exception?)null);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    return (messageId, exception);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            })
+            .ToArray();
+        (string Id, Exception? Error)[] outcomes = await Task.WhenAll(tasks);
+        return new GmailApiTrashResult(
+            outcomes.Where(item => item.Error is null).Select(item => item.Id).ToHashSet(StringComparer.Ordinal),
+            outcomes.Where(item => item.Error is not null).ToDictionary(
+                item => item.Id,
+                item => item.Error!,
+                StringComparer.Ordinal));
     }
 
     internal static byte[] DecodeBase64Url(string value)

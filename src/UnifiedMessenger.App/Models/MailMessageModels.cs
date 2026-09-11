@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace UnifiedMessenger.App.Models;
 
 public sealed record MailMessageSummary(
@@ -7,11 +9,33 @@ public sealed record MailMessageSummary(
     string FromAddress,
     DateTimeOffset ReceivedAt,
     string Preview,
-    bool IsUnread)
+    bool IsUnread) : INotifyPropertyChanged
 {
+    private bool _isSelected;
+
     public MailMessageAttachmentSummary AttachmentSummary { get; init; } = MailMessageAttachmentSummary.Empty;
+    public bool IsStarred { get; init; }
+    internal IReadOnlySet<string> ProviderLabelIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value)
+            {
+                return;
+            }
+
+            _isSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     public bool HasAttachments => AttachmentSummary.Count > 0;
+    public string StarActionText => IsStarred ? "Снять пометку" : "Пометить";
     public int AttachmentCount => AttachmentSummary.Count;
     public IReadOnlyList<MailAttachmentPreviewItem> AttachmentPreviewItems => AttachmentSummary.PreviewItems;
     public bool HasMoreAttachments => AttachmentSummary.RemainingCount > 0;

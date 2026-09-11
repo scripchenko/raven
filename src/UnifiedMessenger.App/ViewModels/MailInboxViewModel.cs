@@ -23,6 +23,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public static readonly TimeSpan MailReadDwellDelay = TimeSpan.FromSeconds(3);
 
     private readonly IMailReadProviderFactory _providerFactory;
+    private readonly IGmailMailboxManagementService? _gmailMailboxService;
     private readonly IMailAttachmentSaveService? _attachmentSaveService;
     private readonly MailMessageSourceCache? _messageSourceCache;
     private readonly IMailReadDwellScheduler _readDwellScheduler;
@@ -31,6 +32,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private readonly Dictionary<Guid, AccountFolderState> _accountFolderStates = [];
     private readonly Dictionary<Guid, InboxFreshnessState> _inboxFreshnessStates = [];
     private readonly HashSet<Guid> _gmailReauthenticationRequiredAccounts = [];
+    private readonly HashSet<string> _labelMenuMessageKeys = new(StringComparer.Ordinal);
     private readonly BoundedLruCache<MessageBodyCacheKey, MailMessageContent> _messageBodyCache =
         new(MessageBodyCacheCapacity);
     private readonly BoundedLruCache<RemoteImageConsentKey, bool> _remoteImageConsents =
@@ -54,12 +56,17 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private bool _canTrustCurrentRemoteImageSender;
     private bool _isReadStateChanging;
     private bool _isGmailReauthenticating;
+    private bool _isMailboxChanging;
+    private bool _requiresMailboxAuthorization;
+    private bool _isLabelMenuOpen;
+    private bool _labelMenuTargetsDetail;
     private bool _hasLoaded;
     private string? _listErrorMessage;
     private string? _messageErrorMessage;
     private string? _readStateErrorMessage;
     private string? _authorizationMessage;
     private string? _gmailReauthenticationErrorMessage;
+    private string? _mailboxActionErrorMessage;
     private string? _attachmentStatusMessage;
     private bool _isAttachmentSaving;
     private MailReadFailureKind? _failureKind;
@@ -104,6 +111,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         IRemoteImageSenderTrustStore? remoteImageSenderTrustStore = null)
     {
         _providerFactory = providerFactory;
+        _gmailMailboxService = providerFactory.GmailMailboxManagementService;
         _attachmentSaveService = attachmentSaveService;
         _messageSourceCache = messageSourceCache;
         _readDwellScheduler = readDwellScheduler;
@@ -121,10 +129,26 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         SaveAttachmentCommand = new AsyncRelayCommand<MailAttachmentInfo>(SaveAttachmentAsync, CanSaveAttachment);
         OpenMessageCommand = new RelayCommand<MailMessageSummary>(OpenMessage, CanOpenMessage);
         BackToMessageListCommand = new RelayCommand(ShowMessageList, CanShowMessageList);
+        ToggleMessageSelectionCommand = new RelayCommand<MailMessageSummary>(ToggleMessageSelection, CanToggleMessageSelection);
+        SelectAllLoadedCommand = new RelayCommand(ToggleSelectAllLoaded, CanSelectAllLoaded);
+        ClearSelectionCommand = new RelayCommand(ClearSelection, () => HasSelectedMessages);
+        ToggleStarCommand = new AsyncRelayCommand<MailMessageSummary>(ToggleStarAsync, CanMutateMessage);
+        ToggleSelectedStarCommand = new AsyncRelayCommand(ToggleSelectedStarAsync, CanMutateSelection);
+        ArchiveSelectedCommand = new AsyncRelayCommand(ArchiveSelectedAsync, CanArchiveSelection);
+        ArchiveDetailCommand = new AsyncRelayCommand(ArchiveDetailAsync, CanArchiveDetail);
+        DeleteSelectedCommand = new AsyncRelayCommand(DeleteSelectedAsync, CanDeleteSelection);
+        DeleteDetailCommand = new AsyncRelayCommand(DeleteDetailAsync, CanDeleteDetail);
+        MarkSelectedReadCommand = new AsyncRelayCommand(() => SetSelectedReadStateAsync(true), CanChangeSelectedReadState);
+        MarkSelectedUnreadCommand = new AsyncRelayCommand(() => SetSelectedReadStateAsync(false), CanChangeSelectedReadState);
+        OpenLabelsForSelectionCommand = new AsyncRelayCommand(() => OpenLabelsAsync(targetsDetail: false), CanMutateSelection);
+        OpenLabelsForDetailCommand = new AsyncRelayCommand(() => OpenLabelsAsync(targetsDetail: true), CanMutateDetail);
+        ToggleUserLabelCommand = new AsyncRelayCommand<GmailUserLabelOption>(ToggleUserLabelAsync, CanToggleUserLabel);
+        CloseLabelsCommand = new RelayCommand(CloseLabels);
     }
 
     public ObservableCollection<MailFolder> Folders { get; } = [];
     public ObservableCollection<MailMessageSummary> Messages { get; } = [];
+    public ObservableCollection<GmailUserLabelOption> UserLabels { get; } = [];
     public MailComposeViewModel Compose { get; }
 
     public IAsyncRelayCommand RefreshCommand { get; }
@@ -137,6 +161,21 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public IAsyncRelayCommand<MailAttachmentInfo> SaveAttachmentCommand { get; }
     public IRelayCommand<MailMessageSummary> OpenMessageCommand { get; }
     public IRelayCommand BackToMessageListCommand { get; }
+    public IRelayCommand<MailMessageSummary> ToggleMessageSelectionCommand { get; }
+    public IRelayCommand SelectAllLoadedCommand { get; }
+    public IRelayCommand ClearSelectionCommand { get; }
+    public IAsyncRelayCommand<MailMessageSummary> ToggleStarCommand { get; }
+    public IAsyncRelayCommand ToggleSelectedStarCommand { get; }
+    public IAsyncRelayCommand ArchiveSelectedCommand { get; }
+    public IAsyncRelayCommand ArchiveDetailCommand { get; }
+    public IAsyncRelayCommand DeleteSelectedCommand { get; }
+    public IAsyncRelayCommand DeleteDetailCommand { get; }
+    public IAsyncRelayCommand MarkSelectedReadCommand { get; }
+    public IAsyncRelayCommand MarkSelectedUnreadCommand { get; }
+    public IAsyncRelayCommand OpenLabelsForSelectionCommand { get; }
+    public IAsyncRelayCommand OpenLabelsForDetailCommand { get; }
+    public IAsyncRelayCommand<GmailUserLabelOption> ToggleUserLabelCommand { get; }
+    public IRelayCommand CloseLabelsCommand { get; }
 
     internal Task CurrentMessageLoadTask { get; private set; } = Task.CompletedTask;
     internal Task CurrentFolderLoadTask { get; private set; } = Task.CompletedTask;
@@ -164,6 +203,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 OnPropertyChanged(nameof(AccountDisplayName));
                 OnPropertyChanged(nameof(ProviderDisplayName));
                 OnPropertyChanged(nameof(EmailAddress));
+                OnPropertyChanged(nameof(IsGmailMailboxAvailable));
+                OnPropertyChanged(nameof(CanUseMailboxActions));
                 OnPropertyChanged(nameof(RequiresGmailReauthentication));
                 OnPropertyChanged(nameof(RequiresGmailMessageReauthentication));
                 OnPropertyChanged(nameof(RequiresGmailReadStateReauthentication));
@@ -190,6 +231,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
             AccountFolderState catalog = GetAccountFolderState(ActiveAccount.Id);
             catalog.SelectedFolderKey = value.Key;
+            ClearSelectionsForAccount(ActiveAccount.Id);
+            CloseLabels();
+            OnPropertyChanged(nameof(CanDeleteCurrentFolder));
             CancelReadDwell(resetDetailSession: true);
             CurrentFolderLoadTask = SwitchFolderAsync(ActiveAccount, value);
         }
@@ -207,6 +251,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
             CancelReadDwell(resetDetailSession: true);
             OnPropertyChanged(nameof(HasSelectedMessage));
+            OnPropertyChanged(nameof(DetailStarActionText));
+            NotifyMailboxCommandStates();
             RaiseReadStateChanged();
             if (_isApplyingState || ActiveAccount is null || SelectedFolder is null)
             {
@@ -275,6 +321,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 }
 
                 RaiseReadStateChanged();
+                NotifyMailboxCommandStates();
                 SaveAttachmentCommand.NotifyCanExecuteChanged();
                 UpdateReadDwellState();
             }
@@ -327,6 +374,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 OnPropertyChanged(nameof(ShowPrintAction));
                 OnPropertyChanged(nameof(CanPrintMessage));
                 RetryMessageCommand.NotifyCanExecuteChanged();
+                NotifyMailboxCommandStates();
             }
         }
     }
@@ -351,6 +399,37 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _isGmailReauthenticating, value))
             {
                 ReauthenticateGmailCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool IsMailboxChanging
+    {
+        get => _isMailboxChanging;
+        private set
+        {
+            if (SetProperty(ref _isMailboxChanging, value))
+            {
+                OnPropertyChanged(nameof(CanUseMailboxActions));
+                NotifyMailboxCommandStates();
+            }
+        }
+    }
+
+    public bool IsLabelMenuOpen
+    {
+        get => _isLabelMenuOpen;
+        private set => SetProperty(ref _isLabelMenuOpen, value);
+    }
+
+    public string? MailboxActionErrorMessage
+    {
+        get => _mailboxActionErrorMessage;
+        private set
+        {
+            if (SetProperty(ref _mailboxActionErrorMessage, value))
+            {
+                OnPropertyChanged(nameof(HasMailboxActionError));
             }
         }
     }
@@ -393,6 +472,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 OnPropertyChanged(nameof(ShowPrintAction));
                 OnPropertyChanged(nameof(CanPrintMessage));
                 RetryMessageCommand.NotifyCanExecuteChanged();
+                NotifyMailboxCommandStates();
             }
         }
     }
@@ -487,6 +567,29 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     }
 
     public bool IsActive => ActiveAccount is { IsEnabled: true };
+    public bool IsGmailMailboxAvailable =>
+        ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }
+        && _gmailMailboxService is not null;
+    public bool CanUseMailboxActions => IsGmailMailboxAvailable && !IsMailboxChanging;
+    public int SelectedMessageCount => Messages.Count(message => message.IsSelected);
+    public bool HasSelectedMessages => SelectedMessageCount > 0;
+    public bool AreAllLoadedMessagesSelected => Messages.Count > 0 && Messages.All(message => message.IsSelected);
+    public bool AreAllSelectedMessagesStarred =>
+        HasSelectedMessages && GetSelectedMessages().All(message => message.IsStarred);
+    public bool? LoadedSelectionState => !HasSelectedMessages
+        ? false
+        : AreAllLoadedMessagesSelected ? true : null;
+    public bool HasMailboxActionError => !string.IsNullOrWhiteSpace(MailboxActionErrorMessage);
+    public bool HasUserLabels => UserLabels.Count > 0;
+    public string LabelMenuTitle => _labelMenuTargetsDetail
+        ? "Ярлыки письма"
+        : $"Ярлыки: выбрано {SelectedMessageCount}";
+    public string SelectedStarActionText =>
+        AreAllSelectedMessagesStarred ? "Снять пометку" : "Пометить";
+    public string DetailStarActionText => SelectedMessageSummary?.IsStarred == true
+        ? "Снять пометку"
+        : "Пометить";
+    public bool CanDeleteCurrentFolder => SelectedFolder?.Kind is not MailFolderKind.Trash;
     public bool IsComposeOpen => Compose.IsOpen;
     public MailInboxPresentationMode PresentationMode => IsComposeOpen
         ? MailInboxPresentationMode.Compose
@@ -583,7 +686,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && _readStateCapability.CanSetReadState;
     public bool RequiresGmailAuthorization =>
         ActiveAccount?.Provider is MailProviderType.Gmail
-        && _readStateCapability.RequiresAuthorization;
+        && (_readStateCapability.RequiresAuthorization || _requiresMailboxAuthorization);
     public bool CanChangeReadState =>
         _readStateCapability.CanSetReadState
         && HasSelectedContent
@@ -663,10 +766,16 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     {
         ThrowIfDisposed();
         CancelActivation();
+        ClearSelection();
+        CloseLabels();
         _readStateCapability = MailReadStateCapability.Unsupported;
         long version = ++_viewVersion;
         _activationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         ActiveAccount = account;
+        if (account is not null)
+        {
+            ClearSelectionsForAccount(account.Id);
+        }
         Compose.ActivateAccount(account);
         IsListLoading = false;
         IsMessageLoading = false;
@@ -675,7 +784,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ReadStateErrorMessage = null;
         ReadStateFailureKind = null;
         AuthorizationMessage = null;
+        _requiresMailboxAuthorization = false;
         GmailReauthenticationErrorMessage = null;
+        MailboxActionErrorMessage = null;
 
         if (account is null || !account.IsEnabled)
         {
@@ -802,6 +913,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         _remoteImageConsents.RemoveWhere(key => key.AccountId == accountId);
         _messageBodyCache.RemoveWhere(key => key.AccountId == accountId);
         _messageSourceCache?.RemoveAccount(accountId);
+        _gmailMailboxService?.RemoveAccount(accountId);
         Compose.RemoveAccount(accountId);
         if (ActiveAccount?.Id == accountId)
         {
@@ -909,6 +1021,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ReadStateFailureKind = null;
         ReadStateErrorMessage = null;
         AuthorizationMessage = null;
+        MailboxActionErrorMessage = null;
         FolderState state = GetState(account.Id, folder.Key);
         ApplyState(state);
         bool requiresFreshInbox = IsTrackedGmailInbox(account, folder) && IsInboxStale(account.Id);
@@ -1037,6 +1150,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             ClearGmailReauthenticationRequired(accountId);
+            _requiresMailboxAuthorization = false;
+            MailboxActionErrorMessage = null;
             Compose.ClearGmailReauthenticationError(accountId);
             MessageFailureKind = null;
             MessageErrorMessage = null;
@@ -1288,6 +1403,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
             if (replace)
             {
+                HashSet<string> selectedKeys = state.Messages
+                    .Where(message => message.IsSelected)
+                    .Select(message => message.MessageKey)
+                    .ToHashSet(StringComparer.Ordinal);
                 MailMessageSummary? retained = state.SelectedMessageKey is null
                     ? null
                     : state.Messages.FirstOrDefault(message => message.MessageKey == state.SelectedMessageKey);
@@ -1297,12 +1416,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 {
                     if (keys.Add(summary.MessageKey))
                     {
+                        summary.IsSelected = selectedKeys.Contains(summary.MessageKey);
                         state.Messages.Add(summary);
                     }
                 }
 
                 if (retained is not null && keys.Add(retained.MessageKey))
                 {
+                    retained.IsSelected = false;
                     state.Messages.Add(retained);
                 }
             }
@@ -1535,7 +1656,21 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 account.InboxUnreadCount = Math.Max(0, inboxUnreadCount + (isUnread ? 1 : -1));
             }
 
-            MailMessageSummary updatedSummary = summary with { IsUnread = isUnread };
+            HashSet<string> updatedLabels = summary.ProviderLabelIds.ToHashSet(StringComparer.Ordinal);
+            if (isUnread)
+            {
+                updatedLabels.Add(GmailSystemFolders.Unread);
+            }
+            else
+            {
+                updatedLabels.Remove(GmailSystemFolders.Unread);
+            }
+
+            MailMessageSummary updatedSummary = summary with
+            {
+                IsUnread = isUnread,
+                ProviderLabelIds = updatedLabels
+            };
             FolderState state = GetState(account.Id, folder.Key);
             int stateIndex = state.Messages.FindIndex(message => message.MessageKey == summary.MessageKey);
             if (stateIndex >= 0)
@@ -1678,6 +1813,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             AuthorizationMessage = null;
+            _requiresMailboxAuthorization = false;
+            MailboxActionErrorMessage = null;
             await RefreshReadStateCapabilityAsync();
         }
         catch (OperationCanceledException)
@@ -1768,6 +1905,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             ReadStateErrorMessage = null;
             RaiseListStateChanged();
             RaiseReadStateChanged();
+            RaiseMailboxStateChanged();
         }
         finally
         {
@@ -1873,6 +2011,534 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         }
     }
 
+    private void ToggleMessageSelection(MailMessageSummary? message)
+    {
+        if (message is null || !IsGmailMailboxAvailable)
+        {
+            return;
+        }
+
+        message.IsSelected = !message.IsSelected;
+        RaiseMailboxStateChanged();
+    }
+
+    private bool CanToggleMessageSelection(MailMessageSummary? message) =>
+        message is not null && CanUseMailboxActions && IsMessageListVisible;
+
+    private void ToggleSelectAllLoaded()
+    {
+        bool select = !AreAllLoadedMessagesSelected;
+        foreach (MailMessageSummary message in Messages)
+        {
+            message.IsSelected = select;
+        }
+
+        RaiseMailboxStateChanged();
+    }
+
+    private bool CanSelectAllLoaded() =>
+        CanUseMailboxActions && IsMessageListVisible && Messages.Count > 0;
+
+    private void ClearSelection()
+    {
+        foreach (MailMessageSummary message in Messages.Where(message => message.IsSelected))
+        {
+            message.IsSelected = false;
+        }
+
+        RaiseMailboxStateChanged();
+    }
+
+    private void ClearSelectionsForAccount(Guid accountId)
+    {
+        foreach ((FolderStateKey key, FolderState state) in _folderStates)
+        {
+            if (key.AccountId != accountId)
+            {
+                continue;
+            }
+
+            foreach (MailMessageSummary message in state.Messages)
+            {
+                message.IsSelected = false;
+            }
+        }
+
+        foreach (MailMessageSummary message in Messages)
+        {
+            message.IsSelected = false;
+        }
+
+        RaiseMailboxStateChanged();
+    }
+
+    private IReadOnlyList<MailMessageSummary> GetSelectedMessages() =>
+        Messages.Where(message => message.IsSelected).ToArray();
+
+    private async Task ToggleStarAsync(MailMessageSummary? message)
+    {
+        if (!CanMutateMessage(message) || message is null)
+        {
+            return;
+        }
+
+        bool newValue = !message.IsStarred;
+        await ExecuteMailboxMutationAsync(
+            [message.MessageKey],
+            "Не удалось изменить пометку.",
+            (service, account, keys, token) => service.SetStarredAsync(account, keys, newValue, token),
+            keys => ApplyStarState(keys, newValue));
+    }
+
+    private async Task ToggleSelectedStarAsync()
+    {
+        IReadOnlyList<MailMessageSummary> selected = GetSelectedMessages();
+        bool newValue = selected.Any(message => !message.IsStarred);
+        await ExecuteMailboxMutationAsync(
+            selected.Select(message => message.MessageKey).ToArray(),
+            "Не удалось изменить пометку выбранных писем.",
+            (service, account, keys, token) => service.SetStarredAsync(account, keys, newValue, token),
+            keys => ApplyStarState(keys, newValue));
+    }
+
+    private Task ArchiveSelectedAsync() => ArchiveAsync(
+        GetSelectedMessages().Select(message => message.MessageKey).ToArray());
+
+    private Task ArchiveDetailAsync() => ArchiveAsync(
+        SelectedMessageSummary is null ? [] : [SelectedMessageSummary.MessageKey]);
+
+    private Task ArchiveAsync(IReadOnlyCollection<string> messageKeys) =>
+        ExecuteMailboxMutationAsync(
+            messageKeys,
+            "Не удалось архивировать письмо.",
+            (service, account, keys, token) => service.ArchiveAsync(account, keys, token),
+            ApplyArchive);
+
+    private Task DeleteSelectedAsync() => DeleteAsync(
+        GetSelectedMessages().Select(message => message.MessageKey).ToArray());
+
+    private Task DeleteDetailAsync() => DeleteAsync(
+        SelectedMessageSummary is null ? [] : [SelectedMessageSummary.MessageKey]);
+
+    private Task DeleteAsync(IReadOnlyCollection<string> messageKeys) =>
+        ExecuteMailboxMutationAsync(
+            messageKeys,
+            "Не удалось удалить письмо.",
+            (service, account, keys, token) => service.MoveToTrashAsync(account, keys, token),
+            ApplyTrash);
+
+    private Task SetSelectedReadStateAsync(bool isRead) =>
+        ExecuteMailboxMutationAsync(
+            GetSelectedMessages().Select(message => message.MessageKey).ToArray(),
+            "Не удалось изменить статус прочтения.",
+            (service, account, keys, token) => service.SetReadStateAsync(account, keys, isRead, token),
+            keys => ApplyReadState(keys, isRead));
+
+    private async Task OpenLabelsAsync(bool targetsDetail)
+    {
+        if (ActiveAccount is not MailAccount account || _gmailMailboxService is null)
+        {
+            return;
+        }
+
+        string[] keys = targetsDetail
+            ? SelectedMessageSummary is null ? [] : [SelectedMessageSummary.MessageKey]
+            : GetSelectedMessages().Select(message => message.MessageKey).ToArray();
+        if (keys.Length == 0)
+        {
+            return;
+        }
+
+        MailboxActionErrorMessage = null;
+        CancelMutationOperation();
+        CancellationTokenSource operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(GetActivationToken());
+        _mutationCancellation = operationCancellation;
+        IsMailboxChanging = true;
+        Guid accountId = account.Id;
+        long version = _viewVersion;
+        CancellationToken cancellationToken = operationCancellation.Token;
+        try
+        {
+            GmailUserLabelResult result = await _gmailMailboxService.GetUserLabelsAsync(
+                account,
+                forceRefresh: true,
+                cancellationToken);
+            if (!IsCurrentAccount(accountId, version, cancellationToken))
+            {
+                return;
+            }
+
+            if (!result.IsSuccess)
+            {
+                HandleMailboxFailure(account, result.FailureKind, "Не удалось загрузить ярлыки.");
+                return;
+            }
+
+            _labelMenuTargetsDetail = targetsDetail;
+            _labelMenuMessageKeys.Clear();
+            _labelMenuMessageKeys.UnionWith(keys);
+            PopulateUserLabels(result.Labels, keys);
+            IsLabelMenuOpen = true;
+            OnPropertyChanged(nameof(LabelMenuTitle));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_mutationCancellation, operationCancellation))
+            {
+                _mutationCancellation = null;
+                operationCancellation.Dispose();
+                IsMailboxChanging = false;
+            }
+        }
+    }
+
+    private async Task ToggleUserLabelAsync(GmailUserLabelOption? option)
+    {
+        if (option is null || ActiveAccount is not MailAccount account)
+        {
+            return;
+        }
+
+        bool apply = option.IsApplied is not true;
+        string[] keys = _labelMenuMessageKeys.ToArray();
+        await ExecuteMailboxMutationAsync(
+            keys,
+            "Не удалось изменить ярлык.",
+            (service, currentAccount, messageKeys, token) => service.SetUserLabelAsync(
+                currentAccount,
+                messageKeys,
+                option.Id,
+                apply,
+                token),
+            succeeded =>
+            {
+                ApplyProviderLabelState(succeeded, option.Id, apply);
+                IReadOnlyList<MailMessageSummary> targets = FindCachedMessages(account.Id, keys);
+                int appliedCount = targets.Count(message => message.ProviderLabelIds.Contains(option.Id));
+                option.IsApplied = appliedCount == 0
+                    ? false
+                    : appliedCount == targets.Count ? true : null;
+            },
+            closeLabelMenu: false);
+    }
+
+    private bool CanToggleUserLabel(GmailUserLabelOption? option) =>
+        option is not null && CanUseMailboxActions && IsLabelMenuOpen;
+
+    private void PopulateUserLabels(IReadOnlyList<GmailUserLabel> labels, IReadOnlyCollection<string> messageKeys)
+    {
+        IReadOnlyList<MailMessageSummary> targets = FindCachedMessages(ActiveAccount!.Id, messageKeys);
+        UserLabels.Clear();
+        foreach (GmailUserLabel label in labels)
+        {
+            int appliedCount = targets.Count(message => message.ProviderLabelIds.Contains(label.Id));
+            UserLabels.Add(new GmailUserLabelOption(
+                label.Id,
+                label.DisplayName,
+                appliedCount == 0 ? false : appliedCount == targets.Count ? true : null));
+        }
+
+        OnPropertyChanged(nameof(HasUserLabels));
+    }
+
+    private void CloseLabels()
+    {
+        IsLabelMenuOpen = false;
+        _labelMenuMessageKeys.Clear();
+        UserLabels.Clear();
+        OnPropertyChanged(nameof(HasUserLabels));
+    }
+
+    private async Task ExecuteMailboxMutationAsync(
+        IReadOnlyCollection<string> messageKeys,
+        string failureMessage,
+        Func<IGmailMailboxManagementService, MailAccount, IReadOnlyCollection<string>, CancellationToken, Task<GmailMailboxMutationResult>> operation,
+        Action<IReadOnlyCollection<string>> applySucceeded,
+        bool closeLabelMenu = true)
+    {
+        if (messageKeys.Count == 0
+            || ActiveAccount is not MailAccount account
+            || SelectedFolder is not MailFolder folder
+            || _gmailMailboxService is null)
+        {
+            return;
+        }
+
+        CancelMutationOperation();
+        CancellationTokenSource operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(GetActivationToken());
+        _mutationCancellation = operationCancellation;
+        CancellationToken cancellationToken = operationCancellation.Token;
+        Guid accountId = account.Id;
+        string folderKey = folder.Key;
+        long version = _viewVersion;
+        IsMailboxChanging = true;
+        MailboxActionErrorMessage = null;
+        try
+        {
+            GmailMailboxMutationResult result = await operation(
+                _gmailMailboxService,
+                account,
+                messageKeys,
+                cancellationToken);
+            if (!IsCurrent(accountId, folderKey, version, cancellationToken))
+            {
+                return;
+            }
+
+            if (result.SucceededMessageKeys.Count > 0)
+            {
+                applySucceeded(result.SucceededMessageKeys);
+            }
+
+            if (result.FailedMessages.Count > 0)
+            {
+                string message = result.IsPartialSuccess
+                    ? $"{failureMessage} Часть выбранных писем не изменена."
+                    : failureMessage;
+                HandleMailboxFailure(account, result.FailureKind, message);
+            }
+
+            if (closeLabelMenu)
+            {
+                CloseLabels();
+            }
+
+            ApplyState(GetState(accountId, folderKey));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_mutationCancellation, operationCancellation))
+            {
+                _mutationCancellation = null;
+                operationCancellation.Dispose();
+                IsMailboxChanging = false;
+            }
+        }
+    }
+
+    private void ApplyStarState(IReadOnlyCollection<string> messageKeys, bool isStarred)
+    {
+        ApplyProviderLabelState(messageKeys, GmailSystemFolders.Starred, isStarred, summary => summary with
+        {
+            IsStarred = isStarred
+        });
+        if (!isStarred && ActiveAccount is MailAccount account)
+        {
+            RemoveMessagesFromFolder(account.Id, MailFolderKind.Starred, messageKeys);
+        }
+        else if (isStarred && ActiveAccount is MailAccount active)
+        {
+            MarkFolderStale(active.Id, MailFolderKind.Starred);
+        }
+    }
+
+    private void ApplyArchive(IReadOnlyCollection<string> messageKeys)
+    {
+        if (ActiveAccount is not MailAccount account)
+        {
+            return;
+        }
+
+        AdjustInboxUnreadForRemoval(account, messageKeys);
+        ApplyProviderLabelState(messageKeys, GmailSystemFolders.Inbox, isApplied: false);
+        RemoveMessagesFromFolder(account.Id, MailFolderKind.Inbox, messageKeys);
+    }
+
+    private void ApplyTrash(IReadOnlyCollection<string> messageKeys)
+    {
+        if (ActiveAccount is not MailAccount account)
+        {
+            return;
+        }
+
+        AdjustInboxUnreadForRemoval(account, messageKeys);
+        HashSet<string> keys = messageKeys.ToHashSet(StringComparer.Ordinal);
+        foreach ((FolderStateKey stateKey, FolderState state) in _folderStates)
+        {
+            if (stateKey.AccountId == account.Id && stateKey.FolderKey != MailFolderCatalog.TrashKey)
+            {
+                RemoveMessages(state, keys);
+            }
+        }
+
+        MarkFolderStale(account.Id, MailFolderKind.Trash);
+    }
+
+    private void AdjustInboxUnreadForRemoval(
+        MailAccount account,
+        IReadOnlyCollection<string> messageKeys)
+    {
+        if (account.InboxUnreadCount is not int unreadCount)
+        {
+            return;
+        }
+
+        int removedUnread = FindCachedMessages(account.Id, messageKeys)
+            .Count(message => message.IsUnread
+                && message.ProviderLabelIds.Contains(GmailSystemFolders.Inbox));
+        account.InboxUnreadCount = Math.Max(0, unreadCount - removedUnread);
+    }
+
+    private void ApplyReadState(IReadOnlyCollection<string> messageKeys, bool isRead)
+    {
+        if (ActiveAccount is not MailAccount account)
+        {
+            return;
+        }
+
+        IReadOnlyList<MailMessageSummary> before = FindCachedMessages(account.Id, messageKeys);
+        int unreadDelta = before
+            .Where(message => message.ProviderLabelIds.Contains(GmailSystemFolders.Inbox)
+                && message.IsUnread != !isRead)
+            .Sum(_ => isRead ? -1 : 1);
+        if (account.InboxUnreadCount is int unreadCount)
+        {
+            account.InboxUnreadCount = Math.Max(0, unreadCount + unreadDelta);
+        }
+
+        ApplyProviderLabelState(
+            messageKeys,
+            GmailSystemFolders.Unread,
+            !isRead,
+            summary => summary with { IsUnread = !isRead });
+        if (SelectedMessageContent is MailMessageContent content
+            && messageKeys.Contains(content.MessageKey, StringComparer.Ordinal))
+        {
+            MailMessageContent updated = content with { IsUnread = !isRead };
+            _messageBodyCache.Set(new MessageBodyCacheKey(account.Id, content.MessageKey), updated);
+            _isReadStateMetadataUpdate = true;
+            try
+            {
+                SelectedMessageContent = updated;
+            }
+            finally
+            {
+                _isReadStateMetadataUpdate = false;
+            }
+        }
+    }
+
+    private void ApplyProviderLabelState(
+        IReadOnlyCollection<string> messageKeys,
+        string labelId,
+        bool isApplied,
+        Func<MailMessageSummary, MailMessageSummary>? additionalUpdate = null)
+    {
+        if (ActiveAccount is not MailAccount account)
+        {
+            return;
+        }
+
+        HashSet<string> keys = messageKeys.ToHashSet(StringComparer.Ordinal);
+        foreach ((FolderStateKey stateKey, FolderState state) in _folderStates)
+        {
+            if (stateKey.AccountId != account.Id)
+            {
+                continue;
+            }
+
+            for (int index = 0; index < state.Messages.Count; index++)
+            {
+                MailMessageSummary summary = state.Messages[index];
+                if (!keys.Contains(summary.MessageKey))
+                {
+                    continue;
+                }
+
+                HashSet<string> labels = summary.ProviderLabelIds.ToHashSet(StringComparer.Ordinal);
+                if (isApplied)
+                {
+                    labels.Add(labelId);
+                }
+                else
+                {
+                    labels.Remove(labelId);
+                }
+
+                MailMessageSummary updated = summary with { ProviderLabelIds = labels };
+                state.Messages[index] = additionalUpdate?.Invoke(updated) ?? updated;
+            }
+        }
+    }
+
+    private void RemoveMessagesFromFolder(
+        Guid accountId,
+        MailFolderKind folderKind,
+        IReadOnlyCollection<string> messageKeys)
+    {
+        AccountFolderState account = GetAccountFolderState(accountId);
+        MailFolder? folder = account.Folders.FirstOrDefault(item => item.Kind == folderKind);
+        if (folder is null)
+        {
+            return;
+        }
+
+        RemoveMessages(GetState(accountId, folder.Key), messageKeys.ToHashSet(StringComparer.Ordinal));
+    }
+
+    private static void RemoveMessages(FolderState state, IReadOnlySet<string> messageKeys)
+    {
+        state.Messages.RemoveAll(message => messageKeys.Contains(message.MessageKey));
+        if (state.SelectedMessageKey is string selected && messageKeys.Contains(selected))
+        {
+            state.SelectedMessageKey = null;
+            state.ContentMode = MailInboxPresentationMode.MessageList;
+        }
+    }
+
+    private void MarkFolderStale(Guid accountId, MailFolderKind kind)
+    {
+        AccountFolderState account = GetAccountFolderState(accountId);
+        MailFolder? folder = account.Folders.FirstOrDefault(item => item.Kind == kind);
+        if (folder is not null)
+        {
+            GetState(accountId, folder.Key).MarkStale();
+        }
+    }
+
+    private IReadOnlyList<MailMessageSummary> FindCachedMessages(
+        Guid accountId,
+        IReadOnlyCollection<string> messageKeys)
+    {
+        HashSet<string> keys = messageKeys.ToHashSet(StringComparer.Ordinal);
+        IEnumerable<MailMessageSummary> current = ActiveAccount?.Id == accountId
+            ? Messages.Where(message => keys.Contains(message.MessageKey))
+            : [];
+        return _folderStates
+            .Where(item => item.Key.AccountId == accountId)
+            .SelectMany(item => item.Value.Messages)
+            .Where(message => keys.Contains(message.MessageKey))
+            .Concat(current)
+            .GroupBy(message => message.MessageKey, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private void HandleMailboxFailure(
+        MailAccount account,
+        GmailMailboxFailureKind? failureKind,
+        string message)
+    {
+        MailboxActionErrorMessage = failureKind is GmailMailboxFailureKind.NotAuthorized
+            ? "Чтобы управлять письмами, нужно снова разрешить доступ Google."
+            : message;
+        if (failureKind is GmailMailboxFailureKind.NotAuthorized)
+        {
+            _requiresMailboxAuthorization = true;
+            AuthorizationMessage = MailboxActionErrorMessage;
+        }
+        if (failureKind is GmailMailboxFailureKind.ReauthorizationRequired)
+        {
+            MarkGmailReauthenticationRequired(account, MailReadFailureKind.ReauthorizationRequired);
+        }
+    }
+
     private void OpenMessage(MailMessageSummary? summary)
     {
         if (summary is null || ActiveAccount is null || SelectedFolder is null)
@@ -1944,6 +2610,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         OnPropertyChanged(nameof(CanPrintMessage));
         OpenMessageCommand.NotifyCanExecuteChanged();
         BackToMessageListCommand.NotifyCanExecuteChanged();
+        NotifyMailboxCommandStates();
         UpdateReadDwellState();
     }
 
@@ -2004,6 +2671,40 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && ActiveAccount is not null
         && SelectedMessageContent is not null
         && !IsAttachmentSaving;
+
+    private bool CanMutateMessage(MailMessageSummary? message) =>
+        message is not null
+        && CanUseMailboxActions
+        && (IsMessageDetailVisible
+            ? CanMutateDetail() && ReferenceEquals(message, SelectedMessageSummary)
+            : IsMessageListVisible && Messages.Any(current => ReferenceEquals(current, message)));
+
+    private bool CanMutateSelection() =>
+        CanUseMailboxActions && IsMessageListVisible && HasSelectedMessages;
+
+    private bool CanMutateDetail() =>
+        CanUseMailboxActions
+        && IsMessageDetailVisible
+        && !IsMessageLoading
+        && !HasMessageError
+        && SelectedMessageSummary is MailMessageSummary summary
+        && SelectedMessageContent is MailMessageContent content
+        && string.Equals(summary.MessageKey, content.MessageKey, StringComparison.Ordinal);
+
+    private bool CanArchiveSelection() =>
+        CanMutateSelection()
+        && GetSelectedMessages().Any(message => message.ProviderLabelIds.Contains(GmailSystemFolders.Inbox));
+
+    private bool CanArchiveDetail() =>
+        CanMutateDetail()
+        && SelectedMessageSummary!.ProviderLabelIds.Contains(GmailSystemFolders.Inbox);
+
+    private bool CanDeleteSelection() => CanMutateSelection() && CanDeleteCurrentFolder;
+
+    private bool CanDeleteDetail() => CanMutateDetail() && CanDeleteCurrentFolder;
+
+    private bool CanChangeSelectedReadState() =>
+        CanMutateSelection() && SelectedFolder?.SupportsReadState == true;
 
     private async Task SaveAttachmentAsync(MailAttachmentInfo? attachment)
     {
@@ -2145,6 +2846,38 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         OpenMessageCommand.NotifyCanExecuteChanged();
         BackToMessageListCommand.NotifyCanExecuteChanged();
         SaveAttachmentCommand.NotifyCanExecuteChanged();
+        NotifyMailboxCommandStates();
+    }
+
+    private void RaiseMailboxStateChanged()
+    {
+        OnPropertyChanged(nameof(SelectedMessageCount));
+        OnPropertyChanged(nameof(HasSelectedMessages));
+        OnPropertyChanged(nameof(AreAllLoadedMessagesSelected));
+        OnPropertyChanged(nameof(AreAllSelectedMessagesStarred));
+        OnPropertyChanged(nameof(LoadedSelectionState));
+        OnPropertyChanged(nameof(SelectedStarActionText));
+        OnPropertyChanged(nameof(DetailStarActionText));
+        OnPropertyChanged(nameof(LabelMenuTitle));
+        NotifyMailboxCommandStates();
+    }
+
+    private void NotifyMailboxCommandStates()
+    {
+        ToggleMessageSelectionCommand.NotifyCanExecuteChanged();
+        SelectAllLoadedCommand.NotifyCanExecuteChanged();
+        ClearSelectionCommand.NotifyCanExecuteChanged();
+        ToggleStarCommand.NotifyCanExecuteChanged();
+        ToggleSelectedStarCommand.NotifyCanExecuteChanged();
+        ArchiveSelectedCommand.NotifyCanExecuteChanged();
+        ArchiveDetailCommand.NotifyCanExecuteChanged();
+        DeleteSelectedCommand.NotifyCanExecuteChanged();
+        DeleteDetailCommand.NotifyCanExecuteChanged();
+        MarkSelectedReadCommand.NotifyCanExecuteChanged();
+        MarkSelectedUnreadCommand.NotifyCanExecuteChanged();
+        OpenLabelsForSelectionCommand.NotifyCanExecuteChanged();
+        OpenLabelsForDetailCommand.NotifyCanExecuteChanged();
+        ToggleUserLabelCommand.NotifyCanExecuteChanged();
     }
 
     private bool TryGetCurrentRemoteImageConsentKey(out RemoteImageConsentKey key)
@@ -2443,6 +3176,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         _mutationCancellation?.Cancel();
         _mutationCancellation?.Dispose();
         _mutationCancellation = null;
+        if (IsMailboxChanging)
+        {
+            IsMailboxChanging = false;
+        }
     }
 
     private void CancelAttachmentOperation()
@@ -2539,6 +3276,23 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Guid AccountId,
         string MessageKey,
         string NormalizedAddress);
+}
+
+public sealed class GmailUserLabelOption(
+    string id,
+    string displayName,
+    bool? isApplied) : ObservableObject
+{
+    private bool? _isApplied = isApplied;
+
+    public string Id { get; } = id;
+    public string DisplayName { get; } = displayName;
+
+    public bool? IsApplied
+    {
+        get => _isApplied;
+        set => SetProperty(ref _isApplied, value);
+    }
 }
 
 internal interface IMailReadDwellScheduler

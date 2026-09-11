@@ -256,7 +256,7 @@ public sealed class LanternMailUiTests
     }
 
     [Fact]
-    public void MailDetailToolbar_UsesOnlyAvailableIconCommands()
+    public void MailDetailToolbar_IncludesMailboxActionsAndExistingCommands()
     {
         XDocument view = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
@@ -278,12 +278,14 @@ public sealed class LanternMailUiTests
         Assert.DoesNotContain("Content=\"Ответить\"", detailMarkup, StringComparison.Ordinal);
         Assert.DoesNotContain("Content=\"Переслать\"", detailMarkup, StringComparison.Ordinal);
         Assert.DoesNotContain("Content=\"←  К списку\"", detailMarkup, StringComparison.Ordinal);
-        Assert.DoesNotContain("Archive", detailMarkup, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Delete", detailMarkup, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ArchiveDetailCommand", detailMarkup, StringComparison.Ordinal);
+        Assert.Contains("DeleteDetailCommand", detailMarkup, StringComparison.Ordinal);
+        Assert.Contains("ToggleStarCommand", detailMarkup, StringComparison.Ordinal);
+        Assert.Contains("OpenLabelsForDetailCommand", detailMarkup, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void MailListToolbar_HasOnlyLeftAlignedRefreshAndNoDuplicateFolderTitle()
+    public void MailListToolbar_HasSelectionAndMailboxActionsWithoutDuplicateFolderTitle()
     {
         XDocument view = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
@@ -291,7 +293,9 @@ public sealed class LanternMailUiTests
         XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
         XElement list = Named(view, presentation, xaml, "Grid", "MessageListSurface");
         XElement toolbar = list.Elements(presentation + "Border").First();
-        XElement refresh = Assert.Single(toolbar.Elements(presentation + "Button"));
+        XElement refresh = Assert.Single(
+            toolbar.Descendants(presentation + "Button"),
+            button => (string?)button.Attribute("Command") == "{Binding RefreshCommand}");
         XElement firstRow = Assert.Single(
             list.Element(presentation + "Grid.RowDefinitions")!
                 .Elements(presentation + "RowDefinition")
@@ -299,16 +303,123 @@ public sealed class LanternMailUiTests
 
         Assert.Equal("44", (string?)firstRow.Attribute("Height"));
         Assert.Equal("{Binding RefreshCommand}", (string?)refresh.Attribute("Command"));
-        Assert.Equal("↻", (string?)refresh.Attribute("Content"));
+        Assert.Null(refresh.Attribute("Content"));
         Assert.Equal("Обновить", (string?)refresh.Attribute("ToolTip"));
-        Assert.Equal("Left", (string?)refresh.Attribute("HorizontalAlignment"));
+        Assert.Equal("Обновить", (string?)refresh.Attribute("AutomationProperties.Name"));
+        XElement refreshPath = Assert.Single(refresh.Descendants(presentation + "Path"));
+        Assert.Equal("{StaticResource MailActionRefreshGeometry}", (string?)refreshPath.Attribute("Data"));
+        Assert.Equal("1.8", (string?)refreshPath.Attribute("StrokeThickness"));
         Assert.DoesNotContain("SelectedFolder.DisplayName", list.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("Archive", toolbar.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Delete", toolbar.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SelectAllLoadedCommand", toolbar.ToString(), StringComparison.Ordinal);
+        Assert.Contains("ArchiveSelectedCommand", toolbar.ToString(), StringComparison.Ordinal);
+        Assert.Contains("DeleteSelectedCommand", toolbar.ToString(), StringComparison.Ordinal);
+        Assert.Contains("OpenLabelsForSelectionCommand", toolbar.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void MailDetailToolbar_IsLeftAlignedInBackReadReplyForwardPrintOrder()
+    public void MailboxToolbars_AreIconFirstAccessibleAndReuseActionGeometry()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        XElement list = Named(view, presentation, xaml, "Grid", "MessageListSurface");
+        XElement detail = Named(view, presentation, xaml, "Grid", "MessageDetailSurface");
+        XElement listToolbar = list.Elements(presentation + "Border").First();
+        XElement detailToolbar = detail.Elements(presentation + "Border").First();
+        string[] listCommands =
+        [
+            "RefreshCommand",
+            "ArchiveSelectedCommand",
+            "DeleteSelectedCommand",
+            "MarkSelectedReadCommand",
+            "MarkSelectedUnreadCommand",
+            "ToggleSelectedStarCommand",
+            "OpenLabelsForSelectionCommand",
+            "ClearSelectionCommand"
+        ];
+
+        foreach (string command in listCommands)
+        {
+            XElement button = Assert.Single(
+                listToolbar.Descendants(presentation + "Button"),
+                candidate => (string?)candidate.Attribute("Command") == $"{{Binding {command}}}");
+            Assert.Null(button.Attribute("Content"));
+            Assert.False(string.IsNullOrWhiteSpace((string?)button.Attribute("ToolTip")));
+            Assert.False(string.IsNullOrWhiteSpace((string?)button.Attribute("AutomationProperties.Name")));
+        }
+
+        Assert.DoesNotContain("Content=\"Архив\"", listToolbar.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"Удалить\"", listToolbar.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"Прочитано\"", listToolbar.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"Не прочитано\"", listToolbar.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"Снять выбор\"", listToolbar.ToString(), StringComparison.Ordinal);
+
+        AssertSharedGeometry("ArchiveSelectedCommand", "ArchiveDetailCommand");
+        AssertSharedGeometry("DeleteSelectedCommand", "DeleteDetailCommand");
+        AssertSharedGeometry("OpenLabelsForSelectionCommand", "OpenLabelsForDetailCommand");
+
+        void AssertSharedGeometry(string listCommand, string detailCommand)
+        {
+            XElement listButton = Assert.Single(
+                listToolbar.Descendants(presentation + "Button"),
+                candidate => (string?)candidate.Attribute("Command") == $"{{Binding {listCommand}}}");
+            XElement detailButton = Assert.Single(
+                detailToolbar.Descendants(presentation + "Button"),
+                candidate => (string?)candidate.Attribute("Command") == $"{{Binding {detailCommand}}}");
+            Assert.Equal(
+                (string?)Assert.Single(listButton.Descendants(presentation + "Path")).Attribute("Data"),
+                (string?)Assert.Single(detailButton.Descendants(presentation + "Path")).Attribute("Data"));
+        }
+    }
+
+    [Fact]
+    public void MailListRows_CenterSelectionAndStarInPaddedCompactColumns()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        XElement list = Named(view, presentation, xaml, "Grid", "MessageListSurface");
+        XElement messageList = Assert.Single(list.Elements(presentation + "ListBox"));
+        XElement row = messageList.Element(presentation + "ListBox.ItemTemplate")!
+            .Element(presentation + "DataTemplate")!
+            .Element(presentation + "Grid")!;
+        XElement[] columns = row.Element(presentation + "Grid.ColumnDefinitions")!
+            .Elements(presentation + "ColumnDefinition")
+            .ToArray();
+        XElement selection = Assert.Single(row.Elements(presentation + "CheckBox"));
+        XElement star = Assert.Single(
+            row.Elements(presentation + "Button"),
+            button => ((string?)button.Attribute("Command"))?.Contains("ToggleStarCommand", StringComparison.Ordinal) == true);
+
+        Assert.Equal(3, columns.Length);
+        Assert.All(columns.Take(2), column =>
+        {
+            Assert.True(double.TryParse(
+                (string?)column.Attribute("Width"),
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out double width));
+            Assert.InRange(width, 40, 52);
+        });
+        Assert.Equal("Center", (string?)selection.Attribute("HorizontalAlignment"));
+        Assert.Equal("Center", (string?)selection.Attribute("VerticalAlignment"));
+        Assert.NotNull(selection.Attribute("Margin"));
+        Assert.Equal("Center", (string?)star.Attribute("HorizontalAlignment"));
+        Assert.Equal("Center", (string?)star.Attribute("VerticalAlignment"));
+        Assert.NotNull(star.Attribute("Margin"));
+        Assert.Equal("0", (string?)star.Attribute("Padding"));
+
+        XElement starText = Assert.Single(star.Elements(presentation + "TextBlock"));
+        Assert.Equal("Center", (string?)starText.Attribute("HorizontalAlignment"));
+        Assert.Equal("Center", (string?)starText.Attribute("VerticalAlignment"));
+        Assert.Contains("Value=\"☆\"", starText.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Value=\"★\"", starText.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MailDetailToolbar_IsLeftAlignedInMailboxAndComposeActionOrder()
     {
         XDocument view = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
@@ -322,6 +433,10 @@ public sealed class LanternMailUiTests
         Assert.Collection(
             buttons,
             button => Assert.Equal("{Binding BackToMessageListCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding ArchiveDetailCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding DeleteDetailCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding ToggleStarCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding OpenLabelsForDetailCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding SetReadStateCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding Compose.ReplyCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding Compose.ForwardCommand}", (string?)button.Attribute("Command")),
@@ -357,7 +472,11 @@ public sealed class LanternMailUiTests
             iconStyle.Elements(presentation + "Setter"),
             setter => (string?)setter.Attribute("Property") == "Stretch"
                 && (string?)setter.Attribute("Value") == "Uniform");
-        Assert.All(buttons, button =>
+        XElement[] vectorButtons = buttons
+            .Where(button => button.Elements(presentation + "Viewbox").Any())
+            .ToArray();
+        Assert.Equal(8, vectorButtons.Length);
+        Assert.All(vectorButtons, button =>
         {
             XElement viewbox = Assert.Single(button.Elements(presentation + "Viewbox"));
             XElement canvas = Assert.Single(viewbox.Elements(presentation + "Canvas"));

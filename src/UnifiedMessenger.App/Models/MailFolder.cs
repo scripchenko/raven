@@ -6,7 +6,8 @@ public enum MailFolderKind
     Sent,
     Drafts,
     Spam,
-    Trash
+    Trash,
+    Starred
 }
 
 public sealed record MailFolder
@@ -43,6 +44,7 @@ public sealed record MailFolder
 internal static class MailFolderCatalog
 {
     public const string InboxKey = "system:inbox";
+    public const string StarredKey = "system:starred";
     public const string SentKey = "system:sent";
     public const string DraftsKey = "system:drafts";
     public const string SpamKey = "system:spam";
@@ -56,6 +58,7 @@ internal static class MailFolderCatalog
             kind switch
             {
                 MailFolderKind.Inbox => InboxKey,
+                MailFolderKind.Starred => StarredKey,
                 MailFolderKind.Sent => SentKey,
                 MailFolderKind.Drafts => DraftsKey,
                 MailFolderKind.Spam => SpamKey,
@@ -65,6 +68,7 @@ internal static class MailFolderCatalog
             kind switch
             {
                 MailFolderKind.Inbox => "Входящие",
+                MailFolderKind.Starred => "Помеченные",
                 MailFolderKind.Sent => "Отправленные",
                 MailFolderKind.Drafts => "Черновики",
                 MailFolderKind.Spam => "Спам",

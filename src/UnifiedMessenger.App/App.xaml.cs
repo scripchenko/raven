@@ -241,7 +241,11 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IRemoteMailImageHttpClient, RemoteMailImageHttpClient>();
         services.AddSingleton<IRemoteMailImageUriValidator, RemoteMailImageUriValidator>();
         services.AddSingleton<IRemoteMailImageLoader, RemoteMailImageLoader>();
-        services.AddSingleton<IGmailApiReadClient, GmailApiReadClient>();
+        services.AddSingleton<GmailApiReadClient>();
+        services.AddSingleton<IGmailApiReadClient>(provider => provider.GetRequiredService<GmailApiReadClient>());
+        services.AddSingleton<IGmailMailboxApiClient>(provider => provider.GetRequiredService<GmailApiReadClient>());
+        services.AddSingleton<IGmailMailboxManagementService, GmailMailboxManagementService>();
+        services.AddSingleton<IGmailMailboxManagementService, GmailMailboxManagementService>();
         services.AddSingleton<IImapInboxClient, MailKitImapInboxClient>();
         services.AddSingleton<MailMessageSourceCache>();
         services.AddSingleton<GmailMailReadProvider>();
