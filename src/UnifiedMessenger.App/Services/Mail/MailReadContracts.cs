@@ -13,6 +13,7 @@ public enum MailReadFailureKind
     MessageUnavailable,
     InvalidMessage,
     FolderUnavailable,
+    InvalidSearchQuery,
     MutationNotAuthorized,
     MutationFailed
 }
@@ -118,6 +119,16 @@ public interface IGmailScopeUpgradeService
 {
     Task<GmailScopeUpgradeResult> UpgradeAsync(
         MailAccount account,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IMailSearchProvider
+{
+    Task<MailPage<MailMessageSummary>> SearchAsync(
+        MailAccount account,
+        string query,
+        string? continuationToken,
+        int pageSize,
         CancellationToken cancellationToken = default);
 }
 

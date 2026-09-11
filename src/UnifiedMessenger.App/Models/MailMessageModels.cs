@@ -295,7 +295,8 @@ public sealed record MailMessageContent(
 
 public sealed record MailPage<T>(
     IReadOnlyList<T> Items,
-    string? ContinuationToken)
+    string? ContinuationToken,
+    long? TotalCount = null)
 {
     public bool HasMore => !string.IsNullOrWhiteSpace(ContinuationToken);
 }

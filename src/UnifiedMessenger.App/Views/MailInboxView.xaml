@@ -19,6 +19,7 @@
         <Geometry x:Key="MailActionLabelGeometry">M4,5 L13,5 L20,12 L12,20 L4,12 Z M8,9 L8.1,9</Geometry>
         <Geometry x:Key="MailActionClearSelectionGeometry">M6,6 L18,18 M18,6 L6,18</Geometry>
         <Geometry x:Key="MailActionRefreshGeometry">M20,4 L20,10 L14,10 M20,10 A8,8 0 0 0 6.3,5.3 M4,20 L4,14 L10,14 M4,14 A8,8 0 0 0 17.7,18.7</Geometry>
+        <Geometry x:Key="MailSearchGeometry">M10.5,4 A6.5,6.5 0 1 0 10.5,17 A6.5,6.5 0 1 0 10.5,4 M15.5,15.5 L21,21</Geometry>
 
         <Style x:Key="MailFolderItemStyle" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="0,1" />
@@ -324,7 +325,104 @@
         <Border Grid.Column="1" Background="{DynamicResource DividerBrush}" />
 
         <Grid Grid.Column="2" Background="{DynamicResource SurfaceBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Padding="18,10"
+                    Background="White"
+                    BorderBrush="{DynamicResource DividerBrush}"
+                    BorderThickness="0,0,0,1"
+                    Visibility="{Binding IsSearchAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="560" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0"
+                            Height="40"
+                            Background="#FFF3F6FA"
+                            BorderBrush="#FFD9E1EC"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="40" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    Width="32"
+                                    Height="32"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.Name="Выполнить поиск"
+                                    Command="{Binding SearchCommand}"
+                                    Style="{StaticResource MailActionToolbarButtonStyle}"
+                                    ToolTip="Выполнить поиск">
+                                <Viewbox Width="18" Height="18">
+                                    <Path Data="{StaticResource MailSearchGeometry}"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeEndLineCap="Round"
+                                          StrokeThickness="1.7" />
+                                </Viewbox>
+                            </Button>
+                            <TextBox x:Name="MailSearchTextBox"
+                                     Grid.Column="1"
+                                     Padding="2,0"
+                                     VerticalContentAlignment="Center"
+                                     AutomationProperties.Name="Поиск в почте"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     FontSize="14.5"
+                                     Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
+                                    <KeyBinding Key="Escape" Command="{Binding ClearSearchCommand}" />
+                                </TextBox.InputBindings>
+                                <TextBox.Style>
+                                    <Style TargetType="TextBox">
+                                        <Setter Property="ToolTip" Value="Поиск в почте" />
+                                    </Style>
+                                </TextBox.Style>
+                            </TextBox>
+                            <TextBlock Grid.Column="1"
+                                       Margin="4,0,0,0"
+                                       VerticalAlignment="Center"
+                                       IsHitTestVisible="False"
+                                       Foreground="#FF78879A"
+                                       Text="Поиск в почте">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SearchText}" Value="">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <Button Grid.Column="2"
+                                    Width="32"
+                                    Height="32"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.Name="Очистить поиск"
+                                    Command="{Binding ClearSearchCommand}"
+                                    Content="×"
+                                    FontSize="20"
+                                    Style="{StaticResource MailActionToolbarButtonStyle}"
+                                    ToolTip="Очистить поиск"
+                                    Visibility="{Binding CanClearSearch, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
             <Grid x:Name="MessageListSurface"
+                  Grid.Row="1"
                   Visibility="{Binding IsMessageListVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="44" />
@@ -336,7 +434,9 @@
                         Background="White"
                         BorderBrush="{DynamicResource DividerBrush}"
                         BorderThickness="0,0,0,1">
-                    <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center" Orientation="Horizontal">
+                    <StackPanel HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal">
                         <CheckBox Margin="0,0,8,0"
                                   VerticalAlignment="Center"
                                   AutomationProperties.Name="Выбрать все загруженные письма"
@@ -362,6 +462,41 @@
                                 </Canvas>
                             </Viewbox>
                         </Button>
+                        <StackPanel x:Name="MailPaginationPanel"
+                                    Margin="20,0,0,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Visibility="{Binding IsPageNavigationVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Margin="0,0,10,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="{Binding PageRangeText}" />
+                            <Button Width="32"
+                                    Height="32"
+                                    Margin="0,0,2,0"
+                                    AutomationProperties.Name="Предыдущая страница"
+                                    Command="{Binding PreviousPageCommand}"
+                                    Style="{StaticResource MailActionToolbarButtonStyle}"
+                                    ToolTip="Предыдущая страница">
+                                <TextBlock FontSize="22" Text="‹">
+                                    <TextBlock.RenderTransform>
+                                        <TranslateTransform Y="-3" />
+                                    </TextBlock.RenderTransform>
+                                </TextBlock>
+                            </Button>
+                            <Button Width="32"
+                                    Height="32"
+                                    AutomationProperties.Name="Следующая страница"
+                                    Command="{Binding NextPageCommand}"
+                                    Style="{StaticResource MailActionToolbarButtonStyle}"
+                                    ToolTip="Следующая страница">
+                                <TextBlock FontSize="22" Text="›">
+                                    <TextBlock.RenderTransform>
+                                        <TranslateTransform Y="-3" />
+                                    </TextBlock.RenderTransform>
+                                </TextBlock>
+                            </Button>
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal"
                                     Visibility="{Binding HasSelectedMessages, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Button Margin="4,0,0,0"
@@ -729,10 +864,6 @@
                             Content="Разрешить управление почтой"
                             Style="{StaticResource PrimaryButtonStyle}"
                             Visibility="{Binding RequiresGmailAuthorization, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Command="{Binding LoadMoreCommand}"
-                            Content="Загрузить ещё"
-                            Style="{StaticResource MailSecondaryButtonStyle}"
-                            Visibility="{Binding ShowLoadMoreAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ProgressBar Width="180"
                                  Height="3"
                                  Margin="0,8,0,0"
@@ -757,7 +888,7 @@
                     <TextBlock HorizontalAlignment="Center"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="В этой папке пока нет писем." />
+                               Text="{Binding EmptyListMessage}" />
                 </Grid>
 
                 <Grid Grid.Row="1"
@@ -793,6 +924,7 @@
             </Grid>
 
             <Grid x:Name="MessageDetailSurface"
+                  Grid.Row="1"
                   Background="White"
                   Visibility="{Binding IsMessageDetailVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.RowDefinitions>
@@ -1211,6 +1343,7 @@
             </Grid>
 
             <Grid x:Name="ComposeSurface"
+                  Grid.Row="1"
                   Margin="28,22"
                   IsEnabled="{Binding Compose.CanEdit}"
                   IsVisibleChanged="ComposeSurface_IsVisibleChanged"
@@ -1425,7 +1558,8 @@
                 </Border>
             </Grid>
 
-            <Border Panel.ZIndex="100"
+            <Border Grid.Row="1"
+                    Panel.ZIndex="100"
                     Width="320"
                     MaxHeight="420"
                     Margin="56,48,0,0"

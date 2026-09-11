@@ -28,7 +28,9 @@ internal sealed record GmailApiSummaryData(
 
 internal sealed record GmailApiInboxPage(
     IReadOnlyList<GmailApiSummaryData> Items,
-    string? NextPageToken);
+    string? NextPageToken,
+    long? LabelMessagesTotal = null,
+    long? ResultSizeEstimate = null);
 
 internal sealed record GmailApiInboxTechnicalSnapshot(
     int UnreadCount,
@@ -60,6 +62,15 @@ internal interface IGmailApiReadClient
         string? pageToken,
         int pageSize,
         CancellationToken cancellationToken = default);
+
+    Task<GmailApiInboxPage> SearchPageAsync(
+        MailCredential credential,
+        Guid accountId,
+        string query,
+        string? pageToken,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<GmailApiInboxPage>(new NotSupportedException());
 
     Task<GmailApiRawMessage> GetRawMessageAsync(
         MailCredential credential,
@@ -165,7 +176,7 @@ internal sealed class GmailMailReadProvider(
     IMailCredentialStore credentialStore,
     IGmailApiReadClient apiClient,
     IMailContentExtractor contentExtractor,
-    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailSearchProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider
 {
     private const string MessageKeyPrefix = "gmail:";
     private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
@@ -238,7 +249,38 @@ internal sealed class GmailMailReadProvider(
             continuationToken,
             pageSize,
             cancellationToken);
-        return new MailPage<MailMessageSummary>(page.Items.Select(MapSummary).ToArray(), page.NextPageToken);
+        return new MailPage<MailMessageSummary>(
+            page.Items.Select(MapSummary).ToArray(),
+            page.NextPageToken,
+            page.LabelMessagesTotal);
+    }
+
+    public async Task<MailPage<MailMessageSummary>> SearchAsync(
+        MailAccount account,
+        string query,
+        string? continuationToken,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateAccount(account, pageSize);
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            throw new MailReadException(
+                MailReadFailureKind.InvalidSearchQuery,
+                "Не удалось выполнить поиск. Проверьте запрос.");
+        }
+
+        MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+        GmailApiInboxPage page = await apiClient.SearchPageAsync(
+            credential,
+            account.Id,
+            query,
+            continuationToken,
+            pageSize,
+            cancellationToken);
+        return new MailPage<MailMessageSummary>(
+            page.Items.Select(MapSummary).ToArray(),
+            page.NextPageToken);
     }
 
     public Task<MailMessageContent> GetMessageAsync(
@@ -600,6 +642,10 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             listRequest.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
             ListMessagesResponse response = await listRequest.ExecuteAsync(cancellationToken);
             GmailMessage[] listed = response.Messages?.Where(item => !string.IsNullOrWhiteSpace(item.Id)).ToArray() ?? [];
+            long? labelMessagesTotal = await TryGetMessageOrientedLabelTotalAsync(
+                service,
+                labelId,
+                cancellationToken);
 
             using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
             Task<(int Index, GmailApiSummaryData Summary)>[] tasks = listed
@@ -608,7 +654,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
             return new GmailApiInboxPage(
                 metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
-                response.NextPageToken);
+                response.NextPageToken,
+                labelMessagesTotal,
+                response.ResultSizeEstimate);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -690,6 +738,87 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         {
             throw new MailReadException(MailReadFailureKind.MutationFailed, "Не удалось изменить статус письма Gmail.");
         }
+    }
+
+    public async Task<GmailApiInboxPage> SearchPageAsync(
+        MailCredential credential,
+        Guid accountId,
+        string query,
+        string? pageToken,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(credential, accountId, cancellationToken);
+            GmailService service = session.Service;
+            UsersResource.MessagesResource.ListRequest listRequest = service.Users.Messages.List("me");
+            ConfigureSearchRequest(listRequest, query, pageToken, pageSize);
+            ListMessagesResponse response = await listRequest.ExecuteAsync(cancellationToken);
+            GmailMessage[] listed = response.Messages?.Where(item => !string.IsNullOrWhiteSpace(item.Id)).ToArray() ?? [];
+
+            using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
+            Task<(int Index, GmailApiSummaryData Summary)>[] tasks = listed
+                .Select((item, index) => LoadMetadataAsync(service, item.Id, index, gate, cancellationToken))
+                .ToArray();
+            (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
+            return new GmailApiInboxPage(
+                metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
+                response.NextPageToken,
+                null,
+                response.ResultSizeEstimate);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw MapSearchException(exception);
+        }
+    }
+
+    internal static void ConfigureSearchRequest(
+        UsersResource.MessagesResource.ListRequest request,
+        string query,
+        string? pageToken,
+        int pageSize)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.Q = query;
+        request.IncludeSpamTrash = true;
+        request.MaxResults = pageSize;
+        request.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
+    }
+
+    private static async Task<long?> TryGetMessageOrientedLabelTotalAsync(
+        GmailService service,
+        string labelId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            UsersResource.LabelsResource.GetRequest request = service.Users.Labels.Get("me", labelId);
+            request.Fields = "messagesTotal";
+            Google.Apis.Gmail.v1.Data.Label label = await request.ExecuteAsync(cancellationToken);
+            return GetMessageOrientedLabelTotal(label);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    internal static long? GetMessageOrientedLabelTotal(Google.Apis.Gmail.v1.Data.Label? label)
+    {
+        // Lantern currently renders one row per Message. ThreadsTotal is only valid for a future thread-oriented list.
+        return label?.MessagesTotal is int messagesTotal
+            ? Math.Max(0L, messagesTotal)
+            : null;
     }
 
     public async Task<IReadOnlyList<GmailApiUserLabel>> GetUserLabelsAsync(
@@ -958,6 +1087,27 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         GmailAuthorizationFailureClassifier.RequiresReauthorization(exception)
             ? new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.")
             : new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось загрузить почту. Проверьте подключение к сети.");
+
+    internal static MailReadException MapSearchException(Exception exception)
+    {
+        if (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
+        {
+            return new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
+        }
+
+        return exception switch
+        {
+            GoogleApiException { HttpStatusCode: HttpStatusCode.BadRequest } => new MailReadException(
+                MailReadFailureKind.InvalidSearchQuery,
+                "Не удалось выполнить поиск. Проверьте запрос."),
+            GoogleApiException => new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Gmail временно не может выполнить поиск. Попробуйте ещё раз позже."),
+            _ => new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Не удалось выполнить поиск. Проверьте подключение к сети.")
+        };
+    }
 
     private static bool IsExpectedApiException(Exception exception) =>
         exception is GoogleApiException

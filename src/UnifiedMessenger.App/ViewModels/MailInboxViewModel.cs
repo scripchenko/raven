@@ -17,7 +17,7 @@ public enum MailInboxPresentationMode
 
 public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInboxFreshnessService
 {
-    public const int InitialPageSize = 30;
+    public const int PageSize = 50;
     public const int MessageBodyCacheCapacity = 20;
     public const int RemoteImageConsentCacheCapacity = 20;
     public static readonly TimeSpan MailReadDwellDelay = TimeSpan.FromSeconds(3);
@@ -44,6 +44,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private CancellationTokenSource? _attachmentCancellation;
     private CancellationTokenSource? _readDwellCancellation;
     private CancellationTokenSource? _remoteImageSenderTrustCancellation;
+    private FolderState? _displayedListState;
+    private FolderState? _searchState;
+    private Guid? _searchAccountId;
+    private string _searchText = string.Empty;
+    private string? _activeSearchQuery;
     private MailAccount? _activeAccount;
     private MailFolder? _selectedFolder;
     private MailMessageSummary? _selectedMessageSummary;
@@ -121,8 +126,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Compose.PropertyChanged += OnComposePropertyChanged;
         Compose.Sent += OnMailSent;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, CanRefresh);
-        LoadMoreCommand = new AsyncRelayCommand(LoadMoreAsync, CanLoadMore);
+        PreviousPageCommand = new AsyncRelayCommand(PreviousPageAsync, CanGoToPreviousPage);
+        NextPageCommand = new AsyncRelayCommand(NextPageAsync, CanGoToNextPage);
         RetryCommand = new AsyncRelayCommand(RetryAsync, CanRetry);
+        SearchCommand = new AsyncRelayCommand(
+            SearchAsync,
+            CanSearch,
+            AsyncRelayCommandOptions.AllowConcurrentExecutions);
+        ClearSearchCommand = new RelayCommand(ClearSearch, CanClearSearchCommand);
         ReauthenticateGmailCommand = new AsyncRelayCommand(ReauthenticateGmailAsync, CanReauthenticateGmail);
         RetryMessageCommand = new AsyncRelayCommand(RetryMessageAsync, CanRetryMessage);
         SetReadStateCommand = new AsyncRelayCommand(SetReadStateAsync, CanSetReadState);
@@ -153,8 +164,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public MailComposeViewModel Compose { get; }
 
     public IAsyncRelayCommand RefreshCommand { get; }
-    public IAsyncRelayCommand LoadMoreCommand { get; }
+    public IAsyncRelayCommand PreviousPageCommand { get; }
+    public IAsyncRelayCommand NextPageCommand { get; }
     public IAsyncRelayCommand RetryCommand { get; }
+    public IAsyncRelayCommand SearchCommand { get; }
+    public IRelayCommand ClearSearchCommand { get; }
     public IAsyncRelayCommand ReauthenticateGmailCommand { get; }
     public IAsyncRelayCommand RetryMessageCommand { get; }
     public IAsyncRelayCommand SetReadStateCommand { get; }
@@ -180,6 +194,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     internal Task CurrentMessageLoadTask { get; private set; } = Task.CompletedTask;
     internal Task CurrentFolderLoadTask { get; private set; } = Task.CompletedTask;
+    internal Task CurrentSearchTask { get; private set; } = Task.CompletedTask;
     internal int CachedMessageBodyCount => _messageBodyCache.Count;
     internal int CachedRemoteImageConsentCount => _remoteImageConsents.Count;
     internal bool IsReadStateMetadataUpdate => _isReadStateMetadataUpdate;
@@ -205,6 +220,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 OnPropertyChanged(nameof(ProviderDisplayName));
                 OnPropertyChanged(nameof(EmailAddress));
                 OnPropertyChanged(nameof(IsGmailMailboxAvailable));
+                OnPropertyChanged(nameof(IsSearchAvailable));
                 OnPropertyChanged(nameof(CanUseMailboxActions));
                 OnPropertyChanged(nameof(RequiresGmailReauthentication));
                 OnPropertyChanged(nameof(RequiresGmailMessageReauthentication));
@@ -230,6 +246,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 return;
             }
 
+            ExitSearchMode(clearText: true, applyFolderState: false);
             AccountFolderState catalog = GetAccountFolderState(ActiveAccount.Id);
             catalog.SelectedFolderKey = value.Key;
             ClearSelectionsForAccount(ActiveAccount.Id);
@@ -260,7 +277,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 return;
             }
 
-            FolderState state = GetState(ActiveAccount.Id, SelectedFolder.Key);
+            FolderState state = GetCurrentListState(ActiveAccount.Id, SelectedFolder.Key);
             state.SelectedMessageKey = value?.MessageKey;
             SetContentMode(
                 value is null
@@ -563,8 +580,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _continuationToken, value))
             {
                 OnPropertyChanged(nameof(HasMore));
-                OnPropertyChanged(nameof(ShowLoadMoreAction));
-                LoadMoreCommand.NotifyCanExecuteChanged();
+                RaisePaginationStateChanged();
             }
         }
     }
@@ -574,6 +590,29 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }
         && _gmailMailboxService is not null;
     public bool CanUseMailboxActions => IsGmailMailboxAvailable && !IsMailboxChanging;
+    public bool IsSearchAvailable =>
+        ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }
+        && !IsComposeOpen;
+    public bool IsSearchActive =>
+        ActiveAccount is MailAccount account
+        && _searchAccountId == account.Id
+        && !string.IsNullOrWhiteSpace(_activeSearchQuery)
+        && _searchState is not null;
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(CanClearSearch));
+                SearchCommand.NotifyCanExecuteChanged();
+                ClearSearchCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+    public string? ActiveSearchQuery => IsSearchActive ? _activeSearchQuery : null;
+    public bool CanClearSearch => IsSearchActive || !string.IsNullOrWhiteSpace(SearchText);
     public int SelectedMessageCount => Messages.Count(message => message.IsSelected);
     public bool HasSelectedMessages => SelectedMessageCount > 0;
     public bool AreAllLoadedMessagesSelected => Messages.Count > 0 && Messages.All(message => message.IsSelected);
@@ -592,7 +631,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public string DetailStarActionText => SelectedMessageSummary?.IsStarred == true
         ? "Снять пометку"
         : "Пометить";
-    public bool CanDeleteCurrentFolder => SelectedFolder?.Kind is not MailFolderKind.Trash;
+    public bool CanDeleteCurrentFolder => IsSearchActive || SelectedFolder?.Kind is not MailFolderKind.Trash;
     public bool IsComposeOpen => Compose.IsOpen;
     public MailInboxPresentationMode PresentationMode => IsComposeOpen
         ? MailInboxPresentationMode.Compose
@@ -603,6 +642,28 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool HasFolders => Folders.Count > 0;
     public bool HasMessages => Messages.Count > 0;
     public bool HasMore => !string.IsNullOrWhiteSpace(ContinuationToken);
+    public bool IsPageNavigationVisible => HasLoaded && !HasBlockingListError;
+    public bool CanNavigateToPreviousPage => _displayedListState?.PageIndex > 0;
+    public bool CanNavigateToNextPage => HasMore;
+    public string PageRangeText
+    {
+        get
+        {
+            FolderState? state = _displayedListState;
+            if (state is null || Messages.Count == 0)
+            {
+                return state?.TotalCount is long emptyTotal
+                    ? $"0–0 из {emptyTotal}"
+                    : "0–0";
+            }
+
+            long first = ((long)state.PageIndex * PageSize) + 1;
+            long last = first + Messages.Count - 1;
+            return state.TotalCount is long exactTotal
+                ? $"{first}–{last} из {Math.Max(exactTotal, last)}"
+                : $"{first}–{last}";
+        }
+    }
     public bool HasListError => !string.IsNullOrWhiteSpace(ListErrorMessage);
     public bool HasBlockingListError => HasListError && !HasMessages;
     public bool HasGmailReauthenticationError => !string.IsNullOrWhiteSpace(GmailReauthenticationErrorMessage);
@@ -620,12 +681,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool RequiresGmailComposeReauthentication =>
         RequiresGmailReauthentication && IsComposeOpen;
     public bool ShowTransientRetryAction => HasBlockingListError && !RequiresGmailReauthentication;
-    public bool ShowLoadMoreAction => HasMore && !RequiresGmailReauthentication;
     public bool HasMessageError => !string.IsNullOrWhiteSpace(MessageErrorMessage);
     public bool ShowMessageRetryAction => HasMessageError && !RequiresGmailMessageReauthentication;
     public bool HasReadStateError => !string.IsNullOrWhiteSpace(ReadStateErrorMessage);
     public bool IsInitialLoading => IsListLoading && !HasMessages;
     public bool IsEmpty => HasLoaded && !IsListLoading && !HasMessages && !HasListError;
+    public string EmptyListMessage => IsSearchActive
+        ? "По вашему запросу ничего не найдено."
+        : "В этой папке пока нет писем.";
     public bool HasSelectedMessage => SelectedMessageSummary is not null;
     public bool HasSelectedContent => SelectedMessageContent is not null;
     public bool HasAttachments => SelectedMessageContent?.Attachments.Count > 0;
@@ -686,7 +749,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool CanPrintMessage => ShowPrintAction && _isPrintAvailable;
     public bool ShowReadStateAction =>
         HasSelectedContent
-        && SelectedFolder?.SupportsReadState == true
+        && (IsSearchActive || SelectedFolder?.SupportsReadState == true)
         && _readStateCapability.CanSetReadState;
     public bool RequiresGmailAuthorization =>
         ActiveAccount?.Provider is MailProviderType.Gmail
@@ -725,6 +788,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         MailReadFailureKind.ReauthorizationRequired => "Требуется вход в Google",
         MailReadFailureKind.AuthenticationFailed or MailReadFailureKind.CredentialMissing => "Не удалось войти в почту",
         MailReadFailureKind.FolderUnavailable => "Папка недоступна",
+        MailReadFailureKind.InvalidSearchQuery => "Не удалось выполнить поиск",
         _ => "Не удалось загрузить почту"
     };
     public string? ListErrorDescription => FailureKind is MailReadFailureKind.ReauthorizationRequired
@@ -770,6 +834,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     {
         ThrowIfDisposed();
         CancelActivation();
+        ResetSearchState(clearText: true);
         ClearSelection();
         CloseLabels();
         _readStateCapability = MailReadStateCapability.Unsupported;
@@ -835,7 +900,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
             else
             {
-                await LoadPageAsync(account, folder, state, true, version, _activationCancellation.Token);
+                await LoadPageAsync(account, folder, state, PageRequest.First, version, _activationCancellation.Token);
             }
         }
         else
@@ -879,7 +944,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             folder => folder.Kind == MailFolderKind.Inbox);
         if (inbox is not null)
         {
-            SelectedFolder = inbox;
+            if (IsSearchActive && ReferenceEquals(SelectedFolder, inbox))
+            {
+                ExitSearchMode(clearText: true, applyFolderState: true);
+            }
+            else
+            {
+                SelectedFolder = inbox;
+            }
         }
     }
 
@@ -926,6 +998,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public void RemoveAccount(Guid accountId)
     {
         CancelActivation();
+        if (_searchAccountId == accountId)
+        {
+            ResetSearchState(clearText: true);
+        }
         _accountFolderStates.Remove(accountId);
         _inboxFreshnessStates.Remove(accountId);
         _gmailReauthenticationRequiredAccounts.Remove(accountId);
@@ -964,6 +1040,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         _accountFolderStates.Clear();
         _inboxFreshnessStates.Clear();
         _gmailReauthenticationRequiredAccounts.Clear();
+        ResetSearchState(clearText: true);
         _messageBodyCache.Clear();
         _remoteImageConsents.Clear();
         _messageSourceCache?.Clear();
@@ -1007,7 +1084,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
             else
             {
-                await LoadPageAsync(account, selected, state, true, version, cancellationToken);
+                await LoadPageAsync(account, selected, state, PageRequest.First, version, cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1057,12 +1134,239 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
             else
             {
-                await LoadPageAsync(account, folder, state, true, version, GetActivationToken());
+                await LoadPageAsync(account, folder, state, PageRequest.First, version, GetActivationToken());
             }
         }
         else
         {
             await RefreshReadStateCapabilityAsync();
+        }
+    }
+
+    private Task SearchAsync()
+    {
+        CurrentSearchTask = SearchCoreAsync();
+        return CurrentSearchTask;
+    }
+
+    private async Task SearchCoreAsync()
+    {
+        string query = SearchText.Trim();
+        if (query.Length == 0)
+        {
+            ClearSearch();
+            return;
+        }
+
+        if (ActiveAccount is not { Provider: MailProviderType.Gmail, IsEnabled: true } account
+            || SelectedFolder is null
+            || _providerFactory.Get(account.Provider) is not IMailSearchProvider)
+        {
+            return;
+        }
+
+        long version = ++_viewVersion;
+        CancelReadDwell(resetDetailSession: true);
+        CancelListOperation();
+        CancelMessageOperation();
+        CancelMutationOperation();
+        CancelAttachmentOperation();
+        ClearSelection();
+        CloseLabels();
+        _searchAccountId = account.Id;
+        _activeSearchQuery = query;
+        _searchState = new FolderState();
+        RaiseSearchStateChanged();
+        ApplyState(_searchState);
+        await LoadSearchPageAsync(
+            account,
+            _searchState,
+            PageRequest.First,
+            version,
+            GetActivationToken());
+    }
+
+    private void ClearSearch()
+    {
+        if (_disposed || !CanClearSearch)
+        {
+            return;
+        }
+
+        ExitSearchMode(clearText: true, applyFolderState: true);
+    }
+
+    private void ExitSearchMode(bool clearText, bool applyFolderState)
+    {
+        bool hadSearch = IsSearchActive || _searchState is not null || !string.IsNullOrWhiteSpace(_activeSearchQuery);
+        bool hadText = !string.IsNullOrEmpty(_searchText);
+        if (!hadSearch && (!clearText || !hadText))
+        {
+            return;
+        }
+
+        if (hadSearch)
+        {
+            ++_viewVersion;
+            CancelReadDwell(resetDetailSession: true);
+            CancelListOperation();
+            CancelMessageOperation();
+            CancelMutationOperation();
+            CancelAttachmentOperation();
+            CloseLabels();
+            IsListLoading = false;
+        }
+
+        ResetSearchState(clearText);
+        if (!hadSearch
+            || !applyFolderState
+            || ActiveAccount is not { IsEnabled: true } account
+            || SelectedFolder is not MailFolder folder)
+        {
+            return;
+        }
+
+        FolderState state = GetState(account.Id, folder.Key);
+        state.SelectedMessageKey = null;
+        state.ContentMode = MailInboxPresentationMode.MessageList;
+        ApplyState(state);
+        bool requiresFreshInbox = IsTrackedGmailInbox(account, folder) && IsInboxStale(account.Id);
+        if (!state.HasLoaded || requiresFreshInbox)
+        {
+            CurrentFolderLoadTask = IsTrackedGmailInbox(account, folder)
+                ? RefreshInboxFirstPageAsync(
+                    account,
+                    folder,
+                    state,
+                    _viewVersion,
+                    GetActivationToken())
+                : LoadPageAsync(
+                    account,
+                    folder,
+                    state,
+                    PageRequest.First,
+                    _viewVersion,
+                    GetActivationToken());
+        }
+    }
+
+    private void ResetSearchState(bool clearText)
+    {
+        _searchState = null;
+        _searchAccountId = null;
+        _activeSearchQuery = null;
+        if (clearText)
+        {
+            _searchText = string.Empty;
+            OnPropertyChanged(nameof(SearchText));
+        }
+
+        RaiseSearchStateChanged();
+    }
+
+    private void RaiseSearchStateChanged()
+    {
+        OnPropertyChanged(nameof(IsSearchActive));
+        OnPropertyChanged(nameof(ActiveSearchQuery));
+        OnPropertyChanged(nameof(CanClearSearch));
+        OnPropertyChanged(nameof(EmptyListMessage));
+        SearchCommand.NotifyCanExecuteChanged();
+        ClearSearchCommand.NotifyCanExecuteChanged();
+        RaiseListStateChanged();
+        NotifyMailboxCommandStates();
+    }
+
+    private async Task<bool> LoadSearchPageAsync(
+        MailAccount account,
+        FolderState state,
+        PageRequest request,
+        long version,
+        CancellationToken activationToken)
+    {
+        string query = _activeSearchQuery ?? string.Empty;
+        CancelListOperation();
+        _listCancellation = CancellationTokenSource.CreateLinkedTokenSource(activationToken);
+        CancellationToken cancellationToken = _listCancellation.Token;
+        IsListLoading = true;
+        ListErrorMessage = null;
+        FailureKind = null;
+        try
+        {
+            if (_providerFactory.Get(account.Provider) is not IMailSearchProvider searchProvider)
+            {
+                return false;
+            }
+
+            MailPage<MailMessageSummary> page = await searchProvider.SearchAsync(
+                account,
+                query,
+                request.Token,
+                PageSize,
+                cancellationToken);
+            if (!IsCurrentSearch(account.Id, query, version, cancellationToken))
+            {
+                return false;
+            }
+
+            bool preserveSelection = request.PageIndex == state.PageIndex;
+            HashSet<string> selectedKeys = preserveSelection
+                ? state.Messages
+                    .Where(message => message.IsSelected)
+                    .Select(message => message.MessageKey)
+                    .ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+            state.Messages.Clear();
+            HashSet<string> keys = new(StringComparer.Ordinal);
+            foreach (MailMessageSummary summary in page.Items)
+            {
+                if (keys.Add(summary.MessageKey))
+                {
+                    summary.IsSelected = selectedKeys.Contains(summary.MessageKey);
+                    state.Messages.Add(summary);
+                }
+            }
+
+            if (state.SelectedMessageKey is not null
+                && state.Messages.All(message => message.MessageKey != state.SelectedMessageKey))
+            {
+                state.SelectedMessageKey = null;
+                state.ContentMode = MailInboxPresentationMode.MessageList;
+            }
+
+            state.ApplyPage(request, page.ContinuationToken, totalCount: null);
+            state.HasLoaded = true;
+            state.ListErrorMessage = null;
+            state.FailureKind = null;
+            ApplyState(state);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (MailReadException exception) when (IsCurrentSearch(account.Id, query, version, cancellationToken))
+        {
+            state.HasLoaded = true;
+            state.ListErrorMessage = exception.UserMessage;
+            state.FailureKind = exception.FailureKind;
+            MarkGmailReauthenticationRequired(account, exception.FailureKind);
+            ApplyState(state);
+            return false;
+        }
+        catch (Exception) when (IsCurrentSearch(account.Id, query, version, cancellationToken))
+        {
+            state.HasLoaded = true;
+            state.ListErrorMessage = "Не удалось выполнить поиск. Проверьте подключение к сети.";
+            state.FailureKind = MailReadFailureKind.ConnectionFailed;
+            ApplyState(state);
+            return false;
+        }
+        finally
+        {
+            if (IsCurrentSearch(account.Id, query, version, cancellationToken))
+            {
+                IsListLoading = false;
+            }
         }
     }
 
@@ -1073,32 +1377,63 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             return;
         }
 
+        if (IsSearchActive && _searchState is FolderState searchState)
+        {
+            searchState.PrepareRefresh();
+            await LoadSearchPageAsync(
+                account,
+                searchState,
+                searchState.CurrentPageRequest,
+                _viewVersion,
+                GetActivationToken());
+            return;
+        }
+
         FolderState state = GetState(account.Id, folder.Key);
         ContinuationToken = null;
         ListErrorMessage = null;
         FailureKind = null;
-        if (IsTrackedGmailInbox(account, folder))
+        if (IsTrackedGmailInbox(account, folder) && state.PageIndex == 0)
         {
             await RefreshInboxFirstPageAsync(account, folder, state, _viewVersion, GetActivationToken());
         }
         else
         {
             state.PrepareRefresh();
-            await LoadPageAsync(account, folder, state, true, _viewVersion, GetActivationToken());
+            await LoadPageAsync(account, folder, state, state.CurrentPageRequest, _viewVersion, GetActivationToken());
         }
     }
 
-    private async Task LoadMoreAsync()
+    private Task PreviousPageAsync() => NavigatePageAsync(forward: false);
+
+    private Task NextPageAsync() => NavigatePageAsync(forward: true);
+
+    private async Task NavigatePageAsync(bool forward)
     {
         if (ActiveAccount is not { IsEnabled: true } account || SelectedFolder is not MailFolder folder)
         {
             return;
         }
 
-        FolderState state = GetState(account.Id, folder.Key);
-        if (!string.IsNullOrWhiteSpace(state.ContinuationToken))
+        FolderState state = GetCurrentListState(account.Id, folder.Key);
+        PageRequest request;
+        bool hasRequest = forward
+            ? state.TryCreateNextPageRequest(out request)
+            : state.TryCreatePreviousPageRequest(out request);
+        if (!hasRequest)
         {
-            await LoadPageAsync(account, folder, state, false, _viewVersion, GetActivationToken());
+            return;
+        }
+
+        ClearSelection();
+        CloseLabels();
+        if (IsSearchActive)
+        {
+            await LoadSearchPageAsync(account, state, request, _viewVersion, GetActivationToken());
+        }
+        else
+        {
+            await LoadPageAsync(account, folder, state, request, _viewVersion, GetActivationToken());
         }
     }
 
@@ -1106,6 +1441,18 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     {
         if (ActiveAccount is not { IsEnabled: true } account)
         {
+            return;
+        }
+
+        if (IsSearchActive && _searchState is FolderState searchState)
+        {
+            searchState.PrepareRefresh();
+            await LoadSearchPageAsync(
+                account,
+                searchState,
+                searchState.CurrentPageRequest,
+                _viewVersion,
+                GetActivationToken());
             return;
         }
 
@@ -1127,11 +1474,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         {
             state.Reset();
             ApplyState(state);
-            await LoadPageAsync(account, folder, state, true, _viewVersion, GetActivationToken());
+            await LoadPageAsync(account, folder, state, PageRequest.First, _viewVersion, GetActivationToken());
         }
         else
         {
-            await LoadPageAsync(account, folder, state, false, _viewVersion, GetActivationToken());
+            await LoadPageAsync(account, folder, state, state.CurrentPageRequest, _viewVersion, GetActivationToken());
         }
     }
 
@@ -1213,6 +1560,18 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         GmailReauthenticationErrorMessage = null;
         ListErrorMessage = null;
         FailureKind = null;
+        if (IsSearchActive && _searchState is FolderState searchState)
+        {
+            searchState.PrepareRefresh();
+            await LoadSearchPageAsync(
+                account,
+                searchState,
+                searchState.CurrentPageRequest,
+                version,
+                cancellationToken);
+            return;
+        }
+
         AccountFolderState accountState = GetAccountFolderState(account.Id);
         if (!HasFolders || SelectedFolder is not MailFolder folder)
         {
@@ -1230,7 +1589,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         }
         else
         {
-            await LoadPageAsync(account, folder, state, true, version, cancellationToken);
+            await LoadPageAsync(account, folder, state, PageRequest.First, version, cancellationToken);
         }
     }
 
@@ -1269,7 +1628,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         OnPropertyChanged(nameof(RequiresGmailReadStateReauthentication));
         OnPropertyChanged(nameof(RequiresGmailComposeReauthentication));
         OnPropertyChanged(nameof(ShowTransientRetryAction));
-        OnPropertyChanged(nameof(ShowLoadMoreAction));
+        RaisePaginationStateChanged();
         OnPropertyChanged(nameof(ShowMessageRetryAction));
         ReauthenticateGmailCommand.NotifyCanExecuteChanged();
         RetryCommand.NotifyCanExecuteChanged();
@@ -1299,7 +1658,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             account,
             folder,
             state,
-            replace: true,
+            PageRequest.First,
             version,
             cancellationToken);
         if (succeeded)
@@ -1340,6 +1699,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 && ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true } account
                 && account.Id == accountId
                 && SelectedFolder is { Kind: MailFolderKind.Inbox } folder
+                && !IsSearchActive
                 && !IsComposeOpen)
             {
                 freshness.AutoRefreshRequested = false;
@@ -1366,6 +1726,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true } account
         && account.Id == accountId
         && SelectedFolder?.Kind is MailFolderKind.Inbox
+        && !IsSearchActive
         && !IsComposeOpen;
 
     private static bool IsTrackedGmailInbox(MailAccount account, MailFolder folder) =>
@@ -1387,7 +1748,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         MailAccount account,
         MailFolder folder,
         FolderState state,
-        bool replace,
+        PageRequest request,
         long version,
         CancellationToken activationToken)
     {
@@ -1400,14 +1761,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         try
         {
             IMailReadProvider provider = _providerFactory.Get(account.Provider);
-            Task<int?> unreadCountTask = replace && folder.Kind is MailFolderKind.Inbox
+            Task<int?> unreadCountTask = request.PageIndex == 0 && folder.Kind is MailFolderKind.Inbox
                 ? TryGetInboxUnreadCountAsync(provider, account, cancellationToken)
                 : Task.FromResult<int?>(null);
             MailPage<MailMessageSummary> page = await provider.GetPageAsync(
                 account,
                 folder,
-                replace ? null : state.ContinuationToken,
-                InitialPageSize,
+                request.Token,
+                PageSize,
                 cancellationToken);
             if (!IsCurrent(account.Id, folder.Key, version, cancellationToken))
             {
@@ -1425,50 +1786,39 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 account.InboxUnreadCount = exactUnreadCount;
             }
 
-            if (replace)
-            {
-                HashSet<string> selectedKeys = state.Messages
+            bool preserveSelection = request.PageIndex == state.PageIndex;
+            HashSet<string> selectedKeys = preserveSelection
+                ? state.Messages
                     .Where(message => message.IsSelected)
                     .Select(message => message.MessageKey)
-                    .ToHashSet(StringComparer.Ordinal);
-                MailMessageSummary? retained = state.SelectedMessageKey is null
-                    ? null
-                    : state.Messages.FirstOrDefault(message => message.MessageKey == state.SelectedMessageKey);
-                state.Messages.Clear();
-                HashSet<string> keys = new(StringComparer.Ordinal);
-                foreach (MailMessageSummary summary in page.Items)
-                {
-                    if (keys.Add(summary.MessageKey))
-                    {
-                        summary.IsSelected = selectedKeys.Contains(summary.MessageKey);
-                        state.Messages.Add(summary);
-                    }
-                }
-
-                if (retained is not null && keys.Add(retained.MessageKey))
-                {
-                    retained.IsSelected = false;
-                    state.Messages.Add(retained);
-                }
-            }
-            else
+                    .ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+            MailMessageSummary? retained = preserveSelection && state.SelectedMessageKey is not null
+                ? state.Messages.FirstOrDefault(message => message.MessageKey == state.SelectedMessageKey)
+                : null;
+            state.Messages.Clear();
+            HashSet<string> keys = new(StringComparer.Ordinal);
+            foreach (MailMessageSummary summary in page.Items)
             {
-                HashSet<string> keys = state.Messages.Select(message => message.MessageKey).ToHashSet(StringComparer.Ordinal);
-                foreach (MailMessageSummary summary in page.Items)
+                if (keys.Add(summary.MessageKey))
                 {
-                    if (keys.Add(summary.MessageKey))
-                    {
-                        state.Messages.Add(summary);
-                    }
+                    summary.IsSelected = selectedKeys.Contains(summary.MessageKey);
+                    state.Messages.Add(summary);
                 }
             }
 
-            state.ContinuationToken = page.ContinuationToken;
+            if (retained is not null && keys.Add(retained.MessageKey))
+            {
+                retained.IsSelected = false;
+                state.Messages.Add(retained);
+            }
+
+            state.ApplyPage(request, page.ContinuationToken, page.TotalCount);
             state.HasLoaded = true;
             state.ListErrorMessage = null;
             state.FailureKind = null;
             ApplyState(state);
-            if (replace
+            if (preserveSelection
                 && SelectedMessageContent is null
                 && SelectedMessageSummary is MailMessageSummary restored
                 && CurrentMessageLoadTask.IsCompleted)
@@ -1545,7 +1895,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 return;
             }
 
-            FolderState state = GetState(account.Id, folder.Key);
+            FolderState state = GetCurrentListState(account.Id, folder.Key);
             state.SelectedMessageKey = summary.MessageKey;
             SelectedMessageContent = content;
             MessageFailureKind = null;
@@ -1579,8 +1929,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         _readStateCapability = MailReadStateCapability.Unsupported;
         if (ActiveAccount is not MailAccount account
             || SelectedFolder is not MailFolder folder
-            || !folder.SupportsReadState
             || _providerFactory.Get(account.Provider) is not IMailMessageStateProvider stateProvider)
+        {
+            RaiseReadStateChanged();
+            return;
+        }
+
+        MailFolder readStateFolder = IsSearchActive ? MailFolderCatalog.Inbox() : folder;
+        if (!readStateFolder.SupportsReadState)
         {
             RaiseReadStateChanged();
             return;
@@ -1589,7 +1945,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         try
         {
             ReadStateFailureKind = null;
-            _readStateCapability = await stateProvider.GetReadStateCapabilityAsync(account, folder, GetActivationToken());
+            _readStateCapability = await stateProvider.GetReadStateCapabilityAsync(
+                account,
+                readStateFolder,
+                GetActivationToken());
         }
         catch (MailReadException exception)
         {
@@ -1658,7 +2017,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 return;
             }
 
-            await provider.SetReadStateAsync(account, folder, summary.MessageKey, isRead, cancellationToken);
+            MailFolder readStateFolder = IsSearchActive ? MailFolderCatalog.Inbox() : folder;
+            await provider.SetReadStateAsync(
+                account,
+                readStateFolder,
+                summary.MessageKey,
+                isRead,
+                cancellationToken);
             if (!IsCurrent(account.Id, folder.Key, expectedTarget.ViewVersion, cancellationToken)
                 || SelectedMessageSummary?.MessageKey != summary.MessageKey
                 || (origin is ReadStateMutationOrigin.AutomaticDwell
@@ -1673,7 +2038,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             bool isUnread = !isRead;
-            if (folder.Kind is MailFolderKind.Inbox
+            bool affectsInboxUnreadCount = IsSearchActive
+                ? summary.ProviderLabelIds.Contains(GmailSystemFolders.Inbox)
+                : folder.Kind is MailFolderKind.Inbox;
+            if (affectsInboxUnreadCount
                 && account.InboxUnreadCount is int inboxUnreadCount
                 && summary.IsUnread != isUnread)
             {
@@ -1695,7 +2063,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 IsUnread = isUnread,
                 ProviderLabelIds = updatedLabels
             };
-            FolderState state = GetState(account.Id, folder.Key);
+            FolderState state = GetCurrentListState(account.Id, folder.Key);
             int stateIndex = state.Messages.FindIndex(message => message.MessageKey == summary.MessageKey);
             if (stateIndex >= 0)
             {
@@ -1746,6 +2114,17 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             RaiseReadStateChanged();
+            if (IsCurrentSearch(account.Id, _activeSearchQuery, expectedTarget.ViewVersion, CancellationToken.None)
+                && _searchState is FolderState searchState)
+            {
+                searchState.PrepareRefresh();
+                await LoadSearchPageAsync(
+                    account,
+                    searchState,
+                    PageRequest.First,
+                    expectedTarget.ViewVersion,
+                    GetActivationToken());
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1893,6 +2272,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private void ApplyState(FolderState state)
     {
+        _displayedListState = state;
         _isApplyingState = true;
         try
         {
@@ -1930,6 +2310,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             RaiseListStateChanged();
             RaiseReadStateChanged();
             RaiseMailboxStateChanged();
+            RaisePaginationStateChanged();
         }
         finally
         {
@@ -1941,6 +2322,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private void ClearDisplayedState(bool clearFolders, bool preserveLoading = false)
     {
+        _displayedListState = null;
         _isApplyingState = true;
         try
         {
@@ -1974,6 +2356,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             _readStateCapability = MailReadStateCapability.Unsupported;
             RaiseListStateChanged();
             RaiseReadStateChanged();
+            RaisePaginationStateChanged();
         }
         finally
         {
@@ -2000,6 +2383,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         return state;
     }
 
+    private FolderState GetCurrentListState(Guid accountId, string folderKey) =>
+        IsSearchActive
+        && _searchAccountId == accountId
+        && _searchState is FolderState searchState
+            ? searchState
+            : GetState(accountId, folderKey);
+
     internal bool IsFolderStateStale(Guid accountId, MailFolderKind kind)
     {
         AccountFolderState account = GetAccountFolderState(accountId);
@@ -2019,7 +2409,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             OnPropertyChanged(nameof(IsComposeOpen));
+            OnPropertyChanged(nameof(IsSearchAvailable));
             OnPropertyChanged(nameof(RequiresGmailComposeReauthentication));
+            SearchCommand.NotifyCanExecuteChanged();
             RaisePresentationStateChanged();
         }
 
@@ -2083,6 +2475,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             foreach (MailMessageSummary message in state.Messages)
+            {
+                message.IsSelected = false;
+            }
+        }
+
+        if (_searchAccountId == accountId && _searchState is FolderState searchState)
+        {
+            foreach (MailMessageSummary message in searchState.Messages)
             {
                 message.IsSelected = false;
             }
@@ -2240,6 +2640,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             succeeded =>
             {
                 ApplyProviderLabelState(succeeded, option.Id, apply);
+                InvalidateFolderTotalByProviderLocator(account.Id, option.Id);
                 IReadOnlyList<MailMessageSummary> targets = FindCachedMessages(account.Id, keys);
                 int appliedCount = targets.Count(message => message.ProviderLabelIds.Contains(option.Id));
                 option.IsApplied = appliedCount == 0
@@ -2330,7 +2731,19 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 CloseLabels();
             }
 
-            ApplyState(GetState(accountId, folderKey));
+            ApplyState(GetCurrentListState(accountId, folderKey));
+            if (result.SucceededMessageKeys.Count > 0
+                && IsCurrentSearch(accountId, _activeSearchQuery, version, CancellationToken.None)
+                && _searchState is FolderState searchState)
+            {
+                searchState.PrepareRefresh();
+                await LoadSearchPageAsync(
+                    account,
+                    searchState,
+                    PageRequest.First,
+                    version,
+                    GetActivationToken());
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -2389,6 +2802,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             {
                 RemoveMessages(state, keys);
             }
+        }
+
+        if (_searchAccountId == account.Id && _searchState is FolderState searchState)
+        {
+            RemoveMessages(searchState, keys);
         }
 
         MarkFolderStale(account.Id, MailFolderKind.Trash);
@@ -2489,6 +2907,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 state.Messages[index] = additionalUpdate?.Invoke(updated) ?? updated;
             }
         }
+
+        if (_searchAccountId == account.Id && _searchState is FolderState searchState)
+        {
+            ApplyProviderLabelState(searchState, keys, labelId, isApplied, additionalUpdate);
+        }
     }
 
     private void RemoveMessagesFromFolder(
@@ -2508,11 +2931,35 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private static void RemoveMessages(FolderState state, IReadOnlySet<string> messageKeys)
     {
+        int previousCount = state.Messages.Count;
         state.Messages.RemoveAll(message => messageKeys.Contains(message.MessageKey));
+        int removedCount = previousCount - state.Messages.Count;
+        if (state.TotalCount is long totalCount)
+        {
+            state.TotalCount = removedCount == messageKeys.Count
+                ? Math.Max(0, totalCount - removedCount)
+                : null;
+        }
+
         if (state.SelectedMessageKey is string selected && messageKeys.Contains(selected))
         {
             state.SelectedMessageKey = null;
             state.ContentMode = MailInboxPresentationMode.MessageList;
+        }
+    }
+
+    private void InvalidateFolderTotalByProviderLocator(Guid accountId, string providerLocator)
+    {
+        AccountFolderState account = GetAccountFolderState(accountId);
+        foreach (MailFolder folder in account.Folders.Where(folder =>
+                     string.Equals(folder.ProviderLocator, providerLocator, StringComparison.Ordinal)))
+        {
+            FolderState state = GetState(accountId, folder.Key);
+            state.TotalCount = null;
+            if (ReferenceEquals(_displayedListState, state))
+            {
+                RaisePaginationStateChanged();
+            }
         }
     }
 
@@ -2538,10 +2985,43 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             .Where(item => item.Key.AccountId == accountId)
             .SelectMany(item => item.Value.Messages)
             .Where(message => keys.Contains(message.MessageKey))
+            .Concat(_searchAccountId == accountId && _searchState is FolderState searchState
+                ? searchState.Messages.Where(message => keys.Contains(message.MessageKey))
+                : [])
             .Concat(current)
             .GroupBy(message => message.MessageKey, StringComparer.Ordinal)
             .Select(group => group.First())
             .ToArray();
+    }
+
+    private static void ApplyProviderLabelState(
+        FolderState state,
+        IReadOnlySet<string> messageKeys,
+        string labelId,
+        bool isApplied,
+        Func<MailMessageSummary, MailMessageSummary>? additionalUpdate)
+    {
+        for (int index = 0; index < state.Messages.Count; index++)
+        {
+            MailMessageSummary summary = state.Messages[index];
+            if (!messageKeys.Contains(summary.MessageKey))
+            {
+                continue;
+            }
+
+            HashSet<string> labels = summary.ProviderLabelIds.ToHashSet(StringComparer.Ordinal);
+            if (isApplied)
+            {
+                labels.Add(labelId);
+            }
+            else
+            {
+                labels.Remove(labelId);
+            }
+
+            MailMessageSummary updated = summary with { ProviderLabelIds = labels };
+            state.Messages[index] = additionalUpdate?.Invoke(updated) ?? updated;
+        }
     }
 
     private void HandleMailboxFailure(
@@ -2599,7 +3079,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         FolderState? currentState = state;
         if (currentState is null && ActiveAccount is MailAccount account && SelectedFolder is MailFolder folder)
         {
-            currentState = GetState(account.Id, folder.Key);
+            currentState = GetCurrentListState(account.Id, folder.Key);
         }
 
         if (currentState is not null)
@@ -2677,10 +3157,27 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         IsCurrentAccount(accountId, version, cancellationToken)
         && SelectedFolder?.Key == folderKey;
 
+    private bool IsCurrentSearch(
+        Guid accountId,
+        string? query,
+        long version,
+        CancellationToken cancellationToken) =>
+        IsCurrentAccount(accountId, version, cancellationToken)
+        && IsSearchActive
+        && string.Equals(_activeSearchQuery, query, StringComparison.Ordinal);
+
     private CancellationToken GetActivationToken() => _activationCancellation?.Token ?? CancellationToken.None;
     private bool CanRefresh() => IsActive && SelectedFolder is not null && !IsListLoading;
-    private bool CanLoadMore() => IsActive && ShowLoadMoreAction && !IsListLoading;
+    private bool CanGoToPreviousPage() =>
+        IsActive && CanNavigateToPreviousPage && !RequiresGmailReauthentication && !IsListLoading;
+    private bool CanGoToNextPage() =>
+        IsActive && CanNavigateToNextPage && !RequiresGmailReauthentication && !IsListLoading;
     private bool CanRetry() => IsActive && HasListError && !RequiresGmailReauthentication && !IsListLoading;
+    private bool CanSearch() =>
+        ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }
+        && !IsComposeOpen
+        && (IsSearchActive || !string.IsNullOrWhiteSpace(SearchText));
+    private bool CanClearSearchCommand() => CanClearSearch;
     private bool CanReauthenticateGmail() =>
         IsActive
         && RequiresGmailReauthentication
@@ -2728,7 +3225,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private bool CanDeleteDetail() => CanMutateDetail() && CanDeleteCurrentFolder;
 
     private bool CanChangeSelectedReadState() =>
-        CanMutateSelection() && SelectedFolder?.SupportsReadState == true;
+        CanMutateSelection() && (IsSearchActive || SelectedFolder?.SupportsReadState == true);
 
     private async Task SaveAttachmentAsync(MailAttachmentInfo? attachment)
     {
@@ -2790,15 +3287,27 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         OnPropertyChanged(nameof(HasBlockingListError));
         OnPropertyChanged(nameof(RequiresGmailReauthentication));
         OnPropertyChanged(nameof(ShowTransientRetryAction));
-        OnPropertyChanged(nameof(ShowLoadMoreAction));
+        RaisePaginationStateChanged();
         OnPropertyChanged(nameof(ListErrorDescription));
         OnPropertyChanged(nameof(IsInitialLoading));
         OnPropertyChanged(nameof(IsEmpty));
+        OnPropertyChanged(nameof(EmptyListMessage));
         RefreshCommand.NotifyCanExecuteChanged();
-        LoadMoreCommand.NotifyCanExecuteChanged();
         RetryCommand.NotifyCanExecuteChanged();
+        SearchCommand.NotifyCanExecuteChanged();
+        ClearSearchCommand.NotifyCanExecuteChanged();
         ReauthenticateGmailCommand.NotifyCanExecuteChanged();
         OpenMessageCommand.NotifyCanExecuteChanged();
+    }
+
+    private void RaisePaginationStateChanged()
+    {
+        OnPropertyChanged(nameof(IsPageNavigationVisible));
+        OnPropertyChanged(nameof(CanNavigateToPreviousPage));
+        OnPropertyChanged(nameof(CanNavigateToNextPage));
+        OnPropertyChanged(nameof(PageRangeText));
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        NextPageCommand.NotifyCanExecuteChanged();
     }
 
     private void RaiseReadStateChanged()
@@ -2861,8 +3370,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private void NotifyCommandStates()
     {
         RefreshCommand.NotifyCanExecuteChanged();
-        LoadMoreCommand.NotifyCanExecuteChanged();
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        NextPageCommand.NotifyCanExecuteChanged();
         RetryCommand.NotifyCanExecuteChanged();
+        SearchCommand.NotifyCanExecuteChanged();
+        ClearSearchCommand.NotifyCanExecuteChanged();
         ReauthenticateGmailCommand.NotifyCanExecuteChanged();
         RetryMessageCommand.NotifyCanExecuteChanged();
         SetReadStateCommand.NotifyCanExecuteChanged();
@@ -3069,7 +3581,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             || IsComposeOpen
             || SelectedMessageSummary?.IsUnread != true
             || SelectedMessageContent?.IsUnread != true
-            || SelectedFolder?.SupportsReadState != true
+            || (!IsSearchActive && SelectedFolder?.SupportsReadState != true)
             || !_readStateCapability.CanSetReadState
             || IsReadStateChanging
             || _readDwellAttemptedTarget == target
@@ -3258,18 +3770,76 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private sealed class FolderState
     {
+        private readonly List<string?> _pageTokens = [null];
+
         public List<MailMessageSummary> Messages { get; } = [];
         public string? ContinuationToken { get; set; }
+        public long? TotalCount { get; set; }
+        public int PageIndex { get; private set; }
         public string? SelectedMessageKey { get; set; }
         public bool HasLoaded { get; set; }
         public string? ListErrorMessage { get; set; }
         public MailReadFailureKind? FailureKind { get; set; }
         public MailInboxPresentationMode ContentMode { get; set; } = MailInboxPresentationMode.MessageList;
+        public PageRequest CurrentPageRequest => new(PageIndex, _pageTokens[PageIndex]);
+
+        public bool TryCreateNextPageRequest(out PageRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(ContinuationToken))
+            {
+                request = default;
+                return false;
+            }
+
+            request = new PageRequest(PageIndex + 1, ContinuationToken);
+            return true;
+        }
+
+        public bool TryCreatePreviousPageRequest(out PageRequest request)
+        {
+            if (PageIndex <= 0)
+            {
+                request = default;
+                return false;
+            }
+
+            int previousIndex = PageIndex - 1;
+            request = new PageRequest(previousIndex, _pageTokens[previousIndex]);
+            return true;
+        }
+
+        public void ApplyPage(PageRequest request, string? nextPageToken, long? totalCount)
+        {
+            if (request.PageIndex == 0)
+            {
+                _pageTokens.Clear();
+                _pageTokens.Add(null);
+            }
+            else
+            {
+                while (_pageTokens.Count <= request.PageIndex)
+                {
+                    _pageTokens.Add(null);
+                }
+
+                _pageTokens[request.PageIndex] = request.Token;
+                if (_pageTokens.Count > request.PageIndex + 1)
+                {
+                    _pageTokens.RemoveRange(
+                        request.PageIndex + 1,
+                        _pageTokens.Count - request.PageIndex - 1);
+                }
+            }
+
+            PageIndex = request.PageIndex;
+            ContinuationToken = nextPageToken;
+            TotalCount = totalCount;
+        }
 
         public void Reset()
         {
             Messages.Clear();
-            ContinuationToken = null;
+            ResetPagination();
             SelectedMessageKey = null;
             HasLoaded = false;
             ListErrorMessage = null;
@@ -3279,7 +3849,6 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
         public void PrepareRefresh()
         {
-            ContinuationToken = null;
             ListErrorMessage = null;
             FailureKind = null;
         }
@@ -3287,10 +3856,24 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         public void MarkStale()
         {
             HasLoaded = false;
-            ContinuationToken = null;
+            ResetPagination();
             ListErrorMessage = null;
             FailureKind = null;
         }
+
+        private void ResetPagination()
+        {
+            _pageTokens.Clear();
+            _pageTokens.Add(null);
+            PageIndex = 0;
+            ContinuationToken = null;
+            TotalCount = null;
+        }
+    }
+
+    private readonly record struct PageRequest(int PageIndex, string? Token)
+    {
+        public static PageRequest First => new(0, null);
     }
 
     private readonly record struct FolderStateKey(Guid AccountId, string FolderKey);

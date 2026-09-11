@@ -11,8 +11,8 @@ public sealed class GmailInboxFreshnessTests
     {
         TestReadProvider provider = new();
         MailAccount account = Account(1);
-        provider.Enqueue(account.Id, Page("old"));
-        provider.Enqueue(account.Id, Page("new"));
+        provider.Enqueue(account.Id, Page("old", 100));
+        provider.Enqueue(account.Id, Page("new", 101));
         using MailInboxViewModel viewModel = CreateViewModel(provider);
         await viewModel.ActivateAsync(account);
 
@@ -21,6 +21,7 @@ public sealed class GmailInboxFreshnessTests
 
         Assert.Equal(2, provider.GetPageCallCount(account.Id));
         Assert.Equal("new", viewModel.Messages[0].MessageKey);
+        Assert.Equal("1–1 из 101", viewModel.PageRangeText);
         Assert.False(viewModel.IsInboxStale(account.Id));
     }
 
@@ -241,8 +242,8 @@ public sealed class GmailInboxFreshnessTests
         IsEnabled = true
     };
 
-    private static MailPage<MailMessageSummary> Page(string key) =>
-        new([Summary(key)], null);
+    private static MailPage<MailMessageSummary> Page(string key, long? totalCount = null) =>
+        new([Summary(key)], null, totalCount);
 
     private static MailMessageSummary Summary(string key) =>
         new(

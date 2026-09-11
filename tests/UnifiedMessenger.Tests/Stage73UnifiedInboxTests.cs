@@ -122,17 +122,17 @@ public sealed class Stage73UnifiedInboxTests
     }
 
     [Fact]
-    public async Task LoadMore_AppendsWithoutDuplicatingMessageKeys()
+    public async Task NextPage_ReplacesCurrentPage()
     {
         QueueReadProvider provider = new();
         provider.EnqueuePage(Page([Summary("one")], "next"));
-        provider.EnqueuePage(Page([Summary("one"), Summary("two")], null));
+        provider.EnqueuePage(Page([Summary("two")], null));
         using MailInboxViewModel viewModel = CreateViewModel(provider);
 
         await viewModel.ActivateAsync(CreateAccount(MailProviderType.Gmail));
-        await viewModel.LoadMoreCommand.ExecuteAsync(null);
+        await viewModel.NextPageCommand.ExecuteAsync(null);
 
-        Assert.Equal(["one", "two"], viewModel.Messages.Select(message => message.MessageKey));
+        Assert.Equal("two", Assert.Single(viewModel.Messages).MessageKey);
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public sealed class Stage73UnifiedInboxTests
     }
 
     [Fact]
-    public async Task RefreshAfterLoadMore_PreservesSelectedOlderMessage()
+    public async Task RefreshAfterNextPage_PreservesSelectedMessage()
     {
         MailMessageSummary firstPageMessage = Summary("first");
         MailMessageSummary olderSelectedMessage = Summary("older");
@@ -276,7 +276,7 @@ public sealed class Stage73UnifiedInboxTests
         provider.EnqueuePage(Page([firstPageMessage with { Subject = "Refreshed" }], "next"));
         using MailInboxViewModel viewModel = CreateViewModel(provider);
         await viewModel.ActivateAsync(CreateAccount(MailProviderType.Gmail));
-        await viewModel.LoadMoreCommand.ExecuteAsync(null);
+        await viewModel.NextPageCommand.ExecuteAsync(null);
         viewModel.SelectedMessageSummary = olderSelectedMessage;
         await viewModel.CurrentMessageLoadTask;
         MailMessageContent visibleContent = Assert.IsType<MailMessageContent>(viewModel.SelectedMessageContent);
