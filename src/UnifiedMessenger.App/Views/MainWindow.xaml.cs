@@ -88,6 +88,7 @@ public partial class MainWindow : Window
         _mailMessageHtmlRenderer = mailMessageHtmlRenderer;
         _mailRendererWindowLifecycle = new MailRendererWindowLifecycleCoordinator(mailMessageHtmlRenderer);
         _remoteMailImageLoader = remoteMailImageLoader;
+        _mailInboxViewModel.SetAutomaticallyShowRemoteImages(_viewModel.AutomaticallyShowRemoteImages);
         DataContext = viewModel;
 
         InitializeComponent();
@@ -297,8 +298,20 @@ public partial class MainWindow : Window
     private void OnDeactivated(object? sender, EventArgs eventArgs) =>
         UpdateMailDetailActivity();
 
-    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    private async void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
+        if (eventArgs.PropertyName == nameof(MainWindowViewModel.AutomaticallyShowRemoteImages))
+        {
+            _mailInboxViewModel.SetAutomaticallyShowRemoteImages(
+                _viewModel.AutomaticallyShowRemoteImages);
+            if (_viewModel.AutomaticallyShowRemoteImages)
+            {
+                await LoadCurrentRemoteImagesAsync();
+            }
+
+            return;
+        }
+
         if (eventArgs.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen)
             || eventArgs.PropertyName == nameof(MainWindowViewModel.WebViewStatus))
         {
@@ -332,12 +345,25 @@ public partial class MainWindow : Window
             return;
         }
 
+        bool shouldLoadAutomaticRemoteImages = ShouldLoadAutomaticRemoteImages(
+            _mailInboxViewModel,
+            eventArgs.PropertyName);
+
         if (!ShouldRefreshMailRendererContent(_mailInboxViewModel, eventArgs.PropertyName))
         {
+            if (shouldLoadAutomaticRemoteImages)
+            {
+                await LoadCurrentRemoteImagesAsync();
+            }
+
             return;
         }
 
         await RefreshMailRendererContentAsync();
+        if (shouldLoadAutomaticRemoteImages)
+        {
+            await LoadCurrentRemoteImagesAsync();
+        }
     }
 
     internal static bool ShouldRefreshMailRendererContent(
@@ -357,7 +383,17 @@ public partial class MainWindow : Window
         MailInboxViewModel viewModel,
         string? propertyName) =>
         propertyName == nameof(MailInboxViewModel.IsCurrentRemoteImageSenderTrusted)
+        && !viewModel.AutomaticallyShowRemoteImages
         && viewModel.IsCurrentRemoteImageSenderTrusted
+        && !viewModel.AreRemoteImagesShown;
+
+    internal static bool ShouldLoadAutomaticRemoteImages(
+        MailInboxViewModel viewModel,
+        string? propertyName) =>
+        propertyName == nameof(MailInboxViewModel.SelectedMessageContent)
+        && viewModel.AutomaticallyShowRemoteImages
+        && viewModel.IsMessageDetailVisible
+        && viewModel.SelectedMessageContent?.HasRemoteImages == true
         && !viewModel.AreRemoteImagesShown;
 
     private async Task InitializeSelectedServiceAfterSettingsAsync()

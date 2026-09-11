@@ -501,6 +501,29 @@ public sealed class LanternMailUiTests
     }
 
     [Fact]
+    public void Settings_ExposeGlobalAutomaticRemoteImagesToggleWithPrivacyDisclosure()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Views", "SettingsView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XElement toggle = Assert.Single(
+            view.Descendants(presentation + "CheckBox"),
+            element => (string?)element.Attribute("Command")
+                == "{Binding SetAutomaticallyShowRemoteImagesCommand}");
+        string markup = view.ToString();
+
+        Assert.Equal(
+            "{Binding AutomaticallyShowRemoteImages, Mode=OneWay}",
+            (string?)toggle.Attribute("IsChecked"));
+        Assert.Equal(
+            "Автоматически показывать внешние изображения",
+            (string?)toggle.Attribute("AutomationProperties.Name"));
+        Assert.Contains("Автоматически показывать внешние изображения", markup, StringComparison.Ordinal);
+        Assert.Contains("без cookies и учётных данных", markup, StringComparison.Ordinal);
+        Assert.Contains("Отправитель всё равно может узнать о загрузке изображения", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DetailCommandsReflectReadStateAndDraftCapability()
     {
         UiMailProvider provider = new();

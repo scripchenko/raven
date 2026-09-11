@@ -135,6 +135,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool DoNotDisturb => _settings.Notifications.DoNotDisturb;
     public bool ShowNotificationPreview => _settings.Notifications.ShowNotificationPreview;
     public bool NotificationSoundEnabled => _settings.Notifications.PlaySound;
+    public bool AutomaticallyShowRemoteImages => _settings.AutomaticallyShowRemoteImages;
     public NotificationSoundMode TelegramNotificationSoundMode =>
         _settings.Notifications.TelegramSoundMode;
     public NotificationSoundMode WhatsAppNotificationSoundMode =>
@@ -507,6 +508,19 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _settings.Notifications.PlaySound = value;
         OnPropertyChanged(nameof(NotificationSoundEnabled));
+        await SaveSettingsAsync();
+    }
+
+    public async Task SetAutomaticallyShowRemoteImagesAsync(bool value)
+    {
+        ThrowIfDisposed();
+        if (_settings.AutomaticallyShowRemoteImages == value)
+        {
+            return;
+        }
+
+        _settings.AutomaticallyShowRemoteImages = value;
+        OnPropertyChanged(nameof(AutomaticallyShowRemoteImages));
         await SaveSettingsAsync();
     }
 

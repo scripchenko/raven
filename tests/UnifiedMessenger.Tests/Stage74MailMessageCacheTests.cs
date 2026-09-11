@@ -393,7 +393,7 @@ public sealed class Stage74MailMessageCacheTests
     }
 
     [Fact]
-    public void MessageBodiesAndRemoteImageConsent_AreNotPartOfPersistedSettings()
+    public void MessageBodiesAndRemoteImageConsent_AreNotPersistedAlongsideGlobalDisplayPolicy()
     {
         string settings = JsonSerializer.Serialize(AppSettings.CreateDefault());
         string[] persistedPropertyNames = typeof(AppSettings).GetProperties()
@@ -402,12 +402,14 @@ public sealed class Stage74MailMessageCacheTests
             .ToArray();
 
         Assert.DoesNotContain("MessageBody", settings, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("RemoteImage", settings, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(nameof(AppSettings.AutomaticallyShowRemoteImages), settings, StringComparison.Ordinal);
         Assert.DoesNotContain(
             persistedPropertyNames,
             name => name.Contains("MessageContent", StringComparison.OrdinalIgnoreCase)
-                || name.Contains("RemoteImage", StringComparison.OrdinalIgnoreCase)
                 || name.Contains("Consent", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            typeof(MailAccount).GetProperties(),
+            property => property.Name.Contains("RemoteImage", StringComparison.OrdinalIgnoreCase));
     }
 
     private static MailInboxViewModel CreateViewModel(CountingReadProvider provider) =>

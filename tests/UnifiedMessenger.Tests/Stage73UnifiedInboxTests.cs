@@ -1308,15 +1308,14 @@ public sealed class Stage73UnifiedInboxTests
     }
 
     [Fact]
-    public void RemoteImageConsent_IsAbsentFromPersistedSettingsSchema()
+    public void RemoteImageConsent_IsNotPersistedWhileGlobalDisplayPolicyIs()
     {
         string settingsJson = JsonSerializer.Serialize(new AppSettings());
 
-        Assert.DoesNotContain("RemoteImage", settingsJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(nameof(AppSettings.AutomaticallyShowRemoteImages), settingsJson, StringComparison.Ordinal);
         Assert.DoesNotContain(
             typeof(AppSettings).GetProperties(),
-            property => property.Name.Contains("Consent", StringComparison.OrdinalIgnoreCase)
-                || property.Name.Contains("RemoteImage", StringComparison.OrdinalIgnoreCase));
+            property => property.Name.Contains("Consent", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(
             typeof(MailInboxViewModel).GetConstructors().Single().GetParameters(),
             parameter => parameter.ParameterType.Name.Contains("Settings", StringComparison.OrdinalIgnoreCase)
@@ -1343,8 +1342,8 @@ public sealed class Stage73UnifiedInboxTests
         Assert.DoesNotContain(
             typeof(AppSettings).GetProperties(),
             property => property.PropertyType == typeof(MailMessageContent)
-                || property.PropertyType == typeof(MailImageContent)
-                || property.Name.Contains("RemoteImage", StringComparison.Ordinal));
+                || property.PropertyType == typeof(MailImageContent));
+        Assert.True(new AppSettings().AutomaticallyShowRemoteImages);
     }
 
     [Fact]

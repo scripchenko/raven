@@ -68,6 +68,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public bool DoNotDisturb => _mainWindowViewModel.DoNotDisturb;
     public bool ShowNotificationPreview => _mainWindowViewModel.ShowNotificationPreview;
     public bool NotificationSoundEnabled => _mainWindowViewModel.NotificationSoundEnabled;
+    public bool AutomaticallyShowRemoteImages => _mainWindowViewModel.AutomaticallyShowRemoteImages;
     public bool IsTelegramLanternSound =>
         _mainWindowViewModel.TelegramNotificationSoundMode is NotificationSoundMode.Lantern;
     public bool IsTelegramNativeSound => !IsTelegramLanternSound;
@@ -140,6 +141,15 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         if (value is bool enabled)
         {
             await _mainWindowViewModel.SetNotificationSoundEnabledAsync(enabled);
+        }
+    }
+
+    [RelayCommand]
+    private async Task SetAutomaticallyShowRemoteImages(bool? value)
+    {
+        if (value is bool enabled)
+        {
+            await _mainWindowViewModel.SetAutomaticallyShowRemoteImagesAsync(enabled);
         }
     }
 
@@ -303,6 +313,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         else if (eventArgs.PropertyName is nameof(MainWindowViewModel.NotificationSoundEnabled))
         {
             OnPropertyChanged(nameof(NotificationSoundEnabled));
+        }
+        else if (eventArgs.PropertyName is nameof(MainWindowViewModel.AutomaticallyShowRemoteImages))
+        {
+            OnPropertyChanged(nameof(AutomaticallyShowRemoteImages));
         }
         else if (eventArgs.PropertyName is nameof(MainWindowViewModel.TelegramNotificationSoundMode))
         {

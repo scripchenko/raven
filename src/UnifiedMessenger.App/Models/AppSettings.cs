@@ -15,6 +15,7 @@ public sealed class AppSettings
     public bool CloseCompletelyOnWindowClose { get; set; }
     public bool RestoreLastService { get; set; } = true;
     public bool StartWithWindows { get; set; }
+    public bool AutomaticallyShowRemoteImages { get; set; } = true;
     public string Language { get; set; } = "ru-RU";
     public Guid? LastServiceId { get; set; }
     public Guid? LastNavigationAccountId { get; set; }

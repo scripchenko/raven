@@ -51,6 +51,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private bool _isListLoading;
     private bool _isMessageLoading;
     private bool _isRemoteImageLoading;
+    private bool _automaticallyShowRemoteImages;
     private bool _isPrintAvailable;
     private bool _isCurrentRemoteImageSenderTrusted;
     private bool _canTrustCurrentRemoteImageSender;
@@ -315,7 +316,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 OnPropertyChanged(nameof(SelectedMessageDisplayDate));
                 OnPropertyChanged(nameof(ShowPrintAction));
                 OnPropertyChanged(nameof(CanPrintMessage));
-                if (!isReadStateMetadataUpdate)
+                if (!isReadStateMetadataUpdate && !AutomaticallyShowRemoteImages)
                 {
                     BeginRemoteImageSenderTrustLookup();
                 }
@@ -333,6 +334,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && _remoteImageConsents.TryGet(key, out _);
 
     public bool IsCurrentRemoteImageSenderTrusted => _isCurrentRemoteImageSenderTrusted;
+
+    public bool AutomaticallyShowRemoteImages => _automaticallyShowRemoteImages;
 
     public bool CanTrustCurrentRemoteImageSender => _canTrustCurrentRemoteImageSender;
 
@@ -629,7 +632,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool IsSelectedMessagePlainText => SelectedMessageContent?.BodyKind is MailMessageBodyKind.PlainText;
     public bool IsSelectedMessageHtml => SelectedMessageContent?.BodyKind is MailMessageBodyKind.SanitizedHtml;
     public bool ShowRemoteImagesBanner =>
-        SelectedMessageContent?.HasRemoteImages == true
+        !AutomaticallyShowRemoteImages
+        && SelectedMessageContent?.HasRemoteImages == true
         && (IsCurrentRemoteImageSenderTrusted || !AreRemoteImagesShown);
     public bool ShowOneTimeRemoteImagesAction =>
         ShowRemoteImagesBanner
@@ -838,6 +842,26 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         {
             await RefreshInboxUnreadCountAsync(account, version, _activationCancellation.Token);
             await RefreshReadStateCapabilityAsync();
+        }
+    }
+
+    public void SetAutomaticallyShowRemoteImages(bool enabled)
+    {
+        if (_disposed || _automaticallyShowRemoteImages == enabled)
+        {
+            return;
+        }
+
+        _automaticallyShowRemoteImages = enabled;
+        OnPropertyChanged(nameof(AutomaticallyShowRemoteImages));
+        if (enabled)
+        {
+            CancelRemoteImageSenderTrustLookup();
+            RaiseRemoteImageConsentStateChanged();
+        }
+        else
+        {
+            BeginRemoteImageSenderTrustLookup();
         }
     }
 

@@ -433,6 +433,28 @@
                                    Foreground="{DynamicResource TextSecondaryBrush}"
                                    Text="Пароли хранятся отдельно в защищённом хранилище Windows и не записываются в settings.json."
                                    TextWrapping="Wrap" />
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,24,0">
+                                    <TextBlock FontWeight="SemiBold"
+                                               Text="Автоматически показывать внешние изображения" />
+                                    <TextBlock Margin="0,6,0,0"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="Lantern загружает изображения через защищённый загрузчик без cookies и учётных данных. Отправитель всё равно может узнать о загрузке изображения."
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                                <CheckBox Grid.Column="1"
+                                          VerticalAlignment="Center"
+                                          AutomationProperties.Name="Автоматически показывать внешние изображения"
+                                          Command="{Binding SetAutomaticallyShowRemoteImagesCommand}"
+                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                          IsChecked="{Binding AutomaticallyShowRemoteImages, Mode=OneWay}" />
+                            </Grid>
+                        </Border>
                         <ItemsControl ItemsSource="{Binding MailAccounts}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>

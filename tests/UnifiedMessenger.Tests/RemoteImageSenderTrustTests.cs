@@ -26,6 +26,60 @@ public sealed class RemoteImageSenderTrustTests
     }
 
     [Fact]
+    public async Task AutomaticMode_BypassesPerMessageAndSenderGatesAndRequestsProtectedLoad()
+    {
+        MailAccount account = Account();
+        MailMessageSummary summary = Summary("automatic");
+        InMemoryTrustStore trustStore = new();
+        using MailInboxViewModel viewModel = ViewModel(
+            account,
+            summary,
+            Content("automatic", "new-sender@example.test"),
+            trustStore);
+        viewModel.SetAutomaticallyShowRemoteImages(true);
+
+        await OpenAsync(viewModel, account, summary);
+
+        Assert.True(viewModel.AutomaticallyShowRemoteImages);
+        Assert.False(viewModel.ShowRemoteImagesBanner);
+        Assert.False(viewModel.ShowOneTimeRemoteImagesAction);
+        Assert.False(viewModel.ShowAlwaysRemoteImagesFromSenderAction);
+        Assert.False(viewModel.ShowRevokeRemoteImagesFromSenderAction);
+        Assert.True(MainWindow.ShouldLoadAutomaticRemoteImages(
+            viewModel,
+            nameof(MailInboxViewModel.SelectedMessageContent)));
+        Assert.False(MainWindow.ShouldLoadTrustedRemoteImages(
+            viewModel,
+            nameof(MailInboxViewModel.IsCurrentRemoteImageSenderTrusted)));
+    }
+
+    [Fact]
+    public async Task ManualMode_RestoresExplicitGateForCurrentlyOpenUnknownSender()
+    {
+        MailAccount account = Account();
+        MailMessageSummary summary = Summary("manual");
+        InMemoryTrustStore trustStore = new();
+        using MailInboxViewModel viewModel = ViewModel(
+            account,
+            summary,
+            Content("manual", "new-sender@example.test"),
+            trustStore);
+        viewModel.SetAutomaticallyShowRemoteImages(true);
+        await OpenAsync(viewModel, account, summary);
+
+        viewModel.SetAutomaticallyShowRemoteImages(false);
+        await viewModel.CurrentRemoteImageSenderTrustTask;
+
+        Assert.False(viewModel.AutomaticallyShowRemoteImages);
+        Assert.True(viewModel.ShowRemoteImagesBanner);
+        Assert.True(viewModel.ShowOneTimeRemoteImagesAction);
+        Assert.True(viewModel.CanShowRemoteImages);
+        Assert.False(MainWindow.ShouldLoadAutomaticRemoteImages(
+            viewModel,
+            nameof(MailInboxViewModel.SelectedMessageContent)));
+    }
+
+    [Fact]
     public async Task AlwaysTrust_AppliesToFutureMessagesFromSameSenderInSameAccount()
     {
         MailAccount account = Account();

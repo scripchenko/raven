@@ -26,6 +26,7 @@ public sealed class Stage5SettingsTests
         fixture.Settings.Notifications.DoNotDisturb = true;
         fixture.Settings.Notifications.ShowNotificationPreview = false;
         fixture.Settings.Notifications.PlaySound = false;
+        fixture.Settings.AutomaticallyShowRemoteImages = false;
 
         using SettingsViewModel viewModel = fixture.CreateSettingsViewModel();
 
@@ -35,6 +36,7 @@ public sealed class Stage5SettingsTests
         Assert.True(viewModel.DoNotDisturb);
         Assert.False(viewModel.ShowNotificationPreview);
         Assert.False(viewModel.NotificationSoundEnabled);
+        Assert.False(viewModel.AutomaticallyShowRemoteImages);
         Assert.Equal(fixture.Main.Services.Count, viewModel.Accounts.Count);
         Assert.Same(fixture.Main.Services[0], viewModel.Accounts[0].Service);
     }
@@ -113,6 +115,58 @@ public sealed class Stage5SettingsTests
 
         Assert.False(fixture.Settings.Notifications.PlaySound);
         Assert.Equal(1, fixture.Store.SaveCount);
+    }
+
+    [Fact]
+    public async Task AutomaticallyShowRemoteImages_ChangesAndPersistsImmediately()
+    {
+        using SettingsFixture fixture = CreateFixture();
+        using SettingsViewModel viewModel = fixture.CreateSettingsViewModel();
+        List<string?> changedProperties = [];
+        viewModel.PropertyChanged += (_, eventArgs) => changedProperties.Add(eventArgs.PropertyName);
+
+        await viewModel.SetAutomaticallyShowRemoteImagesCommand.ExecuteAsync(false);
+
+        Assert.False(fixture.Settings.AutomaticallyShowRemoteImages);
+        Assert.False(fixture.Main.AutomaticallyShowRemoteImages);
+        Assert.False(viewModel.AutomaticallyShowRemoteImages);
+        Assert.Equal(1, fixture.Store.SaveCount);
+        Assert.Contains(nameof(SettingsViewModel.AutomaticallyShowRemoteImages), changedProperties);
+    }
+
+    [Fact]
+    public async Task AutomaticallyShowRemoteImages_RemainsOneGlobalPolicyAcrossMailAccounts()
+    {
+        AppSettings settings = AppSettings.CreateDefault();
+        MailAccount firstAccount = new()
+        {
+            Id = Guid.NewGuid(),
+            Provider = MailProviderType.Gmail,
+            EmailAddress = "first@gmail.test",
+            CredentialKey = "first-credential",
+            IsEnabled = true
+        };
+        MailAccount secondAccount = new()
+        {
+            Id = Guid.NewGuid(),
+            Provider = MailProviderType.Yandex,
+            EmailAddress = "second@yandex.test",
+            CredentialKey = "second-credential",
+            IsEnabled = true
+        };
+        settings.MailAccounts.AddRange([firstAccount, secondAccount]);
+        using SettingsFixture fixture = new(settings, _catalog);
+
+        await fixture.Main.SetAutomaticallyShowRemoteImagesAsync(false);
+        fixture.Main.SelectMailAccount(firstAccount.Id);
+        Assert.False(fixture.Main.AutomaticallyShowRemoteImages);
+        fixture.Main.SelectMailAccount(secondAccount.Id);
+        Assert.False(fixture.Main.AutomaticallyShowRemoteImages);
+
+        Assert.Equal(1, fixture.Store.SaveCount);
+        Assert.DoesNotContain(
+            typeof(MailAccount).GetProperties(),
+            property => property.Name.Contains("RemoteImage", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -598,6 +652,33 @@ public sealed class Stage5SettingsTests
         Assert.False(loaded.Settings.Notifications.PlaySound);
         Assert.Equal(account.Id, Assert.Single(loaded.Settings.Services).Id);
         Assert.Empty(temporaryFiles);
+    }
+
+    [Fact]
+    public async Task AutomaticallyShowRemoteImages_DefaultsOnAndPersistsOffWithoutSchemaMigration()
+    {
+        using TempSettingsFolder temp = new();
+        JsonSettingsService service = new(temp.SettingsPath);
+
+        Assert.True(AppSettings.CreateDefault().AutomaticallyShowRemoteImages);
+
+        AppSettings settings = AppSettings.CreateDefault();
+        settings.AutomaticallyShowRemoteImages = false;
+        await service.SaveAsync(settings);
+        Assert.False((await service.LoadAsync()).Settings.AutomaticallyShowRemoteImages);
+
+        await File.WriteAllTextAsync(
+            temp.SettingsPath,
+            $$"""
+            {
+              "schemaVersion": {{AppSettings.CurrentSchemaVersion}}
+            }
+            """);
+        SettingsLoadResult legacy = await service.LoadAsync();
+
+        Assert.True(legacy.Settings.AutomaticallyShowRemoteImages);
+        Assert.False(legacy.WasMigrated);
+        Assert.Equal(AppSettings.CurrentSchemaVersion, legacy.Settings.SchemaVersion);
     }
 
     [Fact]
