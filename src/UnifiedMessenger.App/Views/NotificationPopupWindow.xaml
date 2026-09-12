@@ -16,6 +16,7 @@
         FontFamily="Segoe UI"
         UseLayoutRounding="True">
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <DrawingImage x:Key="MailNotificationIcon">
             <DrawingImage.Drawing>
                 <DrawingGroup>
@@ -46,6 +47,20 @@
                 </DataTrigger>
                 <DataTrigger Binding="{Binding ServiceName}" Value="Почта">
                     <Setter Property="Source" Value="{StaticResource MailNotificationIcon}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsGmail}" Value="True">
+                    <Setter Property="Source" Value="/UnifiedMessenger.App;component/Assets/Services/gmail.png" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="PopupContentSourceIconStyle"
+               TargetType="Image"
+               BasedOn="{StaticResource PopupSourceIconStyle}">
+            <Setter Property="Visibility" Value="Visible" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ShowSenderInitials}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -157,7 +172,7 @@
                                TextTrimming="CharacterEllipsis"
                                TextWrapping="Wrap" />
                     <TextBlock x:Name="NotificationBody"
-                               MaxHeight="96"
+                               MaxHeight="48"
                                FontSize="12.5"
                                Foreground="#FF454545"
                                Text="{Binding Body}"
@@ -169,13 +184,40 @@
                             <TranslateTransform Y="-1" />
                         </TextBlock.RenderTransform>
                     </TextBlock>
+                    <TextBlock x:Name="NotificationPreview"
+                               Margin="0,1,0,0"
+                               MaxHeight="48"
+                               FontSize="12"
+                               Foreground="#FF777777"
+                               Text="{Binding PreviewText}"
+                               LineHeight="15"
+                               LineStackingStrategy="BlockLineHeight"
+                               TextTrimming="CharacterEllipsis"
+                               TextWrapping="Wrap"
+                               Visibility="{Binding HasPreviewText, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </StackPanel>
-                <Image x:Name="ContentSourceIcon"
-                       Grid.Column="1"
-                       Width="36"
-                       Height="36"
-                       VerticalAlignment="Top"
-                       Style="{StaticResource PopupSourceIconStyle}" />
+                <Grid Grid.Column="1"
+                      Width="36"
+                      Height="36"
+                      VerticalAlignment="Top">
+                    <Image x:Name="ContentSourceIcon"
+                           Width="36"
+                           Height="36"
+                           Style="{StaticResource PopupContentSourceIconStyle}" />
+                    <Border x:Name="SenderInitialsAvatar"
+                            Width="36"
+                            Height="36"
+                            Background="#FFEA4335"
+                            CornerRadius="18"
+                            Visibility="{Binding ShowSenderInitials, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="White"
+                                   Text="{Binding SenderAvatarInitials}" />
+                    </Border>
+                </Grid>
             </Grid>
         </Grid>
     </Border>

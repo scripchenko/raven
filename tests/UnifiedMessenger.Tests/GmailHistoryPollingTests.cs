@@ -49,6 +49,58 @@ public sealed class GmailHistoryPollingTests
     }
 
     [Fact]
+    public async Task SingleNewMessage_ForwardsOnlyItsSafeNotificationMetadata()
+    {
+        MailAccount account = Account();
+        HistoryProvider provider = new();
+        provider.Enqueue(account.Id, Result(1, 100));
+        provider.Enqueue(account.Id, Result(2, 104, "m1") with
+        {
+            NotificationPreview = new MailNotificationPreview(
+                "Sender",
+                "sender@example.test",
+                "Subject",
+                "Snippet")
+        });
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        MailNotificationPreview preview = Assert.IsType<MailNotificationPreview>(Assert.Single(events).Preview);
+        Assert.Equal("Sender", preview.SenderDisplayName);
+        Assert.Equal("sender@example.test", preview.SenderAddress);
+        Assert.Equal("Subject", preview.Subject);
+        Assert.Equal("Snippet", preview.Snippet);
+    }
+
+    [Fact]
+    public async Task MultipleNewMessages_DoNotAttachOneMessagesPreviewToBatch()
+    {
+        MailAccount account = Account();
+        HistoryProvider provider = new();
+        provider.Enqueue(account.Id, Result(1, 100));
+        provider.Enqueue(account.Id, Result(3, 104, "m1", "m2") with
+        {
+            NotificationPreview = new MailNotificationPreview(
+                "Sender",
+                "sender@example.test",
+                "Subject",
+                "Snippet")
+        });
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        MailNewMessageDetectedEventArgs detected = Assert.Single(events);
+        Assert.Equal(2, detected.NewMessageCount);
+        Assert.Null(detected.Preview);
+    }
+
+    [Fact]
     public async Task DuplicateHistoryRecords_AreDeduplicatedByMessageId()
     {
         MailAccount account = Account();
@@ -397,6 +449,21 @@ public sealed class GmailHistoryPollingTests
         Assert.Equal(GmailSystemFolders.Inbox, request.LabelId);
         Assert.Equal(500, request.MaxResults);
         Assert.Equal("next", request.PageToken);
+    }
+
+    [Fact]
+    public void NotificationPreviewRequest_UsesMetadataOnlyWithoutFullBody()
+    {
+        using GmailService service = new();
+        UsersResource.MessagesResource.GetRequest request = service.Users.Messages.Get("me", "message-id");
+
+        GmailApiReadClient.ConfigureNotificationPreviewRequest(request);
+
+        Assert.Equal(UsersResource.MessagesResource.GetRequest.FormatEnum.Metadata, request.Format);
+        Assert.Equal(["From", "Subject"], request.MetadataHeaders);
+        Assert.Equal("snippet,payload/headers", request.Fields);
+        Assert.DoesNotContain("raw", request.Fields, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("body", request.Fields, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

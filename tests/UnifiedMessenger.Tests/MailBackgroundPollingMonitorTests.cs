@@ -181,14 +181,30 @@ public sealed class MailBackgroundPollingMonitorTests
     }
 
     [Fact]
-    public void PublicDetectionEvent_ContainsNoMessageIdentityOrContent()
+    public void PublicDetectionEvent_ContainsOnlyApprovedPreviewMetadataAndNoMessageIdentity()
     {
         PropertyInfo[] properties = typeof(MailNewMessageDetectedEventArgs).GetProperties();
 
         Assert.Equal(
-            [nameof(MailNewMessageDetectedEventArgs.MailAccountId), nameof(MailNewMessageDetectedEventArgs.NewMessageCount)],
+            [
+                nameof(MailNewMessageDetectedEventArgs.MailAccountId),
+                nameof(MailNewMessageDetectedEventArgs.NewMessageCount),
+                nameof(MailNewMessageDetectedEventArgs.Preview)
+            ],
             properties.Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
         Assert.DoesNotContain(properties, property => property.PropertyType == typeof(string));
+
+        Assert.Equal(
+            [
+                nameof(MailNotificationPreview.SenderAddress),
+                nameof(MailNotificationPreview.SenderDisplayName),
+                nameof(MailNotificationPreview.Snippet),
+                nameof(MailNotificationPreview.Subject)
+            ],
+            typeof(MailNotificationPreview)
+                .GetProperties()
+                .Select(property => property.Name)
+                .OrderBy(name => name, StringComparer.Ordinal));
     }
 
     [Fact]
@@ -224,7 +240,16 @@ public sealed class MailBackgroundPollingMonitorTests
         MailAccount account = Account(MailProviderType.Gmail);
         GmailHistoryClient client = new(
             new GmailApiHistoryBaseline(6, 120),
-            new GmailApiHistoryDelta(7, 124, ["gmail-2", "gmail-1"]));
+            new GmailApiHistoryDelta(7, 124, ["gmail-1"])
+            {
+                NotificationPreview = new GmailApiSummaryData(
+                    "gmail-1",
+                    "Subject",
+                    "Sender <sender@example.test>",
+                    1,
+                    "Snippet",
+                    [])
+            });
         GmailMailReadProvider provider = new(
             new TestCredentialStore(MailCredential.CreateGmailOAuth("refresh", "client", "secret")),
             client,
@@ -240,7 +265,11 @@ public sealed class MailBackgroundPollingMonitorTests
         Assert.Empty(baseline.NewMessageIdentities);
         Assert.Equal(7, delta.UnreadCount);
         Assert.Equal(124UL, delta.HistoryCursor);
-        Assert.Equal(["gmail-2", "gmail-1"], delta.NewMessageIdentities);
+        Assert.Equal(["gmail-1"], delta.NewMessageIdentities);
+        Assert.Equal("Sender", delta.NotificationPreview?.SenderDisplayName);
+        Assert.Equal("sender@example.test", delta.NotificationPreview?.SenderAddress);
+        Assert.Equal("Subject", delta.NotificationPreview?.Subject);
+        Assert.Equal("Snippet", delta.NotificationPreview?.Snippet);
         Assert.Equal(account.Id, client.AccountId);
     }
 

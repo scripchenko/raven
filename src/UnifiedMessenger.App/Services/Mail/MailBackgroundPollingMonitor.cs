@@ -4,12 +4,20 @@ using UnifiedMessenger.App.Services.Tray;
 
 namespace UnifiedMessenger.App.Services.Mail;
 
+public sealed record MailNotificationPreview(
+    string SenderDisplayName,
+    string SenderAddress,
+    string Subject,
+    string Snippet);
+
 public sealed class MailNewMessageDetectedEventArgs(
     Guid mailAccountId,
-    int newMessageCount) : EventArgs
+    int newMessageCount,
+    MailNotificationPreview? preview = null) : EventArgs
 {
     public Guid MailAccountId { get; } = mailAccountId;
     public int NewMessageCount { get; } = Math.Max(1, newMessageCount);
+    public MailNotificationPreview? Preview { get; } = preview;
 }
 
 public interface IMailBackgroundPollingMonitor : IDisposable
@@ -37,7 +45,10 @@ internal sealed record MailHistoryPollResult(
     int UnreadCount,
     ulong HistoryCursor,
     IReadOnlyCollection<string> NewMessageIdentities,
-    bool IsRebaseline = false);
+    bool IsRebaseline = false)
+{
+    public MailNotificationPreview? NotificationPreview { get; init; }
+}
 
 internal interface IMailNewMessageHistoryProvider
 {
@@ -218,7 +229,7 @@ public sealed class MailBackgroundPollingMonitor(
 
             _baselines[account.Id] = new MailInboxBaseline(snapshot.IdentityScope, identities);
             int unreadCount = Math.Max(0, snapshot.UnreadCount);
-            uiDispatcher.Post(() => ApplySuccessfulPoll(account.Id, unreadCount, newMessageCount));
+            uiDispatcher.Post(() => ApplySuccessfulPoll(account.Id, unreadCount, newMessageCount, preview: null));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -276,14 +287,22 @@ public sealed class MailBackgroundPollingMonitor(
             ? 0
             : newMessageIdentities.Length;
         int unreadCount = Math.Max(0, result.UnreadCount);
-        uiDispatcher.Post(() => ApplySuccessfulPoll(account.Id, unreadCount, newMessageCount));
+        uiDispatcher.Post(() => ApplySuccessfulPoll(
+            account.Id,
+            unreadCount,
+            newMessageCount,
+            newMessageCount == 1 ? result.NotificationPreview : null));
     }
 
     private Task<bool> IsAccountStillEnabledAsync(Guid accountId) =>
         uiDispatcher.InvokeAsync(() => settingsStore.Current.MailAccounts.Any(
             candidate => candidate.Id == accountId && candidate.IsEnabled));
 
-    private void ApplySuccessfulPoll(Guid accountId, int unreadCount, int newMessageCount)
+    private void ApplySuccessfulPoll(
+        Guid accountId,
+        int unreadCount,
+        int newMessageCount,
+        MailNotificationPreview? preview)
     {
         if (_shutdownStarted)
         {
@@ -302,7 +321,7 @@ public sealed class MailBackgroundPollingMonitor(
         {
             MailNewMessageDetected?.Invoke(
                 this,
-                new MailNewMessageDetectedEventArgs(accountId, newMessageCount));
+                new MailNewMessageDetectedEventArgs(accountId, newMessageCount, preview));
         }
     }
 

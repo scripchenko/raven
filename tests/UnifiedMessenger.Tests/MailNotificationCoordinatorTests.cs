@@ -22,16 +22,118 @@ public sealed class MailNotificationCoordinatorTests
     }
 
     [Fact]
-    public void NewMailInInactiveAccount_ShowsOneSafePopup()
+    public void NewMailInInactiveAccount_ShowsOneSafeFallbackPopup()
     {
         using Fixture fixture = new();
 
         fixture.Handle(fixture.First, 1);
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Почта", popup.ServiceName);
+        Assert.Equal("Gmail • first@example.test", popup.ServiceName);
         Assert.Equal("Новое письмо", popup.Title);
         Assert.Equal("Получено новое письмо", popup.Body);
+        Assert.Equal(NotificationPopupBrand.Gmail, popup.Brand);
+        Assert.Null(popup.PreviewText);
+        Assert.Null(popup.SenderAvatarInitials);
+    }
+
+    [Fact]
+    public void SingleGmailAccount_UsesSenderSubjectSnippetAndInitials()
+    {
+        using Fixture fixture = new(includeSecondAccount: false);
+
+        fixture.Handle(
+            fixture.First,
+            1,
+            new MailNotificationPreview(
+                "Анна Смирнова",
+                "anna@example.test",
+                "Статус проекта",
+                "Короткий безопасный preview"));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Gmail", popup.ServiceName);
+        Assert.Equal("Анна Смирнова", popup.Title);
+        Assert.Equal("Статус проекта", popup.Body);
+        Assert.Equal("Короткий безопасный preview", popup.PreviewText);
+        Assert.Equal(NotificationPopupBrand.Gmail, popup.Brand);
+        Assert.Equal("АС", popup.SenderAvatarInitials);
+        Assert.True(popup.ShowSenderInitials);
+        Assert.False(popup.ShowContentSourceIcon);
+    }
+
+    [Fact]
+    public void MultipleGmailAccounts_DisambiguateHeaderWithAccountIdentity()
+    {
+        using Fixture fixture = new();
+
+        fixture.Handle(
+            fixture.First,
+            1,
+            new MailNotificationPreview("Sender", "sender@example.test", "Subject", "Snippet"));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Gmail • first@example.test", popup.ServiceName);
+        Assert.Equal(fixture.First.Id, popup.ServiceInstanceId);
+    }
+
+    [Fact]
+    public void MissingSenderName_UsesAddressAndGmailIconFallback()
+    {
+        using Fixture fixture = new(includeSecondAccount: false);
+
+        fixture.Handle(
+            fixture.First,
+            1,
+            new MailNotificationPreview(
+                "sender@example.test",
+                "sender@example.test",
+                "Subject",
+                "Snippet"));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("sender@example.test", popup.Title);
+        Assert.Null(popup.SenderAvatarInitials);
+        Assert.False(popup.ShowSenderInitials);
+        Assert.True(popup.ShowContentSourceIcon);
+    }
+
+    [Fact]
+    public void MissingSenderSubjectAndSnippet_UsesSafeFallbacks()
+    {
+        using Fixture fixture = new(includeSecondAccount: false);
+
+        fixture.Handle(
+            fixture.First,
+            1,
+            new MailNotificationPreview(string.Empty, string.Empty, string.Empty, string.Empty));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Неизвестный отправитель", popup.Title);
+        Assert.Equal("(без темы)", popup.Body);
+        Assert.Null(popup.PreviewText);
+        Assert.Null(popup.SenderAvatarInitials);
+        Assert.True(popup.ShowContentSourceIcon);
+    }
+
+    [Fact]
+    public void NotificationPreviewDisabled_KeepsGmailBrandButHidesMetadata()
+    {
+        using Fixture fixture = new(includeSecondAccount: false);
+        fixture.Settings.Current.Notifications.ShowNotificationPreview = false;
+
+        fixture.Handle(
+            fixture.First,
+            1,
+            new MailNotificationPreview("Sender", "sender@example.test", "Subject", "Snippet"));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Gmail", popup.ServiceName);
+        Assert.Equal("Новое письмо", popup.Title);
+        Assert.Equal("Получено новое письмо", popup.Body);
+        Assert.Null(popup.PreviewText);
+        Assert.Null(popup.SenderAvatarInitials);
+        Assert.Equal(NotificationPopupBrand.Gmail, popup.Brand);
     }
 
     [Fact]
@@ -73,8 +175,10 @@ public sealed class MailNotificationCoordinatorTests
         fixture.Handle(fixture.First, 4);
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Gmail • first@example.test", popup.ServiceName);
         Assert.Equal("Новые письма", popup.Title);
         Assert.Equal("Получено новых писем: 4", popup.Body);
+        Assert.Null(popup.PreviewText);
         Assert.Single(fixture.Sound.ServiceTypes);
     }
 
@@ -302,20 +406,37 @@ public sealed class MailNotificationCoordinatorTests
     }
 
     [Fact]
-    public void PublicDetectionContract_ContainsNoMailContentOrMessageIdentity()
+    public void PublicDetectionContract_ContainsOnlyApprovedPreviewMetadataAndNoMessageIdentity()
     {
         PropertyInfo[] properties = typeof(MailNewMessageDetectedEventArgs).GetProperties();
 
         Assert.Equal(
-            [nameof(MailNewMessageDetectedEventArgs.MailAccountId), nameof(MailNewMessageDetectedEventArgs.NewMessageCount)],
+            [
+                nameof(MailNewMessageDetectedEventArgs.MailAccountId),
+                nameof(MailNewMessageDetectedEventArgs.NewMessageCount),
+                nameof(MailNewMessageDetectedEventArgs.Preview)
+            ],
             properties.Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
         Assert.DoesNotContain(properties, property => property.PropertyType == typeof(string));
+
+        Assert.Equal(
+            [
+                nameof(MailNotificationPreview.SenderAddress),
+                nameof(MailNotificationPreview.SenderDisplayName),
+                nameof(MailNotificationPreview.Snippet),
+                nameof(MailNotificationPreview.Subject)
+            ],
+            typeof(MailNotificationPreview)
+                .GetProperties()
+                .Select(property => property.Name)
+                .OrderBy(name => name, StringComparer.Ordinal));
     }
 
-    private static MailAccount Account() => new()
+    private static MailAccount Account(string emailAddress = "mail@example.test") => new()
     {
         Id = Guid.NewGuid(),
         Provider = MailProviderType.Gmail,
+        EmailAddress = emailAddress,
         IsEnabled = true,
         CredentialKey = "credential"
     };
@@ -336,11 +457,14 @@ public sealed class MailNotificationCoordinatorTests
     {
         private readonly FakePollingMonitor _monitor = new();
 
-        public Fixture()
+        public Fixture(bool includeSecondAccount = true)
         {
-            First = Account();
-            Second = Account();
-            Settings = new TestSettingsStore(new AppSettings { MailAccounts = [First, Second] });
+            First = Account("first@example.test");
+            Second = Account("second@example.test");
+            Settings = new TestSettingsStore(new AppSettings
+            {
+                MailAccounts = includeSecondAccount ? [First, Second] : [First]
+            });
             Activity = new MailActivityCoordinator();
             Popup = new FakePopupService();
             Sound = new FakeSoundPlayer();
@@ -366,8 +490,11 @@ public sealed class MailNotificationCoordinatorTests
         public FakeInboxFreshnessService Freshness { get; }
         public MailNotificationCoordinator Coordinator { get; }
 
-        public void Handle(MailAccount account, int count) =>
-            _monitor.Raise(new MailNewMessageDetectedEventArgs(account.Id, count));
+        public void Handle(
+            MailAccount account,
+            int count,
+            MailNotificationPreview? preview = null) =>
+            _monitor.Raise(new MailNewMessageDetectedEventArgs(account.Id, count, preview));
 
         public void Dispose()
         {

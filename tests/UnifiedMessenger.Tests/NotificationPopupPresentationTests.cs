@@ -55,6 +55,81 @@ public sealed class NotificationPopupPresentationTests
         });
     }
 
+    [Fact]
+    public void GmailPopup_UsesGmailHeaderPreviewAndSenderInitialsAvatar()
+    {
+        RunSta(() =>
+        {
+            NotificationPopupDisplayModel model = new(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                "Gmail • mail@example.test",
+                "Анна Смирнова",
+                "Статус проекта",
+                "Короткий preview",
+                NotificationPopupBrand.Gmail,
+                "АС");
+            NotificationPopupWindow window = new(model);
+            try
+            {
+                ArrangeCard(window);
+
+                TextBlock sourceLabel = Assert.IsType<TextBlock>(window.FindName("SourceLabel"));
+                Image headerIcon = Assert.IsType<Image>(window.FindName("HeaderSourceIcon"));
+                Image contentIcon = Assert.IsType<Image>(window.FindName("ContentSourceIcon"));
+                Border avatar = Assert.IsType<Border>(window.FindName("SenderInitialsAvatar"));
+                TextBlock preview = Assert.IsType<TextBlock>(window.FindName("NotificationPreview"));
+
+                Assert.Equal("Gmail • mail@example.test", sourceLabel.Text);
+                Assert.EndsWith("gmail.png", headerIcon.Source.ToString(), StringComparison.Ordinal);
+                Assert.Equal(Visibility.Collapsed, contentIcon.Visibility);
+                Assert.Equal(Visibility.Visible, avatar.Visibility);
+                Assert.Equal("АС", Assert.IsType<TextBlock>(avatar.Child).Text);
+                Assert.Equal("Короткий preview", preview.Text);
+                Assert.Equal(Visibility.Visible, preview.Visibility);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void GmailPopup_WithoutUsableSenderName_UsesGmailIconFallback()
+    {
+        RunSta(() =>
+        {
+            NotificationPopupDisplayModel model = new(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                "Gmail",
+                "sender@example.test",
+                "(без темы)",
+                Brand: NotificationPopupBrand.Gmail);
+            NotificationPopupWindow window = new(model);
+            try
+            {
+                ArrangeCard(window);
+
+                Image headerIcon = Assert.IsType<Image>(window.FindName("HeaderSourceIcon"));
+                Image contentIcon = Assert.IsType<Image>(window.FindName("ContentSourceIcon"));
+                Border avatar = Assert.IsType<Border>(window.FindName("SenderInitialsAvatar"));
+                TextBlock preview = Assert.IsType<TextBlock>(window.FindName("NotificationPreview"));
+
+                Assert.EndsWith("gmail.png", headerIcon.Source.ToString(), StringComparison.Ordinal);
+                Assert.EndsWith("gmail.png", contentIcon.Source.ToString(), StringComparison.Ordinal);
+                Assert.Equal(Visibility.Visible, contentIcon.Visibility);
+                Assert.Equal(Visibility.Collapsed, avatar.Visibility);
+                Assert.Equal(Visibility.Collapsed, preview.Visibility);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     [Theory]
     [InlineData("Telegram")]
     [InlineData("WhatsApp")]

@@ -41,7 +41,10 @@ internal sealed record GmailApiHistoryDelta(
     int UnreadCount,
     ulong HistoryId,
     IReadOnlyCollection<string> NewInboxMessageIds,
-    bool IsRebaseline = false);
+    bool IsRebaseline = false)
+{
+    public GmailApiSummaryData? NotificationPreview { get; init; }
+}
 
 internal sealed record GmailApiRawMessage(byte[] RawMime, bool IsUnread, string? ThreadId = null);
 internal sealed record GmailApiUserLabel(string Id, string Name);
@@ -243,7 +246,10 @@ internal sealed class GmailMailReadProvider(
             delta.UnreadCount,
             delta.HistoryId,
             delta.NewInboxMessageIds,
-            delta.IsRebaseline);
+            delta.IsRebaseline)
+        {
+            NotificationPreview = MapNotificationPreview(delta.NotificationPreview)
+        };
     }
 
     public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
@@ -504,6 +510,21 @@ internal sealed class GmailMailReadProvider(
         };
     }
 
+    private static MailNotificationPreview? MapNotificationPreview(GmailApiSummaryData? item)
+    {
+        if (item is null)
+        {
+            return null;
+        }
+
+        MailMessageSummary summary = MapSummary(item);
+        return new MailNotificationPreview(
+            summary.FromDisplayName,
+            summary.FromAddress,
+            summary.Subject,
+            summary.Preview);
+    }
+
     private async Task<MailCredential> LoadCredentialAsync(MailAccount account, CancellationToken cancellationToken)
     {
         MailCredential? credential = await credentialStore.LoadAsync(account.CredentialKey, cancellationToken);
@@ -667,10 +688,19 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             }
 
             int unreadCount = await ReadInboxUnreadCountAsync(service, cancellationToken);
+            GmailApiSummaryData? notificationPreview = historyDelta.messageIds.Count == 1
+                ? await TryLoadNotificationPreviewAsync(
+                    service,
+                    historyDelta.messageIds.Single(),
+                    cancellationToken)
+                : null;
             return new GmailApiHistoryDelta(
                 unreadCount,
                 historyDelta.nextHistoryId,
-                historyDelta.messageIds);
+                historyDelta.messageIds)
+            {
+                NotificationPreview = notificationPreview
+            };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -693,6 +723,44 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         request.LabelId = GmailSystemFolders.Inbox;
         request.MaxResults = HistoryPageSize;
         request.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
+    }
+
+    internal static void ConfigureNotificationPreviewRequest(
+        UsersResource.MessagesResource.GetRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Metadata;
+        request.MetadataHeaders = new[] { "From", "Subject" };
+        request.Fields = "snippet,payload/headers";
+    }
+
+    private static async Task<GmailApiSummaryData?> TryLoadNotificationPreviewAsync(
+        GmailService service,
+        string messageId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            UsersResource.MessagesResource.GetRequest request = service.Users.Messages.Get("me", messageId);
+            ConfigureNotificationPreviewRequest(request);
+            GmailMessage message = await request.ExecuteAsync(cancellationToken);
+            return new GmailApiSummaryData(
+                messageId,
+                GetHeader(message, "Subject"),
+                GetHeader(message, "From"),
+                null,
+                message.Snippet,
+                []);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Notification preview metadata is optional; detection and cursor advancement remain authoritative.
+            return null;
+        }
     }
 
     internal static async Task<(ulong HistoryId, IReadOnlyCollection<string> MessageIds)> ReadHistoryPagesAsync(

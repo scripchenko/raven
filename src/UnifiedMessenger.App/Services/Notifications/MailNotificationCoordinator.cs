@@ -148,7 +148,11 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
             _ = _soundPlayer.TryPlay(ServiceType.Gmail);
         }
 
-        Enqueue(new PendingMailNotification(account.Id, eventArgs.NewMessageCount));
+        Enqueue(new PendingMailNotification(
+            account.Id,
+            eventArgs.NewMessageCount,
+            eventArgs.Preview,
+            notifications.ShowNotificationPreview));
         TryShowAvailable();
     }
 
@@ -185,7 +189,11 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
             }
 
             Guid notificationId = Guid.NewGuid();
-            NotificationPopupDisplayModel popup = CreatePopupModel(notificationId, pending);
+            NotificationPopupDisplayModel popup = CreatePopupModel(
+                notificationId,
+                account,
+                pending,
+                HasMultipleEnabledGmailAccounts());
             if (_popupService.TryShow(popup))
             {
                 _active.Add(
@@ -199,20 +207,93 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         }
     }
 
-    private static NotificationPopupDisplayModel CreatePopupModel(
+    internal static NotificationPopupDisplayModel CreatePopupModel(
         Guid notificationId,
-        PendingMailNotification pending)
+        MailAccount account,
+        PendingMailNotification pending,
+        bool hasMultipleEnabledGmailAccounts)
     {
         bool isSingle = pending.NewMessageCount == 1;
+        string serviceName = account.Provider is MailProviderType.Gmail
+            ? CreateGmailServiceName(account, hasMultipleEnabledGmailAccounts)
+            : "Почта";
+        if (account.Provider is MailProviderType.Gmail
+            && isSingle
+            && pending.Preview is not null
+            && pending.ShowPreview)
+        {
+            string senderName = pending.Preview.SenderDisplayName.Trim();
+            string senderAddress = pending.Preview.SenderAddress.Trim();
+            string title = !string.IsNullOrWhiteSpace(senderName)
+                ? senderName
+                : !string.IsNullOrWhiteSpace(senderAddress)
+                    ? senderAddress
+                    : "Неизвестный отправитель";
+            string subject = MailContentExtractor.NormalizeSubject(pending.Preview.Subject);
+            string snippet = MailContentExtractor.NormalizePreview(pending.Preview.Snippet);
+            return new NotificationPopupDisplayModel(
+                notificationId,
+                pending.MailAccountId,
+                serviceName,
+                title,
+                subject,
+                string.IsNullOrWhiteSpace(snippet) ? null : snippet,
+                NotificationPopupBrand.Gmail,
+                CreateSenderInitials(senderName, senderAddress));
+        }
+
         return new NotificationPopupDisplayModel(
             notificationId,
             pending.MailAccountId,
-            "Почта",
+            serviceName,
             isSingle ? "Новое письмо" : "Новые письма",
             isSingle
                 ? "Получено новое письмо"
-                : $"Получено новых писем: {pending.NewMessageCount}");
+                : $"Получено новых писем: {pending.NewMessageCount}",
+            Brand: account.Provider is MailProviderType.Gmail
+                ? NotificationPopupBrand.Gmail
+                : NotificationPopupBrand.Default);
     }
+
+    internal static string? CreateSenderInitials(string? senderName, string? senderAddress)
+    {
+        string candidate = senderName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(candidate)
+            || string.Equals(candidate, senderAddress?.Trim(), StringComparison.OrdinalIgnoreCase)
+            || candidate.Contains('@'))
+        {
+            return null;
+        }
+
+        string[] words = candidate
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(word => new string(word.Where(char.IsLetterOrDigit).ToArray()))
+            .Where(word => word.Length > 0)
+            .ToArray();
+        if (words.Length == 0)
+        {
+            return null;
+        }
+
+        char first = char.ToUpperInvariant(words[0][0]);
+        return words.Length == 1
+            ? first.ToString()
+            : string.Concat(first, char.ToUpperInvariant(words[^1][0]));
+    }
+
+    private static string CreateGmailServiceName(
+        MailAccount account,
+        bool hasMultipleEnabledGmailAccounts)
+    {
+        string identity = account.DisplayLabel.Trim();
+        return hasMultipleEnabledGmailAccounts && !string.IsNullOrWhiteSpace(identity)
+            ? $"Gmail • {identity}"
+            : "Gmail";
+    }
+
+    private bool HasMultipleEnabledGmailAccounts() =>
+        _settingsStore.Current.MailAccounts.Count(account =>
+            account.IsEnabled && account.Provider is MailProviderType.Gmail) > 1;
 
     private void OnPopupClicked(object? sender, NotificationPopupEventArgs eventArgs)
     {
@@ -260,6 +341,10 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         _settingsStore.Current.MailAccounts.FirstOrDefault(
             account => account.Id == accountId && account.IsEnabled);
 
-    private sealed record PendingMailNotification(Guid MailAccountId, int NewMessageCount);
+    internal sealed record PendingMailNotification(
+        Guid MailAccountId,
+        int NewMessageCount,
+        MailNotificationPreview? Preview,
+        bool ShowPreview);
     private sealed record ActiveMailNotification(Guid NotificationId, Guid MailAccountId);
 }
