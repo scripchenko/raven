@@ -5,6 +5,7 @@ public enum MailFolderKind
     Inbox,
     Sent,
     Drafts,
+    AllMail,
     Spam,
     Trash,
     Starred
@@ -47,6 +48,7 @@ internal static class MailFolderCatalog
     public const string StarredKey = "system:starred";
     public const string SentKey = "system:sent";
     public const string DraftsKey = "system:drafts";
+    public const string AllMailKey = "system:all-mail";
     public const string SpamKey = "system:spam";
     public const string TrashKey = "system:trash";
 
@@ -61,6 +63,7 @@ internal static class MailFolderCatalog
                 MailFolderKind.Starred => StarredKey,
                 MailFolderKind.Sent => SentKey,
                 MailFolderKind.Drafts => DraftsKey,
+                MailFolderKind.AllMail => AllMailKey,
                 MailFolderKind.Spam => SpamKey,
                 MailFolderKind.Trash => TrashKey,
                 _ => throw new ArgumentOutOfRangeException(nameof(kind))
@@ -71,6 +74,7 @@ internal static class MailFolderCatalog
                 MailFolderKind.Starred => "Помеченные",
                 MailFolderKind.Sent => "Отправленные",
                 MailFolderKind.Drafts => "Черновики",
+                MailFolderKind.AllMail => "Вся почта",
                 MailFolderKind.Spam => "Спам",
                 MailFolderKind.Trash => "Корзина",
                 _ => throw new ArgumentOutOfRangeException(nameof(kind))

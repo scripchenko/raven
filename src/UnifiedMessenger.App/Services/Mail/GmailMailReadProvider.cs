@@ -86,6 +86,14 @@ internal interface IGmailApiReadClient
         CancellationToken cancellationToken = default) =>
         Task.FromException<GmailApiInboxPage>(new NotSupportedException());
 
+    Task<GmailApiInboxPage> GetAllMailPageAsync(
+        MailCredential credential,
+        Guid accountId,
+        string? pageToken,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<GmailApiInboxPage>(new NotSupportedException());
+
     Task<GmailApiRawMessage> GetRawMessageAsync(
         MailCredential credential,
         Guid accountId,
@@ -158,6 +166,7 @@ internal interface IGmailMailboxApiClient
 
 internal static class GmailSystemFolders
 {
+    public const string AllMailView = "special:all-mail";
     public const string Inbox = "INBOX";
     public const string Starred = "STARRED";
     public const string Sent = "SENT";
@@ -175,14 +184,22 @@ internal static class GmailSystemFolders
             (MailFolderKind.Inbox, Inbox),
             (MailFolderKind.Starred, Starred),
             (MailFolderKind.Sent, Sent),
-            (MailFolderKind.Drafts, Draft),
-            (MailFolderKind.Spam, Spam),
-            (MailFolderKind.Trash, Trash)
+            (MailFolderKind.Drafts, Draft)
         ];
-        return definitions
+        List<MailFolder> folders = definitions
             .Where(item => availableLabels.Contains(item.Label))
             .Select(item => MailFolderCatalog.Create(item.Kind, item.Label))
-            .ToArray();
+            .ToList();
+        folders.Add(MailFolderCatalog.Create(MailFolderKind.AllMail, AllMailView));
+        if (availableLabels.Contains(Spam))
+        {
+            folders.Add(MailFolderCatalog.Create(MailFolderKind.Spam, Spam));
+        }
+        if (availableLabels.Contains(Trash))
+        {
+            folders.Add(MailFolderCatalog.Create(MailFolderKind.Trash, Trash));
+        }
+        return folders;
     }
 }
 
@@ -264,18 +281,25 @@ internal sealed class GmailMailReadProvider(
         ValidateAccount(account, pageSize);
         ValidateFolder(folder);
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
-        GmailApiInboxPage page = await apiClient.GetFolderPageAsync(
-            credential,
-            account.Id,
-            folder.ProviderLocator,
-            folder.Kind is MailFolderKind.Spam or MailFolderKind.Trash,
-            continuationToken,
-            pageSize,
-            cancellationToken);
+        GmailApiInboxPage page = folder.Kind is MailFolderKind.AllMail
+            ? await apiClient.GetAllMailPageAsync(
+                credential,
+                account.Id,
+                continuationToken,
+                pageSize,
+                cancellationToken)
+            : await apiClient.GetFolderPageAsync(
+                credential,
+                account.Id,
+                folder.ProviderLocator,
+                folder.Kind is MailFolderKind.Spam or MailFolderKind.Trash,
+                continuationToken,
+                pageSize,
+                cancellationToken);
         return new MailPage<MailMessageSummary>(
             page.Items.Select(MapSummary).ToArray(),
             page.NextPageToken,
-            page.LabelMessagesTotal);
+            folder.Kind is MailFolderKind.AllMail ? null : page.LabelMessagesTotal);
     }
 
     public async Task<MailPage<MailMessageSummary>> SearchAsync(
@@ -503,7 +527,10 @@ internal sealed class GmailMailReadProvider(
     private static void ValidateFolder(MailFolder folder)
     {
         ArgumentNullException.ThrowIfNull(folder);
-        if (!GmailSystemFolders.LabelIds.Contains(folder.ProviderLocator, StringComparer.Ordinal))
+        bool isValid = folder.Kind is MailFolderKind.AllMail
+            ? string.Equals(folder.ProviderLocator, GmailSystemFolders.AllMailView, StringComparison.Ordinal)
+            : GmailSystemFolders.LabelIds.Contains(folder.ProviderLocator, StringComparer.Ordinal);
+        if (!isValid)
         {
             throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка Gmail недоступна.");
         }
@@ -888,6 +915,47 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         }
     }
 
+    public async Task<GmailApiInboxPage> GetAllMailPageAsync(
+        MailCredential credential,
+        Guid accountId,
+        string? pageToken,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(credential, accountId, cancellationToken);
+            GmailService service = session.Service;
+            UsersResource.MessagesResource.ListRequest listRequest = service.Users.Messages.List("me");
+            ConfigureAllMailRequest(listRequest, pageToken, pageSize);
+            ListMessagesResponse response = await listRequest.ExecuteAsync(cancellationToken);
+            GmailMessage[] listed = response.Messages?.Where(item => !string.IsNullOrWhiteSpace(item.Id)).ToArray() ?? [];
+
+            using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
+            Task<(int Index, GmailApiSummaryData Summary)>[] tasks = listed
+                .Select((item, index) => LoadMetadataAsync(service, item.Id, index, gate, cancellationToken))
+                .ToArray();
+            (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
+            IReadOnlyList<GmailApiSummaryData> summaries = await ResolveDraftIdentitiesAsync(
+                service,
+                metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
+                cancellationToken);
+            return new GmailApiInboxPage(
+                summaries,
+                response.NextPageToken,
+                LabelMessagesTotal: null,
+                response.ResultSizeEstimate);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw MapListException(exception);
+        }
+    }
+
     public async Task<GmailApiInboxPage> SearchPageAsync(
         MailCredential credential,
         Guid accountId,
@@ -910,8 +978,12 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
                 .Select((item, index) => LoadMetadataAsync(service, item.Id, index, gate, cancellationToken))
                 .ToArray();
             (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
-            return new GmailApiInboxPage(
+            IReadOnlyList<GmailApiSummaryData> summaries = await ResolveDraftIdentitiesAsync(
+                service,
                 metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
+                cancellationToken);
+            return new GmailApiInboxPage(
+                summaries,
                 response.NextPageToken,
                 null,
                 response.ResultSizeEstimate);
@@ -975,6 +1047,78 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         request.MaxResults = pageSize;
         request.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
     }
+
+    internal static void ConfigureAllMailRequest(
+        UsersResource.MessagesResource.ListRequest request,
+        string? pageToken,
+        int pageSize)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.LabelIds = null;
+        request.IncludeSpamTrash = false;
+        request.MaxResults = pageSize;
+        request.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
+    }
+
+    private static async Task<IReadOnlyList<GmailApiSummaryData>> ResolveDraftIdentitiesAsync(
+        GmailService service,
+        IReadOnlyList<GmailApiSummaryData> summaries,
+        CancellationToken cancellationToken)
+    {
+        HashSet<string> pendingMessageIds = summaries
+            .Where(IsDraftSummary)
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        if (pendingMessageIds.Count == 0)
+        {
+            return summaries;
+        }
+
+        Dictionary<string, string> draftIdsByMessageId = new(StringComparer.Ordinal);
+        HashSet<string> visitedPageTokens = new(StringComparer.Ordinal);
+        string? pageToken = null;
+        do
+        {
+            UsersResource.DraftsResource.ListRequest request = service.Users.Drafts.List("me");
+            request.MaxResults = 500;
+            request.PageToken = pageToken;
+            request.Fields = "drafts(id,message/id),nextPageToken";
+            ListDraftsResponse response = await request.ExecuteAsync(cancellationToken);
+            foreach (Draft draft in response.Drafts ?? [])
+            {
+                if (!string.IsNullOrWhiteSpace(draft.Id)
+                    && !string.IsNullOrWhiteSpace(draft.Message?.Id)
+                    && pendingMessageIds.Remove(draft.Message.Id))
+                {
+                    draftIdsByMessageId[draft.Message.Id] = draft.Id;
+                }
+            }
+
+            pageToken = string.IsNullOrWhiteSpace(response.NextPageToken)
+                ? null
+                : response.NextPageToken;
+            if (pageToken is not null && !visitedPageTokens.Add(pageToken))
+            {
+                throw new InvalidOperationException("Gmail вернул повторяющийся маркер страницы черновиков.");
+            }
+        }
+        while (pageToken is not null && pendingMessageIds.Count > 0);
+
+        return ApplyDraftIdentities(summaries, draftIdsByMessageId);
+    }
+
+    internal static IReadOnlyList<GmailApiSummaryData> ApplyDraftIdentities(
+        IReadOnlyList<GmailApiSummaryData> summaries,
+        IReadOnlyDictionary<string, string> draftIdsByMessageId) =>
+        summaries
+            .Where(item => !IsDraftSummary(item) || draftIdsByMessageId.ContainsKey(item.Id))
+            .Select(item => draftIdsByMessageId.TryGetValue(item.Id, out string? draftId)
+                ? item with { DraftId = draftId }
+                : item)
+            .ToArray();
+
+    private static bool IsDraftSummary(GmailApiSummaryData item) =>
+        item.LabelIds.Contains(GmailSystemFolders.Draft, StringComparer.Ordinal);
 
     private static async Task<long?> TryGetMessageOrientedLabelTotalAsync(
         GmailService service,

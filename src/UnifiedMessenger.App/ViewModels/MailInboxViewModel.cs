@@ -616,7 +616,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool CanClearSearch => IsSearchActive || !string.IsNullOrWhiteSpace(SearchText);
     public int SelectedMessageCount => Messages.Count(message => message.IsSelected);
     public bool HasSelectedMessages => SelectedMessageCount > 0;
-    public bool AreAllLoadedMessagesSelected => Messages.Count > 0 && Messages.All(message => message.IsSelected);
+    public bool AreAllLoadedMessagesSelected
+    {
+        get
+        {
+            MailMessageSummary[] selectable = Messages.Where(CanUseMailboxActionsForMessage).ToArray();
+            return selectable.Length > 0 && selectable.All(message => message.IsSelected);
+        }
+    }
     public bool AreAllSelectedMessagesStarred =>
         HasSelectedMessages && GetSelectedMessages().All(message => message.IsStarred);
     public bool? LoadedSelectionState => !HasSelectedMessages
@@ -973,6 +980,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
         InboxFreshnessState freshness = GetInboxFreshnessState(mailAccountId);
         freshness.MarkChanged();
+        MarkFolderStale(mailAccountId, MailFolderKind.AllMail);
         if (isAccountActivelyViewed && IsActiveGmailInbox(mailAccountId))
         {
             freshness.AutoRefreshRequested = true;
@@ -989,6 +997,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
         InboxFreshnessState freshness = GetInboxFreshnessState(mailAccountId);
         freshness.MarkChanged();
+        MarkFolderStale(mailAccountId, MailFolderKind.AllMail);
         if (IsActiveGmailInbox(mailAccountId))
         {
             freshness.AutoRefreshRequested = true;
@@ -2040,9 +2049,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             bool isUnread = !isRead;
-            bool affectsInboxUnreadCount = IsSearchActive
-                ? summary.ProviderLabelIds.Contains(GmailSystemFolders.Inbox)
-                : folder.Kind is MailFolderKind.Inbox;
+            bool affectsInboxUnreadCount = summary.ProviderLabelIds.Contains(GmailSystemFolders.Inbox)
+                || (!IsSearchActive && folder.Kind is MailFolderKind.Inbox);
             if (affectsInboxUnreadCount
                 && account.InboxUnreadCount is int inboxUnreadCount
                 && summary.IsUnread != isUnread)
@@ -2418,7 +2426,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
             if (!Compose.IsOpen
                 && ActiveAccount is { Provider: MailProviderType.Gmail } gmailAccount
-                && SelectedFolder is { Kind: MailFolderKind.Drafts } folder
+                && SelectedFolder is { Kind: MailFolderKind.Drafts or MailFolderKind.AllMail } folder
                 && !GetState(gmailAccount.Id, folder.Key).HasLoaded
                 && !IsListLoading)
             {
@@ -2440,7 +2448,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private void ToggleMessageSelection(MailMessageSummary? message)
     {
-        if (message is null || !IsGmailMailboxAvailable)
+        if (!CanToggleMessageSelection(message) || message is null)
         {
             return;
         }
@@ -2450,12 +2458,15 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     }
 
     private bool CanToggleMessageSelection(MailMessageSummary? message) =>
-        message is not null && CanUseMailboxActions && IsMessageListVisible;
+        message is not null
+        && CanUseMailboxActionsForMessage(message)
+        && CanUseMailboxActions
+        && IsMessageListVisible;
 
     private void ToggleSelectAllLoaded()
     {
         bool select = !AreAllLoadedMessagesSelected;
-        foreach (MailMessageSummary message in Messages)
+        foreach (MailMessageSummary message in Messages.Where(CanUseMailboxActionsForMessage))
         {
             message.IsSelected = select;
         }
@@ -2464,7 +2475,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     }
 
     private bool CanSelectAllLoaded() =>
-        CanUseMailboxActions && IsMessageListVisible && Messages.Count > 0;
+        CanUseMailboxActions
+        && IsMessageListVisible
+        && Messages.Any(CanUseMailboxActionsForMessage);
 
     private void ClearSelection()
     {
@@ -2537,7 +2550,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     }
 
     private Task ArchiveSelectedAsync() => ArchiveAsync(
-        GetSelectedMessages().Select(message => message.MessageKey).ToArray());
+        GetSelectedMessages()
+            .Where(message => message.ProviderLabelIds.Contains(GmailSystemFolders.Inbox))
+            .Select(message => message.MessageKey)
+            .ToArray());
 
     private Task ArchiveDetailAsync() => ArchiveAsync(
         SelectedMessageSummary is null ? [] : [SelectedMessageSummary.MessageKey]);
@@ -3062,7 +3078,6 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         }
 
         if (ActiveAccount is { Provider: MailProviderType.Gmail } account
-            && SelectedFolder.Kind is MailFolderKind.Drafts
             && summary.ProviderDraftId is string draftId)
         {
             CurrentMessageLoadTask = OpenGmailDraftAsync(account, draftId);
@@ -3154,11 +3169,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         {
             GetState(eventArgs.AccountId, sentFolder.Key).MarkStale();
         }
+        MarkFolderStale(eventArgs.AccountId, MailFolderKind.AllMail);
     }
 
     private void OnGmailDraftChanged(object? sender, GmailDraftChangedEventArgs eventArgs)
     {
         MarkFolderStale(eventArgs.AccountId, MailFolderKind.Drafts);
+        MarkFolderStale(eventArgs.AccountId, MailFolderKind.AllMail);
     }
 
     private AccountFolderState GetAccountFolderState(Guid accountId)
@@ -3219,6 +3236,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private bool CanMutateMessage(MailMessageSummary? message) =>
         message is not null
+        && CanUseMailboxActionsForMessage(message)
         && CanUseMailboxActions
         && (IsMessageDetailVisible
             ? CanMutateDetail() && ReferenceEquals(message, SelectedMessageSummary)
@@ -3233,6 +3251,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && !IsMessageLoading
         && !HasMessageError
         && SelectedMessageSummary is MailMessageSummary summary
+        && CanUseMailboxActionsForMessage(summary)
         && SelectedMessageContent is MailMessageContent content
         && string.Equals(summary.MessageKey, content.MessageKey, StringComparison.Ordinal);
 
@@ -3250,6 +3269,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private bool CanChangeSelectedReadState() =>
         CanMutateSelection() && (IsSearchActive || SelectedFolder?.SupportsReadState == true);
+
+    private static bool CanUseMailboxActionsForMessage(MailMessageSummary message) =>
+        string.IsNullOrWhiteSpace(message.ProviderDraftId);
 
     private async Task SaveAttachmentAsync(MailAttachmentInfo? attachment)
     {

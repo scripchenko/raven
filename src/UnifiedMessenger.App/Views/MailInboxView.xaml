@@ -10,6 +10,7 @@
         <Geometry x:Key="MailFolderStarredGeometry">M9,1.8 L11.2,6.2 16.1,6.9 12.5,10.4 13.4,15.3 9,13 4.6,15.3 5.5,10.4 1.9,6.9 6.8,6.2 Z</Geometry>
         <Geometry x:Key="MailFolderSentGeometry">M2,9 L16,2 11,16 8,10 Z M8,10 L16,2</Geometry>
         <Geometry x:Key="MailFolderDraftGeometry">M4,2 L11,2 15,6 15,16 4,16 Z M11,2 L11,6 15,6 M7,9 L12,9 M7,12 L12,12</Geometry>
+        <Geometry x:Key="MailFolderAllMailGeometry">M2,4 L16,4 16,15 2,15 Z M4,2 L14,2 14,4 M2,7 L16,7</Geometry>
         <Geometry x:Key="MailFolderSpamGeometry">M9,2 L17,16 1,16 Z M9,7 L9,11 M9,13 L9,14</Geometry>
         <Geometry x:Key="MailFolderTrashGeometry">M4,5 L14,5 13,16 5,16 Z M3,5 L15,5 M6,5 L6,3 12,3 12,5 M7,8 L7,13 M11,8 L11,13</Geometry>
         <Geometry x:Key="MailActionArchiveGeometry">M4,5 L20,5 L20,9 L4,9 Z M6,9 L6,20 L18,20 L18,9 M12,11 L12,17 M9,14 L12,17 L15,14</Geometry>
@@ -308,6 +309,9 @@
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Drafts}">
                                     <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderDraftGeometry}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.AllMail}">
+                                    <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderAllMailGeometry}" />
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Spam}">
                                     <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderSpamGeometry}" />

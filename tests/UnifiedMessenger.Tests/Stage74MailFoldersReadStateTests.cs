@@ -22,7 +22,7 @@ public sealed class Stage74MailFoldersReadStateTests
         IReadOnlyList<MailFolder> folders = GmailSystemFolders.Map(
             new HashSet<string>([label], StringComparer.Ordinal));
 
-        MailFolder folder = Assert.Single(folders);
+        MailFolder folder = folders.Single(item => item.Kind == kind);
         Assert.Equal(kind, folder.Kind);
         Assert.Equal(displayName, folder.DisplayName);
         Assert.Equal(label, folder.ProviderLocator);
@@ -34,7 +34,7 @@ public sealed class Stage74MailFoldersReadStateTests
         IReadOnlyList<MailFolder> folders = GmailSystemFolders.Map(
             new HashSet<string>([GmailSystemFolders.Inbox, GmailSystemFolders.Sent], StringComparer.Ordinal));
 
-        Assert.Equal([MailFolderKind.Inbox, MailFolderKind.Sent], folders.Select(folder => folder.Kind));
+        Assert.Equal([MailFolderKind.Inbox, MailFolderKind.Sent, MailFolderKind.AllMail], folders.Select(folder => folder.Kind));
         Assert.DoesNotContain(folders, folder => folder.Kind is MailFolderKind.Trash);
     }
 
@@ -49,7 +49,7 @@ public sealed class Stage74MailFoldersReadStateTests
 
         IReadOnlyList<MailFolder> folders = await provider.GetFoldersAsync(GmailAccount());
 
-        Assert.Equal(6, folders.Count);
+        Assert.Equal(7, folders.Count);
         Assert.DoesNotContain(folders, folder => folder.ProviderLocator == "CATEGORY_SOCIAL");
     }
 
