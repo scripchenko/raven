@@ -169,6 +169,11 @@ public partial class App : System.Windows.Application
             _trayCoordinator?.BeginShutdown();
             CloseStartupWindow();
 
+            if (_serviceProvider?.GetService<MailComposeViewModel>() is MailComposeViewModel compose)
+            {
+                await compose.FlushPendingGmailDraftsAsync();
+            }
+
             if (MainWindow is MainWindow mainWindow)
             {
                 mainWindow.Hide();
@@ -270,6 +275,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailComposePreparationService, MailComposePreparationService>();
         services.AddSingleton<IMailComposeConfirmationService, WpfMailComposeConfirmationService>();
         services.AddSingleton<IMailMimeMessageFactory, MailMimeMessageFactory>();
+        services.AddSingleton<IMailDraftAutosaveScheduler, SystemMailDraftAutosaveScheduler>();
+        services.AddSingleton<IGmailDraftApiClient, GmailDraftApiClient>();
+        services.AddSingleton<IGmailDraftService, GmailDraftService>();
         services.AddSingleton<IGmailApiSendClient, GmailApiSendClient>();
         services.AddSingleton<ISmtpClientSessionFactory, MailKitSmtpClientSessionFactory>();
         services.AddSingleton<ISmtpSubmissionClient, MailKitSmtpSubmissionClient>();

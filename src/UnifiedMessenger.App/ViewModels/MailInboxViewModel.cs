@@ -125,6 +125,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Compose = composeViewModel ?? MailComposeViewModel.CreateUnavailable();
         Compose.PropertyChanged += OnComposePropertyChanged;
         Compose.Sent += OnMailSent;
+        Compose.GmailDraftChanged += OnGmailDraftChanged;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, CanRefresh);
         PreviousPageCommand = new AsyncRelayCommand(PreviousPageAsync, CanGoToPreviousPage);
         NextPageCommand = new AsyncRelayCommand(NextPageAsync, CanGoToNextPage);
@@ -1035,6 +1036,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         CancelActivation();
         Compose.PropertyChanged -= OnComposePropertyChanged;
         Compose.Sent -= OnMailSent;
+        Compose.GmailDraftChanged -= OnGmailDraftChanged;
         Compose.Dispose();
         _folderStates.Clear();
         _accountFolderStates.Clear();
@@ -2413,6 +2415,15 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             OnPropertyChanged(nameof(RequiresGmailComposeReauthentication));
             SearchCommand.NotifyCanExecuteChanged();
             RaisePresentationStateChanged();
+
+            if (!Compose.IsOpen
+                && ActiveAccount is { Provider: MailProviderType.Gmail } gmailAccount
+                && SelectedFolder is { Kind: MailFolderKind.Drafts } folder
+                && !GetState(gmailAccount.Id, folder.Key).HasLoaded
+                && !IsListLoading)
+            {
+                CurrentFolderLoadTask = RefreshAsync();
+            }
         }
 
         if (eventArgs.PropertyName is nameof(MailComposeViewModel.RequiresGmailReauthentication)
@@ -3050,6 +3061,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             return;
         }
 
+        if (ActiveAccount is { Provider: MailProviderType.Gmail } account
+            && SelectedFolder.Kind is MailFolderKind.Drafts
+            && summary.ProviderDraftId is string draftId)
+        {
+            CurrentMessageLoadTask = OpenGmailDraftAsync(account, draftId);
+            return;
+        }
+
         if (!ReferenceEquals(SelectedMessageSummary, summary))
         {
             SelectedMessageSummary = summary;
@@ -3135,6 +3154,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         {
             GetState(eventArgs.AccountId, sentFolder.Key).MarkStale();
         }
+    }
+
+    private void OnGmailDraftChanged(object? sender, GmailDraftChangedEventArgs eventArgs)
+    {
+        MarkFolderStale(eventArgs.AccountId, MailFolderKind.Drafts);
     }
 
     private AccountFolderState GetAccountFolderState(Guid accountId)
@@ -3715,6 +3739,16 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         if (IsMailboxChanging)
         {
             IsMailboxChanging = false;
+        }
+    }
+
+    private async Task OpenGmailDraftAsync(MailAccount account, string draftId)
+    {
+        bool opened = await Compose.OpenGmailDraftAsync(account, draftId);
+        if (!opened && ActiveAccount?.Id == account.Id)
+        {
+            MessageFailureKind = MailReadFailureKind.MessageUnavailable;
+            MessageErrorMessage = Compose.ErrorMessage ?? "Не удалось открыть черновик Gmail.";
         }
     }
 

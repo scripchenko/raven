@@ -1364,7 +1364,6 @@
             <Grid x:Name="ComposeSurface"
                   Grid.Row="1"
                   Margin="28,22"
-                  IsEnabled="{Binding Compose.CanEdit}"
                   IsVisibleChanged="ComposeSurface_IsVisibleChanged"
                   Visibility="{Binding Compose.IsOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Border MaxWidth="940"
@@ -1418,6 +1417,7 @@
                                  Grid.Column="1"
                                  Margin="0,12,0,0"
                                  Padding="10,7"
+                                 IsEnabled="{Binding Compose.CanEdit}"
                                  TabIndex="1"
                                  Text="{Binding Compose.Draft.To, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         <Button Grid.Row="2"
@@ -1445,6 +1445,7 @@
                                        Text="Копия:" />
                             <TextBox Grid.Column="1"
                                      Padding="10,7"
+                                     IsEnabled="{Binding Compose.CanEdit}"
                                      TabIndex="2"
                                      Text="{Binding Compose.Draft.Cc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Grid.Row="1"
@@ -1456,6 +1457,7 @@
                                      Grid.Column="1"
                                      Margin="0,8,0,0"
                                      Padding="10,7"
+                                     IsEnabled="{Binding Compose.CanEdit}"
                                      TabIndex="3"
                                      Text="{Binding Compose.Draft.Bcc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
@@ -1470,6 +1472,7 @@
                             </Grid.RowDefinitions>
                             <TextBox x:Name="ComposeSubjectTextBox"
                                      Padding="10,8"
+                                     IsEnabled="{Binding Compose.CanEdit}"
                                      TabIndex="4"
                                      Text="{Binding Compose.Draft.Subject, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                      ToolTip="Тема" />
@@ -1478,6 +1481,7 @@
                                      MinHeight="230"
                                      Margin="0,12,0,0"
                                      Padding="12"
+                                     IsEnabled="{Binding Compose.CanEdit}"
                                      AcceptsReturn="True"
                                      AcceptsTab="False"
                                      SpellCheck.IsEnabled="True"
@@ -1492,6 +1496,7 @@
                                         Style="{StaticResource MailSecondaryButtonStyle}" />
                                 <ScrollViewer MaxHeight="130"
                                               Margin="0,8,0,0"
+                                              IsEnabled="{Binding Compose.CanEdit}"
                                               VerticalScrollBarVisibility="Auto">
                                     <ItemsControl ItemsSource="{Binding Compose.Draft.Attachments}">
                                         <ItemsControl.ItemTemplate>
@@ -1564,9 +1569,24 @@
                                     Margin="0,18,0,0"
                                     HorizontalAlignment="Right"
                                     Orientation="Horizontal">
+                            <TextBlock Margin="0,0,12,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="{Binding Compose.DraftSaveStatusText}"
+                                       Visibility="{Binding Compose.HasDraftSaveStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Margin="0,0,10,0"
+                                    Command="{Binding Compose.RetryDraftSaveCommand}"
+                                    Content="Повторить сохранение"
+                                    Style="{StaticResource MailSecondaryButtonStyle}"
+                                    Visibility="{Binding Compose.HasDraftSaveError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Margin="0,0,10,0"
+                                    Command="{Binding Compose.DiscardDraftCommand}"
+                                    Content="Удалить черновик"
+                                    Style="{StaticResource MailSecondaryButtonStyle}"
+                                    Visibility="{Binding Compose.IsGmailServerDraft, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,0,10,0"
                                     Command="{Binding Compose.CancelCommand}"
-                                    Content="Отмена"
+                                    Content="{Binding Compose.CancelButtonText}"
                                     Style="{StaticResource MailSecondaryButtonStyle}" />
                             <Button Command="{Binding Compose.SendCommand}"
                                     Content="{Binding Compose.SendButtonText}"

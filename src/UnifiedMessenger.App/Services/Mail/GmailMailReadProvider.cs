@@ -24,6 +24,7 @@ internal sealed record GmailApiSummaryData(
     IReadOnlyList<string> LabelIds)
 {
     public MailMessageAttachmentSummary AttachmentSummary { get; init; } = MailMessageAttachmentSummary.Empty;
+    public string? DraftId { get; init; }
 }
 
 internal sealed record GmailApiInboxPage(
@@ -452,7 +453,8 @@ internal sealed class GmailMailReadProvider(
         {
             AttachmentSummary = item.AttachmentSummary,
             IsStarred = item.LabelIds.Contains(GmailSystemFolders.Starred, StringComparer.Ordinal),
-            ProviderLabelIds = item.LabelIds.ToHashSet(StringComparer.Ordinal)
+            ProviderLabelIds = item.LabelIds.ToHashSet(StringComparer.Ordinal),
+            ProviderDraftId = string.IsNullOrWhiteSpace(item.DraftId) ? null : item.DraftId
         };
     }
 
@@ -635,6 +637,11 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         {
             using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(credential, accountId, cancellationToken);
             GmailService service = session.Service;
+            if (string.Equals(labelId, GmailSystemFolders.Draft, StringComparison.Ordinal))
+            {
+                return await GetDraftPageAsync(service, pageToken, pageSize, cancellationToken);
+            }
+
             UsersResource.MessagesResource.ListRequest listRequest = service.Users.Messages.List("me");
             listRequest.LabelIds = new[] { labelId };
             listRequest.IncludeSpamTrash = includeSpamTrash;
@@ -776,6 +783,43 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         {
             throw MapSearchException(exception);
         }
+    }
+
+    private static async Task<GmailApiInboxPage> GetDraftPageAsync(
+        GmailService service,
+        string? pageToken,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        UsersResource.DraftsResource.ListRequest listRequest = service.Users.Drafts.List("me");
+        listRequest.MaxResults = pageSize;
+        listRequest.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
+        ListDraftsResponse response = await listRequest.ExecuteAsync(cancellationToken);
+        Draft[] listed = response.Drafts?
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Message?.Id))
+            .ToArray()
+            ?? [];
+        long? labelMessagesTotal = await TryGetMessageOrientedLabelTotalAsync(
+            service,
+            GmailSystemFolders.Draft,
+            cancellationToken);
+
+        using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
+        Task<(int Index, GmailApiSummaryData Summary)>[] tasks = listed
+            .Select((item, index) => LoadMetadataAsync(
+                service,
+                item.Message.Id,
+                index,
+                gate,
+                cancellationToken,
+                item.Id))
+            .ToArray();
+        (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
+        return new GmailApiInboxPage(
+            metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
+            response.NextPageToken,
+            labelMessagesTotal,
+            response.ResultSizeEstimate);
     }
 
     internal static void ConfigureSearchRequest(
@@ -967,7 +1011,8 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         string messageId,
         int index,
         SemaphoreSlim gate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? draftId = null)
     {
         await gate.WaitAsync(cancellationToken);
         try
@@ -986,7 +1031,8 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
                     message.Snippet,
                     message.LabelIds?.ToArray() ?? [])
                 {
-                    AttachmentSummary = GetAttachmentSummary(message.Payload)
+                    AttachmentSummary = GetAttachmentSummary(message.Payload),
+                    DraftId = draftId
                 });
         }
         finally

@@ -498,6 +498,8 @@ internal sealed record SourceMessageMailAttachmentSource(
     Guid AccountId,
     string MessageKey,
     string AttachmentKey) : MailAttachmentSource;
+internal sealed record MemoryMailAttachmentSource(
+    ReadOnlyMemory<byte> Bytes) : MailAttachmentSource;
 
 public sealed record OutgoingMailAttachment(
     string AttachmentId,
@@ -565,6 +567,16 @@ public sealed record OutgoingMailAttachment(
                 messageKey,
                 attachment.AttachmentKey)
         };
+
+    internal static OutgoingMailAttachment FromMemory(MailAttachmentContent content) =>
+        new(
+            Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture),
+            MailAttachmentFileName.Sanitize(content.FileName),
+            MailAttachmentContentType.Normalize(content.ContentType),
+            content.Bytes.Length)
+        {
+            Source = new MemoryMailAttachmentSource(content.Bytes.ToArray())
+        };
 }
 
 public sealed record MaterializedMailAttachment(
@@ -598,6 +610,10 @@ public sealed class MailOutgoingAttachmentMaterializer(
             {
                 LocalFileMailAttachmentSource local => await ReadLocalAsync(attachment, local, cancellationToken),
                 SourceMessageMailAttachmentSource source => await ReadSourceAsync(account, attachment, source, cancellationToken),
+                MemoryMailAttachmentSource memory => new MailAttachmentContent(
+                    attachment.FileName,
+                    attachment.ContentType,
+                    memory.Bytes),
                 _ => throw new MailAttachmentException(
                     MailAttachmentFailureKind.Unavailable,
                     "Вложение больше недоступно.")

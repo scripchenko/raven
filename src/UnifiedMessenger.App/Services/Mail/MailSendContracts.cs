@@ -90,6 +90,9 @@ public sealed record MailComposeTemplate(
     MailReplyContext? ReplyContext = null)
 {
     public IReadOnlyList<MailForwardAttachmentOffer> ForwardAttachments { get; init; } = [];
+    public IReadOnlyList<OutgoingMailAttachment> ExistingAttachments { get; init; } = [];
+    public bool IsReadOnly { get; init; }
+    public string? RestrictionMessage { get; init; }
 }
 
 public sealed record MailSendResult(
@@ -131,6 +134,7 @@ public sealed class MailComposeValidationException(string userMessage) : Excepti
 public interface IMailComposeRequestFactory
 {
     MailComposeRequest Create(MailAccount account, MailComposeInput input);
+    MailComposeRequest CreateDraft(MailAccount account, MailComposeInput input);
 }
 
 public interface IMailComposePreparationService
@@ -169,6 +173,11 @@ internal sealed record MailMimeSubmission(
 internal interface IMailMimeMessageFactory
 {
     MailMimeSubmission Create(
+        MailAccount account,
+        MailComposeRequest request,
+        IReadOnlyList<MaterializedMailAttachment>? attachments = null);
+
+    MailMimeSubmission CreateDraft(
         MailAccount account,
         MailComposeRequest request,
         IReadOnlyList<MaterializedMailAttachment>? attachments = null);

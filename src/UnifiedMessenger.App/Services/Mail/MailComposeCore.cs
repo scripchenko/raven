@@ -7,7 +7,16 @@ namespace UnifiedMessenger.App.Services.Mail;
 
 public sealed class MailComposeRequestFactory : IMailComposeRequestFactory
 {
-    public MailComposeRequest Create(MailAccount account, MailComposeInput input)
+    public MailComposeRequest Create(MailAccount account, MailComposeInput input) =>
+        CreateCore(account, input, requireRecipient: true);
+
+    public MailComposeRequest CreateDraft(MailAccount account, MailComposeInput input) =>
+        CreateCore(account, input, requireRecipient: false);
+
+    private static MailComposeRequest CreateCore(
+        MailAccount account,
+        MailComposeInput input,
+        bool requireRecipient)
     {
         ArgumentNullException.ThrowIfNull(account);
         ArgumentNullException.ThrowIfNull(input);
@@ -20,7 +29,7 @@ public sealed class MailComposeRequestFactory : IMailComposeRequestFactory
         IReadOnlyList<MailAddress> to = ParseAddresses(input.To, "Проверьте адреса в поле «Кому».");
         IReadOnlyList<MailAddress> cc = ParseAddresses(input.Cc, "Проверьте адреса в поле «Копия».");
         IReadOnlyList<MailAddress> bcc = ParseAddresses(input.Bcc, "Проверьте адреса в поле «Скрытая копия».");
-        if (to.Count + cc.Count + bcc.Count == 0)
+        if (requireRecipient && to.Count + cc.Count + bcc.Count == 0)
         {
             throw new MailComposeValidationException("Укажите хотя бы одного получателя.");
         }
@@ -103,11 +112,24 @@ internal sealed class MailMimeMessageFactory(TimeProvider timeProvider) : IMailM
     public MailMimeSubmission Create(
         MailAccount account,
         MailComposeRequest request,
-        IReadOnlyList<MaterializedMailAttachment>? attachments = null)
+        IReadOnlyList<MaterializedMailAttachment>? attachments = null) =>
+        CreateCore(account, request, attachments, requireRecipient: true);
+
+    public MailMimeSubmission CreateDraft(
+        MailAccount account,
+        MailComposeRequest request,
+        IReadOnlyList<MaterializedMailAttachment>? attachments = null) =>
+        CreateCore(account, request, attachments, requireRecipient: false);
+
+    private MailMimeSubmission CreateCore(
+        MailAccount account,
+        MailComposeRequest request,
+        IReadOnlyList<MaterializedMailAttachment>? attachments,
+        bool requireRecipient)
     {
         ArgumentNullException.ThrowIfNull(account);
         ArgumentNullException.ThrowIfNull(request);
-        if (account.Id != request.AccountId || request.RecipientCount == 0)
+        if (account.Id != request.AccountId || (requireRecipient && request.RecipientCount == 0))
         {
             throw new MailComposeValidationException("Параметры отправки письма некорректны.");
         }

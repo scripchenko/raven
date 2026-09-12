@@ -16,6 +16,7 @@ public sealed record MailMessageSummary(
     public MailMessageAttachmentSummary AttachmentSummary { get; init; } = MailMessageAttachmentSummary.Empty;
     public bool IsStarred { get; init; }
     internal IReadOnlySet<string> ProviderLabelIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+    internal string? ProviderDraftId { get; init; }
 
     public bool IsSelected
     {
