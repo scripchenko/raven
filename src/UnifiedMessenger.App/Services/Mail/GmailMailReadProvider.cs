@@ -33,9 +33,15 @@ internal sealed record GmailApiInboxPage(
     long? LabelMessagesTotal = null,
     long? ResultSizeEstimate = null);
 
-internal sealed record GmailApiInboxTechnicalSnapshot(
+internal sealed record GmailApiHistoryBaseline(
     int UnreadCount,
-    IReadOnlyList<string> MessageIds);
+    ulong HistoryId);
+
+internal sealed record GmailApiHistoryDelta(
+    int UnreadCount,
+    ulong HistoryId,
+    IReadOnlyCollection<string> NewInboxMessageIds,
+    bool IsRebaseline = false);
 
 internal sealed record GmailApiRawMessage(byte[] RawMime, bool IsUnread, string? ThreadId = null);
 internal sealed record GmailApiUserLabel(string Id, string Name);
@@ -45,11 +51,18 @@ internal sealed record GmailApiTrashResult(
 
 internal interface IGmailApiReadClient
 {
-    Task<GmailApiInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+    Task<GmailApiHistoryBaseline> GetHistoryBaselineAsync(
         MailCredential credential,
         Guid accountId,
         CancellationToken cancellationToken = default) =>
-        Task.FromException<GmailApiInboxTechnicalSnapshot>(new NotSupportedException());
+        Task.FromException<GmailApiHistoryBaseline>(new NotSupportedException());
+
+    Task<GmailApiHistoryDelta> GetHistoryDeltaAsync(
+        MailCredential credential,
+        Guid accountId,
+        ulong historyId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<GmailApiHistoryDelta>(new NotSupportedException());
 
     Task<int> GetInboxUnreadCountAsync(
         MailCredential credential,
@@ -177,7 +190,7 @@ internal sealed class GmailMailReadProvider(
     IMailCredentialStore credentialStore,
     IGmailApiReadClient apiClient,
     IMailContentExtractor contentExtractor,
-    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailSearchProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailSearchProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailNewMessageHistoryProvider
 {
     private const string MessageKeyPrefix = "gmail:";
     private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
@@ -193,18 +206,27 @@ internal sealed class GmailMailReadProvider(
         return await apiClient.GetInboxUnreadCountAsync(credential, account.Id, cancellationToken);
     }
 
-    async Task<MailInboxTechnicalSnapshot> IMailInboxTechnicalSnapshotProvider.GetInboxTechnicalSnapshotAsync(
+    async Task<MailHistoryPollResult> IMailNewMessageHistoryProvider.PollHistoryAsync(
         MailAccount account,
+        ulong? historyCursor,
         CancellationToken cancellationToken)
     {
         ValidateAccount(account, pageSize: 1);
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
-        GmailApiInboxTechnicalSnapshot snapshot = await apiClient
-            .GetInboxTechnicalSnapshotAsync(credential, account.Id, cancellationToken);
-        return new MailInboxTechnicalSnapshot(
-            snapshot.UnreadCount,
-            "gmail-inbox",
-            snapshot.MessageIds);
+        if (historyCursor is null)
+        {
+            GmailApiHistoryBaseline baseline = await apiClient
+                .GetHistoryBaselineAsync(credential, account.Id, cancellationToken);
+            return new MailHistoryPollResult(baseline.UnreadCount, baseline.HistoryId, []);
+        }
+
+        GmailApiHistoryDelta delta = await apiClient
+            .GetHistoryDeltaAsync(credential, account.Id, historyCursor.Value, cancellationToken);
+        return new MailHistoryPollResult(
+            delta.UnreadCount,
+            delta.HistoryId,
+            delta.NewInboxMessageIds,
+            delta.IsRebaseline);
     }
 
     public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
@@ -522,7 +544,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
     internal const int MaximumMetadataConcurrency = 5;
     internal const int MaximumTrashConcurrency = 4;
     internal const int MetadataMimeTreeDepth = 8;
-    internal const int BackgroundSnapshotMessageLimit = 100;
+    internal const int HistoryPageSize = 500;
     internal const string InboxLabel = GmailSystemFolders.Inbox;
     internal static string MetadataFieldsProjection { get; } = BuildMetadataFieldsProjection();
 
@@ -557,7 +579,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         }
     }
 
-    public async Task<GmailApiInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+    public async Task<GmailApiHistoryBaseline> GetHistoryBaselineAsync(
         MailCredential credential,
         Guid accountId,
         CancellationToken cancellationToken = default)
@@ -568,26 +590,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
                 credential,
                 accountId,
                 cancellationToken);
-            GmailService service = session.Service;
-            Google.Apis.Gmail.v1.Data.Label inbox = await service.Users.Labels
-                .Get("me", GmailSystemFolders.Inbox)
-                .ExecuteAsync(cancellationToken);
-
-            UsersResource.MessagesResource.ListRequest request = service.Users.Messages.List("me");
-            request.LabelIds = new[] { GmailSystemFolders.Inbox };
-            request.IncludeSpamTrash = false;
-            request.MaxResults = BackgroundSnapshotMessageLimit;
-            request.Fields = "messages/id";
-            ListMessagesResponse response = await request.ExecuteAsync(cancellationToken);
-            string[] messageIds = response.Messages?
-                .Select(message => message.Id)
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.Ordinal)
-                .ToArray()
-                ?? [];
-            long unread = inbox.MessagesUnread ?? 0;
-            int unreadCount = unread >= int.MaxValue ? int.MaxValue : Math.Max(0, (int)unread);
-            return new GmailApiInboxTechnicalSnapshot(unreadCount, messageIds);
+            return await ReadCurrentHistoryBaselineAsync(session.Service, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -597,6 +600,144 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         {
             throw MapListException(exception);
         }
+    }
+
+    public async Task<GmailApiHistoryDelta> GetHistoryDeltaAsync(
+        MailCredential credential,
+        Guid accountId,
+        ulong historyId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(
+                credential,
+                accountId,
+                cancellationToken);
+            GmailService service = session.Service;
+
+            (ulong nextHistoryId, IReadOnlyCollection<string> messageIds) historyDelta;
+            try
+            {
+                historyDelta = await ReadHistoryPagesAsync(
+                    historyId,
+                    async (pageToken, token) =>
+                    {
+                        UsersResource.HistoryResource.ListRequest request = service.Users.History.List("me");
+                        ConfigureHistoryRequest(request, historyId, pageToken);
+                        return await request.ExecuteAsync(token);
+                    },
+                    cancellationToken);
+            }
+            catch (GoogleApiException exception) when (IsStaleHistoryCursor(exception))
+            {
+                GmailApiHistoryBaseline baseline = await ReadCurrentHistoryBaselineAsync(service, cancellationToken);
+                return new GmailApiHistoryDelta(
+                    baseline.UnreadCount,
+                    baseline.HistoryId,
+                    [],
+                    IsRebaseline: true);
+            }
+
+            int unreadCount = await ReadInboxUnreadCountAsync(service, cancellationToken);
+            return new GmailApiHistoryDelta(
+                unreadCount,
+                historyDelta.nextHistoryId,
+                historyDelta.messageIds);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw MapListException(exception);
+        }
+    }
+
+    internal static void ConfigureHistoryRequest(
+        UsersResource.HistoryResource.ListRequest request,
+        ulong historyId,
+        string? pageToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.StartHistoryId = historyId;
+        request.HistoryTypes = UsersResource.HistoryResource.ListRequest.HistoryTypesEnum.MessageAdded;
+        request.LabelId = GmailSystemFolders.Inbox;
+        request.MaxResults = HistoryPageSize;
+        request.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
+    }
+
+    internal static async Task<(ulong HistoryId, IReadOnlyCollection<string> MessageIds)> ReadHistoryPagesAsync(
+        ulong startHistoryId,
+        Func<string?, CancellationToken, Task<ListHistoryResponse>> loadPageAsync,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(loadPageAsync);
+        HashSet<string> messageIds = new(StringComparer.Ordinal);
+        HashSet<string> visitedPageTokens = new(StringComparer.Ordinal);
+        string? pageToken = null;
+        ulong latestHistoryId = startHistoryId;
+
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ListHistoryResponse response = await loadPageAsync(pageToken, cancellationToken);
+            if (response.HistoryId is ulong responseHistoryId)
+            {
+                latestHistoryId = responseHistoryId;
+            }
+
+            foreach (History history in response.History ?? [])
+            {
+                foreach (HistoryMessageAdded added in history.MessagesAdded ?? [])
+                {
+                    if (!string.IsNullOrWhiteSpace(added.Message?.Id))
+                    {
+                        messageIds.Add(added.Message.Id);
+                    }
+                }
+            }
+
+            pageToken = string.IsNullOrWhiteSpace(response.NextPageToken)
+                ? null
+                : response.NextPageToken;
+            if (pageToken is not null && !visitedPageTokens.Add(pageToken))
+            {
+                throw new InvalidOperationException("Gmail вернул повторяющийся маркер страницы истории.");
+            }
+        }
+        while (pageToken is not null);
+
+        return (latestHistoryId, messageIds);
+    }
+
+    internal static bool IsStaleHistoryCursor(GoogleApiException exception) =>
+        exception.HttpStatusCode == HttpStatusCode.NotFound;
+
+    private static async Task<GmailApiHistoryBaseline> ReadCurrentHistoryBaselineAsync(
+        GmailService service,
+        CancellationToken cancellationToken)
+    {
+        Profile profile = await service.Users.GetProfile("me").ExecuteAsync(cancellationToken);
+        if (profile.HistoryId is not ulong historyId)
+        {
+            throw new InvalidOperationException("Gmail не вернул идентификатор истории.");
+        }
+
+        int unreadCount = await ReadInboxUnreadCountAsync(service, cancellationToken);
+        return new GmailApiHistoryBaseline(unreadCount, historyId);
+    }
+
+    private static async Task<int> ReadInboxUnreadCountAsync(
+        GmailService service,
+        CancellationToken cancellationToken)
+    {
+        Google.Apis.Gmail.v1.Data.Label inbox = await service.Users.Labels
+            .Get("me", GmailSystemFolders.Inbox)
+            .ExecuteAsync(cancellationToken);
+        long unread = inbox.MessagesUnread ?? 0;
+        return unread >= int.MaxValue ? int.MaxValue : Math.Max(0, (int)unread);
     }
 
     public async Task<IReadOnlySet<string>> GetSystemLabelIdsAsync(

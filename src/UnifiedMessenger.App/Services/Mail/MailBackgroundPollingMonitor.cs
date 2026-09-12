@@ -33,6 +33,20 @@ internal interface IMailInboxTechnicalSnapshotProvider
         CancellationToken cancellationToken = default);
 }
 
+internal sealed record MailHistoryPollResult(
+    int UnreadCount,
+    ulong HistoryCursor,
+    IReadOnlyCollection<string> NewMessageIdentities,
+    bool IsRebaseline = false);
+
+internal interface IMailNewMessageHistoryProvider
+{
+    Task<MailHistoryPollResult> PollHistoryAsync(
+        MailAccount account,
+        ulong? historyCursor,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed class MailBackgroundPollingMonitor(
     IApplicationSettingsStore settingsStore,
     IMailReadProviderFactory providerFactory,
@@ -42,6 +56,7 @@ public sealed class MailBackgroundPollingMonitor(
     public static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(60);
 
     private readonly Dictionary<Guid, MailInboxBaseline> _baselines = [];
+    private readonly Dictionary<Guid, ulong> _historyCursors = [];
     private readonly SemaphoreSlim _pollGate = new(1, 1);
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly object _lifecycleSync = new();
@@ -119,6 +134,11 @@ public sealed class MailBackgroundPollingMonitor(
                 _baselines.Remove(accountId);
             }
 
+            foreach (Guid accountId in _historyCursors.Keys.Where(id => !enabledIds.Contains(id)).ToArray())
+            {
+                _historyCursors.Remove(accountId);
+            }
+
             foreach (MailAccount account in enabledAccounts)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -162,6 +182,16 @@ public sealed class MailBackgroundPollingMonitor(
         try
         {
             IMailReadProvider provider = providerFactory.Get(account.Provider);
+            if (account.Provider is MailProviderType.Gmail)
+            {
+                if (provider is IMailNewMessageHistoryProvider historyProvider)
+                {
+                    await PollHistoryAccountAsync(account, historyProvider, cancellationToken);
+                }
+
+                return;
+            }
+
             if (provider is not IMailInboxTechnicalSnapshotProvider snapshotProvider)
             {
                 return;
@@ -199,6 +229,59 @@ public sealed class MailBackgroundPollingMonitor(
             // A background provider/network failure is isolated to this account and poll.
         }
     }
+
+    private async Task PollHistoryAccountAsync(
+        MailAccount account,
+        IMailNewMessageHistoryProvider historyProvider,
+        CancellationToken cancellationToken)
+    {
+        bool hasCursor = _historyCursors.TryGetValue(account.Id, out ulong cursor);
+        MailHistoryPollResult result = await historyProvider.PollHistoryAsync(
+            account,
+            hasCursor ? cursor : null,
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        string[] newMessageIdentities = result.NewMessageIdentities
+            .Where(identity => !string.IsNullOrWhiteSpace(identity))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (hasCursor && !result.IsRebaseline && result.HistoryCursor < cursor)
+        {
+            throw new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Gmail вернул некорректный идентификатор истории.");
+        }
+
+        if (hasCursor
+            && !result.IsRebaseline
+            && result.HistoryCursor == cursor
+            && newMessageIdentities.Length > 0)
+        {
+            throw new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Gmail не продвинул идентификатор истории.");
+        }
+
+        if (!await IsAccountStillEnabledAsync(account.Id))
+        {
+            _historyCursors.Remove(account.Id);
+            return;
+        }
+
+        _baselines.Remove(account.Id);
+        _historyCursors[account.Id] = result.HistoryCursor;
+        int newMessageCount = !hasCursor || result.IsRebaseline
+            ? 0
+            : newMessageIdentities.Length;
+        int unreadCount = Math.Max(0, result.UnreadCount);
+        uiDispatcher.Post(() => ApplySuccessfulPoll(account.Id, unreadCount, newMessageCount));
+    }
+
+    private Task<bool> IsAccountStillEnabledAsync(Guid accountId) =>
+        uiDispatcher.InvokeAsync(() => settingsStore.Current.MailAccounts.Any(
+            candidate => candidate.Id == accountId && candidate.IsEnabled));
 
     private void ApplySuccessfulPoll(Guid accountId, int unreadCount, int newMessageCount)
     {

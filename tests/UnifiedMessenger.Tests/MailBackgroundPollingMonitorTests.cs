@@ -219,21 +219,28 @@ public sealed class MailBackgroundPollingMonitorTests
     }
 
     [Fact]
-    public async Task GmailSnapshot_UsesOnlyProviderMessageIdsAndUnreadCount()
+    public async Task GmailHistoryProvider_MapsBaselineAndDeltaWithoutSnapshotFallback()
     {
         MailAccount account = Account(MailProviderType.Gmail);
-        GmailSnapshotClient client = new(new GmailApiInboxTechnicalSnapshot(6, ["gmail-2", "gmail-1"]));
+        GmailHistoryClient client = new(
+            new GmailApiHistoryBaseline(6, 120),
+            new GmailApiHistoryDelta(7, 124, ["gmail-2", "gmail-1"]));
         GmailMailReadProvider provider = new(
             new TestCredentialStore(MailCredential.CreateGmailOAuth("refresh", "client", "secret")),
             client,
             new MailContentExtractor(new MailHtmlSanitizer()));
 
-        MailInboxTechnicalSnapshot snapshot = await ((IMailInboxTechnicalSnapshotProvider)provider)
-            .GetInboxTechnicalSnapshotAsync(account);
+        IMailNewMessageHistoryProvider historyProvider = Assert.IsAssignableFrom<IMailNewMessageHistoryProvider>(provider);
+        Assert.False((object)provider is IMailInboxTechnicalSnapshotProvider);
+        MailHistoryPollResult baseline = await historyProvider.PollHistoryAsync(account, null);
+        MailHistoryPollResult delta = await historyProvider.PollHistoryAsync(account, baseline.HistoryCursor);
 
-        Assert.Equal(6, snapshot.UnreadCount);
-        Assert.Equal("gmail-inbox", snapshot.IdentityScope);
-        Assert.Equal(["gmail-2", "gmail-1"], snapshot.MessageIdentities);
+        Assert.Equal(6, baseline.UnreadCount);
+        Assert.Equal(120UL, baseline.HistoryCursor);
+        Assert.Empty(baseline.NewMessageIdentities);
+        Assert.Equal(7, delta.UnreadCount);
+        Assert.Equal(124UL, delta.HistoryCursor);
+        Assert.Equal(["gmail-2", "gmail-1"], delta.NewMessageIdentities);
         Assert.Equal(account.Id, client.AccountId);
     }
 
@@ -279,7 +286,7 @@ public sealed class MailBackgroundPollingMonitorTests
     private static MailInboxTechnicalSnapshot Snapshot(int unreadCount, params string[] identities) =>
         new(unreadCount, "scope-1", identities);
 
-    private static MailAccount Account(MailProviderType provider = MailProviderType.Gmail) =>
+    private static MailAccount Account(MailProviderType provider = MailProviderType.Yandex) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -367,17 +374,29 @@ public sealed class MailBackgroundPollingMonitorTests
         public IMailReadProvider Get(MailProviderType providerType) => provider;
     }
 
-    private sealed class GmailSnapshotClient(GmailApiInboxTechnicalSnapshot snapshot) : IGmailApiReadClient
+    private sealed class GmailHistoryClient(
+        GmailApiHistoryBaseline baseline,
+        GmailApiHistoryDelta delta) : IGmailApiReadClient
     {
         public Guid? AccountId { get; private set; }
 
-        public Task<GmailApiInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
+        public Task<GmailApiHistoryBaseline> GetHistoryBaselineAsync(
             MailCredential credential,
             Guid accountId,
             CancellationToken cancellationToken = default)
         {
             AccountId = accountId;
-            return Task.FromResult(snapshot);
+            return Task.FromResult(baseline);
+        }
+
+        public Task<GmailApiHistoryDelta> GetHistoryDeltaAsync(
+            MailCredential credential,
+            Guid accountId,
+            ulong historyId,
+            CancellationToken cancellationToken = default)
+        {
+            AccountId = accountId;
+            return Task.FromResult(delta);
         }
 
         public Task<GmailApiInboxPage> GetInboxPageAsync(
