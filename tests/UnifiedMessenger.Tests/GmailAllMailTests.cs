@@ -1,3 +1,5 @@
+using System.Net;
+using Google;
 using Google.Apis.Gmail.v1;
 using Google.Apis.Services;
 using UnifiedMessenger.App.Models;
@@ -108,6 +110,17 @@ public sealed class GmailAllMailTests
         Assert.False(request.IncludeSpamTrash);
     }
 
+    [Fact]
+    public void GmailMessageMetadata_OnlyTreatsMissingListedMessageAsStale()
+    {
+        GoogleApiException missing = new("Gmail", "synthetic") { HttpStatusCode = HttpStatusCode.NotFound };
+        GoogleApiException throttled = new("Gmail", "synthetic") { HttpStatusCode = HttpStatusCode.TooManyRequests };
+
+        Assert.True(GmailApiReadClient.IsStaleListedItem(missing));
+        Assert.False(GmailApiReadClient.IsStaleListedItem(throttled));
+        Assert.False(GmailApiReadClient.IsStaleListedItem(new HttpRequestException("synthetic")));
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(50)]
@@ -190,6 +203,22 @@ public sealed class GmailAllMailTests
 
         Assert.Equal("ordinary", mapped.Id);
         Assert.Null(mapped.DraftId);
+    }
+
+    [Fact]
+    public void GmailAllMailMapping_AcceptsRestoredMessageWithoutInboxLabel()
+    {
+        GmailApiSummaryData restored = ApiSummary("restored", ["CATEGORY_UPDATES", "IMPORTANT", GmailSystemFolders.Unread]);
+
+        GmailApiSummaryData mapped = Assert.Single(GmailApiReadClient.ApplyDraftIdentities(
+            [restored],
+            new Dictionary<string, string>()));
+        MailMessageSummary summary = GmailMailReadProvider.MapSummary(mapped);
+
+        Assert.DoesNotContain(GmailSystemFolders.Inbox, summary.ProviderLabelIds);
+        Assert.Contains("CATEGORY_UPDATES", summary.ProviderLabelIds);
+        Assert.Contains("IMPORTANT", summary.ProviderLabelIds);
+        Assert.True(summary.IsUnread);
     }
 
     [Fact]
@@ -862,6 +891,24 @@ public sealed class GmailAllMailTests
             TrashedKeys = messageKeys.ToArray();
             return Success(messageKeys);
         }
+
+        public Task<GmailMailboxMutationResult> RestoreFromTrashAsync(
+            MailAccount account,
+            IReadOnlyCollection<string> messageKeys,
+            CancellationToken cancellationToken = default) =>
+            Success(messageKeys);
+
+        public Task<GmailMailboxMutationResult> MarkNotSpamAsync(
+            MailAccount account,
+            IReadOnlyCollection<string> messageKeys,
+            CancellationToken cancellationToken = default) =>
+            Success(messageKeys);
+
+        public Task<GmailMailboxMutationResult> ReportSpamAsync(
+            MailAccount account,
+            IReadOnlyCollection<string> messageKeys,
+            CancellationToken cancellationToken = default) =>
+            Success(messageKeys);
 
         public Task<GmailMailboxMutationResult> SetUserLabelAsync(
             MailAccount account,

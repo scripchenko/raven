@@ -15,6 +15,9 @@
         <Geometry x:Key="MailFolderTrashGeometry">M4,5 L14,5 13,16 5,16 Z M3,5 L15,5 M6,5 L6,3 12,3 12,5 M7,8 L7,13 M11,8 L11,13</Geometry>
         <Geometry x:Key="MailActionArchiveGeometry">M4,5 L20,5 L20,9 L4,9 Z M6,9 L6,20 L18,20 L18,9 M12,11 L12,17 M9,14 L12,17 L15,14</Geometry>
         <Geometry x:Key="MailActionTrashGeometry">M4,7 L20,7 M9,4 L15,4 L16,7 M7,7 L8,20 L16,20 L17,7 M10,10 L10.5,17 M14,10 L13.5,17</Geometry>
+        <Geometry x:Key="MailActionReportSpamGeometry">M12,3 L21,20 3,20 Z M12,8 L12,14 M12,17 L12,18</Geometry>
+        <Geometry x:Key="MailActionRestoreGeometry">M4,7 L20,7 M9,4 L15,4 L16,7 M7,7 L8,20 L16,20 L17,7 M12,17 L12,10 M8.5,13.5 L12,10 L15.5,13.5</Geometry>
+        <Geometry x:Key="MailActionNotSpamGeometry">M12,3 L19,6 L19,11.5 C19,16 16,19 12,21 C8,19 5,16 5,11.5 L5,6 Z M8.5,12 L11,14.5 L15.5,9.5</Geometry>
         <Geometry x:Key="MailActionMarkReadGeometry">M3.5,10 L12,4 L20.5,10 L20.5,19.5 L3.5,19.5 Z M4,10 L12,16 L20,10</Geometry>
         <Geometry x:Key="MailActionMarkUnreadGeometry">M3.5,6.5 L20.5,6.5 L20.5,17.5 L3.5,17.5 Z M4,7 L12,13 L20,7</Geometry>
         <Geometry x:Key="MailActionLabelGeometry">M4,5 L13,5 L20,12 L12,20 L4,12 Z M8,9 L8.1,9</Geometry>
@@ -515,6 +518,42 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="В спам"
+                                    Command="{Binding ReportSelectedSpamCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="В спам"
+                                    Visibility="{Binding ShowReportSpamAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionReportSpamGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.6" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="Восстановить"
+                                    Command="{Binding RestoreSelectedCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="Восстановить"
+                                    Visibility="{Binding ShowRestoreAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionRestoreGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.6" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="Не спам"
+                                    Command="{Binding MarkSelectedNotSpamCommand}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="Не спам"
+                                    Visibility="{Binding ShowNotSpamAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{StaticResource MailActionNotSpamGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.6" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
                                     AutomationProperties.Name="Удалить"
                                     Command="{Binding DeleteSelectedCommand}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
@@ -968,6 +1007,60 @@
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
                                     <Path Data="{StaticResource MailActionArchiveGeometry}"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeThickness="1.6" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="В спам"
+                                Command="{Binding ReportDetailSpamCommand}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="В спам"
+                                Visibility="{Binding ShowReportSpamAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="{StaticResource MailActionReportSpamGeometry}"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeThickness="1.6" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="Восстановить"
+                                Command="{Binding RestoreDetailCommand}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Восстановить"
+                                Visibility="{Binding ShowRestoreAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="{StaticResource MailActionRestoreGeometry}"
+                                          Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeThickness="1.6" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="Не спам"
+                                Command="{Binding MarkDetailNotSpamCommand}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="Не спам"
+                                Visibility="{Binding ShowNotSpamAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="{StaticResource MailActionNotSpamGeometry}"
                                           Fill="Transparent"
                                           Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                                           StrokeStartLineCap="Round"

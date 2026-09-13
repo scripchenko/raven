@@ -51,6 +51,9 @@ internal sealed record GmailApiUserLabel(string Id, string Name);
 internal sealed record GmailApiTrashResult(
     IReadOnlySet<string> SucceededMessageIds,
     IReadOnlyDictionary<string, Exception> FailedMessages);
+internal sealed record GmailApiUntrashResult(
+    IReadOnlySet<string> SucceededMessageIds,
+    IReadOnlyDictionary<string, Exception> FailedMessages);
 
 internal interface IGmailApiReadClient
 {
@@ -163,6 +166,15 @@ internal interface IGmailMailboxApiClient
         IReadOnlyCollection<string> messageIds,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(new GmailApiTrashResult(
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, Exception>(StringComparer.Ordinal)));
+
+    Task<GmailApiUntrashResult> RestoreFromTrashAsync(
+        MailCredential credential,
+        Guid accountId,
+        IReadOnlyCollection<string> messageIds,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new GmailApiUntrashResult(
             new HashSet<string>(StringComparer.Ordinal),
             new Dictionary<string, Exception>(StringComparer.Ordinal)));
 }
@@ -590,7 +602,8 @@ internal sealed class GmailMailReadProvider(
 internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApiClient
 {
     internal const int MaximumMetadataConcurrency = 5;
-    internal const int MaximumTrashConcurrency = 4;
+    internal const int MaximumRateLimitRetries = 2;
+    internal const int MaximumPerMessageMutationConcurrency = 4;
     internal const int MetadataMimeTreeDepth = 8;
     internal const int HistoryPageSize = 500;
     internal const string InboxLabel = GmailSystemFolders.Inbox;
@@ -883,7 +896,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             listRequest.IncludeSpamTrash = includeSpamTrash;
             listRequest.MaxResults = pageSize;
             listRequest.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
-            ListMessagesResponse response = await listRequest.ExecuteAsync(cancellationToken);
+            ListMessagesResponse response = await ExecuteWithRateLimitRetryAsync(
+                () => listRequest.ExecuteAsync(cancellationToken),
+                cancellationToken);
             GmailMessage[] listed = response.Messages?.Where(item => !string.IsNullOrWhiteSpace(item.Id)).ToArray() ?? [];
             long? labelMessagesTotal = await TryGetMessageOrientedLabelTotalAsync(
                 service,
@@ -891,12 +906,17 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
                 cancellationToken);
 
             using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
-            Task<(int Index, GmailApiSummaryData Summary)>[] tasks = listed
-                .Select((item, index) => LoadMetadataAsync(service, item.Id, index, gate, cancellationToken))
+            Task<(int Index, GmailApiSummaryData Summary)?>[] tasks = listed
+                .Select((item, index) => LoadAvailableMetadataAsync(
+                    service,
+                    item.Id,
+                    index,
+                    gate,
+                    cancellationToken))
                 .ToArray();
-            (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
+            (int Index, GmailApiSummaryData Summary)?[] metadata = await Task.WhenAll(tasks);
             return new GmailApiInboxPage(
-                metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
+                SelectAvailableSummaries(metadata),
                 response.NextPageToken,
                 labelMessagesTotal,
                 response.ResultSizeEstimate);
@@ -996,17 +1016,24 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             GmailService service = session.Service;
             UsersResource.MessagesResource.ListRequest listRequest = service.Users.Messages.List("me");
             ConfigureAllMailRequest(listRequest, pageToken, pageSize);
-            ListMessagesResponse response = await listRequest.ExecuteAsync(cancellationToken);
+            ListMessagesResponse response = await ExecuteWithRateLimitRetryAsync(
+                () => listRequest.ExecuteAsync(cancellationToken),
+                cancellationToken);
             GmailMessage[] listed = response.Messages?.Where(item => !string.IsNullOrWhiteSpace(item.Id)).ToArray() ?? [];
 
             using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
-            Task<(int Index, GmailApiSummaryData Summary)>[] tasks = listed
-                .Select((item, index) => LoadMetadataAsync(service, item.Id, index, gate, cancellationToken))
+            Task<(int Index, GmailApiSummaryData Summary)?>[] tasks = listed
+                .Select((item, index) => LoadAvailableMetadataAsync(
+                    service,
+                    item.Id,
+                    index,
+                    gate,
+                    cancellationToken))
                 .ToArray();
-            (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
+            (int Index, GmailApiSummaryData Summary)?[] metadata = await Task.WhenAll(tasks);
             IReadOnlyList<GmailApiSummaryData> summaries = await ResolveDraftIdentitiesAsync(
                 service,
-                metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
+                SelectAvailableSummaries(metadata),
                 cancellationToken);
             return new GmailApiInboxPage(
                 summaries,
@@ -1024,6 +1051,99 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         }
     }
 
+    private static async Task<(int Index, GmailApiSummaryData Summary)?> LoadAvailableMetadataAsync(
+        GmailService service,
+        string messageId,
+        int index,
+        SemaphoreSlim gate,
+        CancellationToken cancellationToken,
+        string? draftId = null)
+    {
+        (int Index, GmailApiSummaryData Summary)? loaded = await LoadAvailableListedItemAsync(
+            () => LoadMetadataAsync(
+                service,
+                messageId,
+                index,
+                gate,
+                cancellationToken,
+                draftId));
+        return loaded is { } result
+            && (draftId is null || IsCurrentDraftSummary(result.Summary))
+                ? result
+                : null;
+    }
+
+    internal static bool IsStaleListedItem(Exception exception) =>
+        exception is GoogleApiException { HttpStatusCode: HttpStatusCode.NotFound };
+
+    internal static async Task<(int Index, GmailApiSummaryData Summary)?> LoadAvailableListedItemAsync(
+        Func<Task<(int Index, GmailApiSummaryData Summary)>> load)
+    {
+        ArgumentNullException.ThrowIfNull(load);
+        try
+        {
+            return await load();
+        }
+        catch (Exception exception) when (IsStaleListedItem(exception))
+        {
+            // Gmail list and per-item reads are separate calls. A message can disappear between
+            // them; omitting that stale row keeps the remaining server-authoritative page usable.
+            return null;
+        }
+    }
+
+    internal static bool IsCurrentDraftSummary(GmailApiSummaryData summary) =>
+        summary.LabelIds.Contains(GmailSystemFolders.Draft, StringComparer.Ordinal);
+
+    internal static bool IsRateLimitFailure(Exception exception)
+    {
+        if (exception is not GoogleApiException apiException)
+        {
+            return false;
+        }
+
+        if (apiException.HttpStatusCode is HttpStatusCode.TooManyRequests)
+        {
+            return true;
+        }
+
+        return apiException.HttpStatusCode is HttpStatusCode.Forbidden
+            && apiException.Error?.Errors?.Any(error =>
+                string.Equals(error.Reason, "rateLimitExceeded", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(error.Reason, "userRateLimitExceeded", StringComparison.OrdinalIgnoreCase)) == true;
+    }
+
+    internal static async Task<T> ExecuteWithRateLimitRetryAsync<T>(
+        Func<Task<T>> operation,
+        CancellationToken cancellationToken,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        delay ??= Task.Delay;
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (Exception exception) when (
+                attempt < MaximumRateLimitRetries
+                && IsRateLimitFailure(exception))
+            {
+                await delay(TimeSpan.FromSeconds(1 << attempt), cancellationToken);
+            }
+        }
+    }
+
+    internal static IReadOnlyList<GmailApiSummaryData> SelectAvailableSummaries(
+        IEnumerable<(int Index, GmailApiSummaryData Summary)?> metadata) =>
+        metadata
+            .Where(item => item.HasValue)
+            .Select(item => item.GetValueOrDefault())
+            .OrderBy(item => item.Index)
+            .Select(item => item.Summary)
+            .ToArray();
+
     public async Task<GmailApiInboxPage> SearchPageAsync(
         MailCredential credential,
         Guid accountId,
@@ -1038,17 +1158,24 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             GmailService service = session.Service;
             UsersResource.MessagesResource.ListRequest listRequest = service.Users.Messages.List("me");
             ConfigureSearchRequest(listRequest, query, pageToken, pageSize);
-            ListMessagesResponse response = await listRequest.ExecuteAsync(cancellationToken);
+            ListMessagesResponse response = await ExecuteWithRateLimitRetryAsync(
+                () => listRequest.ExecuteAsync(cancellationToken),
+                cancellationToken);
             GmailMessage[] listed = response.Messages?.Where(item => !string.IsNullOrWhiteSpace(item.Id)).ToArray() ?? [];
 
             using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
-            Task<(int Index, GmailApiSummaryData Summary)>[] tasks = listed
-                .Select((item, index) => LoadMetadataAsync(service, item.Id, index, gate, cancellationToken))
+            Task<(int Index, GmailApiSummaryData Summary)?>[] tasks = listed
+                .Select((item, index) => LoadAvailableMetadataAsync(
+                    service,
+                    item.Id,
+                    index,
+                    gate,
+                    cancellationToken))
                 .ToArray();
-            (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
+            (int Index, GmailApiSummaryData Summary)?[] metadata = await Task.WhenAll(tasks);
             IReadOnlyList<GmailApiSummaryData> summaries = await ResolveDraftIdentitiesAsync(
                 service,
-                metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
+                SelectAvailableSummaries(metadata),
                 cancellationToken);
             return new GmailApiInboxPage(
                 summaries,
@@ -1075,7 +1202,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         UsersResource.DraftsResource.ListRequest listRequest = service.Users.Drafts.List("me");
         listRequest.MaxResults = pageSize;
         listRequest.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
-        ListDraftsResponse response = await listRequest.ExecuteAsync(cancellationToken);
+        ListDraftsResponse response = await ExecuteWithRateLimitRetryAsync(
+            () => listRequest.ExecuteAsync(cancellationToken),
+            cancellationToken);
         Draft[] listed = response.Drafts?
             .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Message?.Id))
             .ToArray()
@@ -1086,8 +1215,8 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             cancellationToken);
 
         using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
-        Task<(int Index, GmailApiSummaryData Summary)>[] tasks = listed
-            .Select((item, index) => LoadMetadataAsync(
+        Task<(int Index, GmailApiSummaryData Summary)?>[] tasks = listed
+            .Select((item, index) => LoadAvailableMetadataAsync(
                 service,
                 item.Message.Id,
                 index,
@@ -1095,9 +1224,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
                 cancellationToken,
                 item.Id))
             .ToArray();
-        (int Index, GmailApiSummaryData Summary)[] metadata = await Task.WhenAll(tasks);
+        (int Index, GmailApiSummaryData Summary)?[] metadata = await Task.WhenAll(tasks);
         return new GmailApiInboxPage(
-            metadata.OrderBy(item => item.Index).Select(item => item.Summary).ToArray(),
+            SelectAvailableSummaries(metadata),
             response.NextPageToken,
             labelMessagesTotal,
             response.ResultSizeEstimate);
@@ -1151,7 +1280,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             request.MaxResults = 500;
             request.PageToken = pageToken;
             request.Fields = "drafts(id,message/id),nextPageToken";
-            ListDraftsResponse response = await request.ExecuteAsync(cancellationToken);
+            ListDraftsResponse response = await ExecuteWithRateLimitRetryAsync(
+                () => request.ExecuteAsync(cancellationToken),
+                cancellationToken);
             foreach (Draft draft in response.Drafts ?? [])
             {
                 if (!string.IsNullOrWhiteSpace(draft.Id)
@@ -1197,7 +1328,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         {
             UsersResource.LabelsResource.GetRequest request = service.Users.Labels.Get("me", labelId);
             request.Fields = "messagesTotal";
-            Google.Apis.Gmail.v1.Data.Label label = await request.ExecuteAsync(cancellationToken);
+            Google.Apis.Gmail.v1.Data.Label label = await ExecuteWithRateLimitRetryAsync(
+                () => request.ExecuteAsync(cancellationToken),
+                cancellationToken);
             return GetMessageOrientedLabelTotal(label);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1286,7 +1419,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             credential,
             accountId,
             cancellationToken);
-        using SemaphoreSlim gate = new(MaximumTrashConcurrency, MaximumTrashConcurrency);
+        using SemaphoreSlim gate = new(
+            MaximumPerMessageMutationConcurrency,
+            MaximumPerMessageMutationConcurrency);
         Task<(string Id, Exception? Error)>[] tasks = messageIds
             .Distinct(StringComparer.Ordinal)
             .Select(async messageId =>
@@ -1313,6 +1448,52 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             .ToArray();
         (string Id, Exception? Error)[] outcomes = await Task.WhenAll(tasks);
         return new GmailApiTrashResult(
+            outcomes.Where(item => item.Error is null).Select(item => item.Id).ToHashSet(StringComparer.Ordinal),
+            outcomes.Where(item => item.Error is not null).ToDictionary(
+                item => item.Id,
+                item => item.Error!,
+                StringComparer.Ordinal));
+    }
+
+    public async Task<GmailApiUntrashResult> RestoreFromTrashAsync(
+        MailCredential credential,
+        Guid accountId,
+        IReadOnlyCollection<string> messageIds,
+        CancellationToken cancellationToken = default)
+    {
+        using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(
+            credential,
+            accountId,
+            cancellationToken);
+        using SemaphoreSlim gate = new(
+            MaximumPerMessageMutationConcurrency,
+            MaximumPerMessageMutationConcurrency);
+        Task<(string Id, Exception? Error)>[] tasks = messageIds
+            .Distinct(StringComparer.Ordinal)
+            .Select(async messageId =>
+            {
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    await session.Service.Users.Messages.Untrash("me", messageId).ExecuteAsync(cancellationToken);
+                    return (messageId, (Exception?)null);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    return (messageId, exception);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            })
+            .ToArray();
+        (string Id, Exception? Error)[] outcomes = await Task.WhenAll(tasks);
+        return new GmailApiUntrashResult(
             outcomes.Where(item => item.Error is null).Select(item => item.Id).ToHashSet(StringComparer.Ordinal),
             outcomes.Where(item => item.Error is not null).ToDictionary(
                 item => item.Id,
@@ -1373,7 +1554,9 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             UsersResource.MessagesResource.GetRequest request = service.Users.Messages.Get("me", messageId);
             request.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Full;
             request.Fields = MetadataFieldsProjection;
-            GmailMessage message = await request.ExecuteAsync(cancellationToken);
+            GmailMessage message = await ExecuteWithRateLimitRetryAsync(
+                () => request.ExecuteAsync(cancellationToken),
+                cancellationToken);
             return (
                 index,
                 new GmailApiSummaryData(
@@ -1482,13 +1665,41 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         }
     }
 
-    private static MailReadException MapListException(Exception exception) =>
-        GmailAuthorizationFailureClassifier.RequiresReauthorization(exception)
-            ? new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.")
-            : new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось загрузить почту. Проверьте подключение к сети.");
+    internal static MailReadException MapListException(Exception exception)
+    {
+        if (exception is MailReadException mailReadException)
+        {
+            return mailReadException;
+        }
+
+        if (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
+        {
+            return new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
+        }
+
+        if (IsRateLimitFailure(exception))
+        {
+            return new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Gmail временно ограничил частоту запросов. Попробуйте ещё раз.");
+        }
+
+        return IsNetworkFailure(exception)
+            ? new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Не удалось загрузить почту. Проверьте подключение к сети.")
+            : new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Не удалось загрузить почту. Попробуйте ещё раз.");
+    }
 
     internal static MailReadException MapSearchException(Exception exception)
     {
+        if (exception is MailReadException mailReadException)
+        {
+            return mailReadException;
+        }
+
         if (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
             return new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
@@ -1502,11 +1713,18 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             GoogleApiException => new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
                 "Gmail временно не может выполнить поиск. Попробуйте ещё раз позже."),
+            _ when IsNetworkFailure(exception) => new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Не удалось выполнить поиск. Проверьте подключение к сети."),
             _ => new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Не удалось выполнить поиск. Проверьте подключение к сети.")
+                "Не удалось выполнить поиск. Попробуйте ещё раз.")
         };
     }
+
+    private static bool IsNetworkFailure(Exception exception) =>
+        exception is HttpRequestException or IOException or TimeoutException
+        || exception is TaskCanceledException;
 
     private static bool IsExpectedApiException(Exception exception) =>
         exception is GoogleApiException

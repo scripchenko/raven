@@ -188,6 +188,35 @@ public sealed class GmailSearchTests
     }
 
     [Fact]
+    public async Task SearchDoesNotExposeTrashOrSpamFolderOnlyActions()
+    {
+        MailAccount account = Account("gmail@example.test");
+        SearchReadProvider provider = new();
+        provider.SetNormalPage(account.Id, null, Page([Summary("gmail:inbox")], null, 1));
+        provider.SearchHandler = (_, _, _, _) => Task.FromResult(Page(
+        [
+            Summary("gmail:trash", labels: [GmailSystemFolders.Trash]),
+            Summary("gmail:spam", labels: [GmailSystemFolders.Spam])
+        ], null, 2));
+        RecordingMailboxService mailbox = new();
+        using MailInboxViewModel viewModel = ViewModel(provider, mailbox);
+        await viewModel.ActivateAsync(account);
+        viewModel.SearchText = "in:anywhere test";
+
+        await viewModel.SearchCommand.ExecuteAsync(null);
+        viewModel.SelectAllLoadedCommand.Execute(null);
+
+        Assert.True(viewModel.IsSearchActive);
+        Assert.False(viewModel.ShowReportSpamAction);
+        Assert.False(viewModel.ShowRestoreAction);
+        Assert.False(viewModel.ShowNotSpamAction);
+        Assert.False(viewModel.RestoreSelectedCommand.CanExecute(null));
+        Assert.False(viewModel.MarkSelectedNotSpamCommand.CanExecute(null));
+        Assert.False(viewModel.ReportSelectedSpamCommand.CanExecute(null));
+        Assert.Empty(mailbox.Operations);
+    }
+
+    [Fact]
     public async Task NormalAndSearchPageTokensStayIsolatedWithFiftyMessageRequests()
     {
         MailAccount account = Account("gmail@example.test");
@@ -906,6 +935,9 @@ public sealed class GmailSearchTests
         Read,
         Archive,
         Trash,
+        Restore,
+        NotSpam,
+        ReportSpam,
         Label
     }
 
@@ -928,6 +960,15 @@ public sealed class GmailSearchTests
 
         public Task<GmailMailboxMutationResult> MoveToTrashAsync(MailAccount account, IReadOnlyCollection<string> messageKeys, CancellationToken cancellationToken = default) =>
             Result(MailboxOperation.Trash, messageKeys);
+
+        public Task<GmailMailboxMutationResult> RestoreFromTrashAsync(MailAccount account, IReadOnlyCollection<string> messageKeys, CancellationToken cancellationToken = default) =>
+            Result(MailboxOperation.Restore, messageKeys);
+
+        public Task<GmailMailboxMutationResult> MarkNotSpamAsync(MailAccount account, IReadOnlyCollection<string> messageKeys, CancellationToken cancellationToken = default) =>
+            Result(MailboxOperation.NotSpam, messageKeys);
+
+        public Task<GmailMailboxMutationResult> ReportSpamAsync(MailAccount account, IReadOnlyCollection<string> messageKeys, CancellationToken cancellationToken = default) =>
+            Result(MailboxOperation.ReportSpam, messageKeys);
 
         public Task<GmailMailboxMutationResult> SetUserLabelAsync(MailAccount account, IReadOnlyCollection<string> messageKeys, string labelId, bool isApplied, CancellationToken cancellationToken = default) =>
             Result(MailboxOperation.Label, messageKeys);

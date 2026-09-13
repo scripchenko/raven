@@ -65,6 +65,21 @@ public interface IGmailMailboxManagementService
         IReadOnlyCollection<string> messageKeys,
         CancellationToken cancellationToken = default);
 
+    Task<GmailMailboxMutationResult> RestoreFromTrashAsync(
+        MailAccount account,
+        IReadOnlyCollection<string> messageKeys,
+        CancellationToken cancellationToken = default);
+
+    Task<GmailMailboxMutationResult> MarkNotSpamAsync(
+        MailAccount account,
+        IReadOnlyCollection<string> messageKeys,
+        CancellationToken cancellationToken = default);
+
+    Task<GmailMailboxMutationResult> ReportSpamAsync(
+        MailAccount account,
+        IReadOnlyCollection<string> messageKeys,
+        CancellationToken cancellationToken = default);
+
     Task<GmailMailboxMutationResult> SetUserLabelAsync(
         MailAccount account,
         IReadOnlyCollection<string> messageKeys,
@@ -191,6 +206,67 @@ internal sealed class GmailMailboxManagementService(
             return Failure(distinctKeys, failureKind);
         }
     }
+
+    public async Task<GmailMailboxMutationResult> RestoreFromTrashAsync(
+        MailAccount account,
+        IReadOnlyCollection<string> messageKeys,
+        CancellationToken cancellationToken = default)
+    {
+        string[] distinctKeys = NormalizeMessageKeys(messageKeys);
+        if (distinctKeys.Length == 0)
+        {
+            return new GmailMailboxMutationResult([], []);
+        }
+
+        try
+        {
+            MailCredential credential = await LoadModifyCredentialAsync(account, cancellationToken);
+            Dictionary<string, string> rawToMessageKey = distinctKeys.ToDictionary(
+                GmailMailReadProvider.ParseMessageKey,
+                key => key,
+                StringComparer.Ordinal);
+            GmailApiUntrashResult result = await apiClient.RestoreFromTrashAsync(
+                credential,
+                account.Id,
+                rawToMessageKey.Keys.ToArray(),
+                cancellationToken);
+            return new GmailMailboxMutationResult(
+                result.SucceededMessageIds.Select(id => rawToMessageKey[id]).ToArray(),
+                result.FailedMessages.Select(item => new GmailMailboxItemFailure(
+                    rawToMessageKey[item.Key],
+                    Classify(item.Value))).ToArray());
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return Failure(distinctKeys, Classify(exception));
+        }
+    }
+
+    public Task<GmailMailboxMutationResult> MarkNotSpamAsync(
+        MailAccount account,
+        IReadOnlyCollection<string> messageKeys,
+        CancellationToken cancellationToken = default) =>
+        ModifyLabelsAsync(
+            account,
+            messageKeys,
+            [GmailSystemFolders.Inbox],
+            [GmailSystemFolders.Spam],
+            cancellationToken);
+
+    public Task<GmailMailboxMutationResult> ReportSpamAsync(
+        MailAccount account,
+        IReadOnlyCollection<string> messageKeys,
+        CancellationToken cancellationToken = default) =>
+        ModifyLabelsAsync(
+            account,
+            messageKeys,
+            [GmailSystemFolders.Spam],
+            [GmailSystemFolders.Inbox],
+            cancellationToken);
 
     public async Task<GmailMailboxMutationResult> SetUserLabelAsync(
         MailAccount account,

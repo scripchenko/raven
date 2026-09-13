@@ -125,7 +125,8 @@ public sealed class GmailHistoryPollingTests
     [InlineData("remove label")]
     [InlineData("mark read")]
     [InlineData("mark unread")]
-    [InlineData("restore old message to inbox")]
+    [InlineData("untrash archived message")]
+    [InlineData("mark old spam message as not spam")]
     [InlineData("draft autosave")]
     [InlineData("sent message")]
     public async Task NonMessageAddedMailboxMutation_DoesNotDetectNewMail(string scenario)

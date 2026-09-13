@@ -149,8 +149,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ToggleSelectedStarCommand = new AsyncRelayCommand(ToggleSelectedStarAsync, CanMutateSelection);
         ArchiveSelectedCommand = new AsyncRelayCommand(ArchiveSelectedAsync, CanArchiveSelection);
         ArchiveDetailCommand = new AsyncRelayCommand(ArchiveDetailAsync, CanArchiveDetail);
+        ReportSelectedSpamCommand = new AsyncRelayCommand(ReportSelectedSpamAsync, CanReportSelectionSpam);
+        ReportDetailSpamCommand = new AsyncRelayCommand(ReportDetailSpamAsync, CanReportDetailSpam);
         DeleteSelectedCommand = new AsyncRelayCommand(DeleteSelectedAsync, CanDeleteSelection);
         DeleteDetailCommand = new AsyncRelayCommand(DeleteDetailAsync, CanDeleteDetail);
+        RestoreSelectedCommand = new AsyncRelayCommand(RestoreSelectedAsync, CanRestoreSelection);
+        RestoreDetailCommand = new AsyncRelayCommand(RestoreDetailAsync, CanRestoreDetail);
+        MarkSelectedNotSpamCommand = new AsyncRelayCommand(MarkSelectedNotSpamAsync, CanMarkSelectionNotSpam);
+        MarkDetailNotSpamCommand = new AsyncRelayCommand(MarkDetailNotSpamAsync, CanMarkDetailNotSpam);
         MarkSelectedReadCommand = new AsyncRelayCommand(() => SetSelectedReadStateAsync(true), CanChangeSelectedReadState);
         MarkSelectedUnreadCommand = new AsyncRelayCommand(() => SetSelectedReadStateAsync(false), CanChangeSelectedReadState);
         OpenLabelsForSelectionCommand = new AsyncRelayCommand(() => OpenLabelsAsync(targetsDetail: false), CanMutateSelection);
@@ -184,8 +190,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public IAsyncRelayCommand ToggleSelectedStarCommand { get; }
     public IAsyncRelayCommand ArchiveSelectedCommand { get; }
     public IAsyncRelayCommand ArchiveDetailCommand { get; }
+    public IAsyncRelayCommand ReportSelectedSpamCommand { get; }
+    public IAsyncRelayCommand ReportDetailSpamCommand { get; }
     public IAsyncRelayCommand DeleteSelectedCommand { get; }
     public IAsyncRelayCommand DeleteDetailCommand { get; }
+    public IAsyncRelayCommand RestoreSelectedCommand { get; }
+    public IAsyncRelayCommand RestoreDetailCommand { get; }
+    public IAsyncRelayCommand MarkSelectedNotSpamCommand { get; }
+    public IAsyncRelayCommand MarkDetailNotSpamCommand { get; }
     public IAsyncRelayCommand MarkSelectedReadCommand { get; }
     public IAsyncRelayCommand MarkSelectedUnreadCommand { get; }
     public IAsyncRelayCommand OpenLabelsForSelectionCommand { get; }
@@ -242,7 +254,16 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         get => _selectedFolder;
         set
         {
-            if (!SetProperty(ref _selectedFolder, value) || _isApplyingState || value is null || ActiveAccount is null)
+            if (!SetProperty(ref _selectedFolder, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(CanDeleteCurrentFolder));
+            OnPropertyChanged(nameof(ShowReportSpamAction));
+            OnPropertyChanged(nameof(ShowRestoreAction));
+            OnPropertyChanged(nameof(ShowNotSpamAction));
+            if (_isApplyingState || value is null || ActiveAccount is null)
             {
                 return;
             }
@@ -252,7 +273,6 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             catalog.SelectedFolderKey = value.Key;
             ClearSelectionsForAccount(ActiveAccount.Id);
             CloseLabels();
-            OnPropertyChanged(nameof(CanDeleteCurrentFolder));
             CancelReadDwell(resetDetailSession: true);
             CurrentFolderLoadTask = SwitchFolderAsync(ActiveAccount, value);
         }
@@ -640,6 +660,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ? "Снять пометку"
         : "Пометить";
     public bool CanDeleteCurrentFolder => IsSearchActive || SelectedFolder?.Kind is not MailFolderKind.Trash;
+    public bool ShowReportSpamAction =>
+        ActiveAccount?.Provider is MailProviderType.Gmail
+        && !IsSearchActive
+        && SelectedFolder?.Kind is MailFolderKind.Inbox;
+    public bool ShowRestoreAction => !IsSearchActive && SelectedFolder?.Kind is MailFolderKind.Trash;
+    public bool ShowNotSpamAction => !IsSearchActive && SelectedFolder?.Kind is MailFolderKind.Spam;
     public bool IsComposeOpen => Compose.IsOpen;
     public MailInboxPresentationMode PresentationMode => IsComposeOpen
         ? MailInboxPresentationMode.Compose
@@ -1281,6 +1307,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         OnPropertyChanged(nameof(ActiveSearchQuery));
         OnPropertyChanged(nameof(CanClearSearch));
         OnPropertyChanged(nameof(EmptyListMessage));
+        OnPropertyChanged(nameof(CanDeleteCurrentFolder));
+        OnPropertyChanged(nameof(ShowReportSpamAction));
+        OnPropertyChanged(nameof(ShowRestoreAction));
+        OnPropertyChanged(nameof(ShowNotSpamAction));
         SearchCommand.NotifyCanExecuteChanged();
         ClearSearchCommand.NotifyCanExecuteChanged();
         RaiseListStateChanged();
@@ -2565,6 +2595,21 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             (service, account, keys, token) => service.ArchiveAsync(account, keys, token),
             ApplyArchive);
 
+    private Task ReportSelectedSpamAsync() => ReportSpamAsync(
+        GetSelectedMessages().Select(message => message.MessageKey).ToArray());
+
+    private Task ReportDetailSpamAsync() => ReportSpamAsync(
+        SelectedMessageSummary is null ? [] : [SelectedMessageSummary.MessageKey]);
+
+    private Task ReportSpamAsync(IReadOnlyCollection<string> messageKeys) =>
+        ExecuteMailboxMutationAsync(
+            messageKeys,
+            "Не удалось переместить письмо в спам.",
+            (service, account, keys, token) => service.ReportSpamAsync(account, keys, token),
+            ApplyReportSpam,
+            clearSelectionAfterSuccess: true,
+            refreshCurrentFolderAfterSuccess: true);
+
     private Task DeleteSelectedAsync() => DeleteAsync(
         GetSelectedMessages().Select(message => message.MessageKey).ToArray());
 
@@ -2577,6 +2622,36 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             "Не удалось удалить письмо.",
             (service, account, keys, token) => service.MoveToTrashAsync(account, keys, token),
             ApplyTrash);
+
+    private Task RestoreSelectedAsync() => RestoreFromTrashAsync(
+        GetSelectedMessages().Select(message => message.MessageKey).ToArray());
+
+    private Task RestoreDetailAsync() => RestoreFromTrashAsync(
+        SelectedMessageSummary is null ? [] : [SelectedMessageSummary.MessageKey]);
+
+    private Task RestoreFromTrashAsync(IReadOnlyCollection<string> messageKeys) =>
+        ExecuteMailboxMutationAsync(
+            messageKeys,
+            "Не удалось восстановить письмо.",
+            (service, account, keys, token) => service.RestoreFromTrashAsync(account, keys, token),
+            ApplyRestoreFromTrash,
+            clearSelectionAfterSuccess: true,
+            refreshCurrentFolderAfterSuccess: true);
+
+    private Task MarkSelectedNotSpamAsync() => MarkNotSpamAsync(
+        GetSelectedMessages().Select(message => message.MessageKey).ToArray());
+
+    private Task MarkDetailNotSpamAsync() => MarkNotSpamAsync(
+        SelectedMessageSummary is null ? [] : [SelectedMessageSummary.MessageKey]);
+
+    private Task MarkNotSpamAsync(IReadOnlyCollection<string> messageKeys) =>
+        ExecuteMailboxMutationAsync(
+            messageKeys,
+            "Не удалось убрать письмо из спама.",
+            (service, account, keys, token) => service.MarkNotSpamAsync(account, keys, token),
+            ApplyNotSpam,
+            clearSelectionAfterSuccess: true,
+            refreshCurrentFolderAfterSuccess: true);
 
     private Task SetSelectedReadStateAsync(bool isRead) =>
         ExecuteMailboxMutationAsync(
@@ -2709,7 +2784,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         string failureMessage,
         Func<IGmailMailboxManagementService, MailAccount, IReadOnlyCollection<string>, CancellationToken, Task<GmailMailboxMutationResult>> operation,
         Action<IReadOnlyCollection<string>> applySucceeded,
-        bool closeLabelMenu = true)
+        bool closeLabelMenu = true,
+        bool clearSelectionAfterSuccess = false,
+        bool refreshCurrentFolderAfterSuccess = false)
     {
         if (messageKeys.Count == 0
             || ActiveAccount is not MailAccount account
@@ -2743,6 +2820,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (result.SucceededMessageKeys.Count > 0)
             {
                 applySucceeded(result.SucceededMessageKeys);
+                if (clearSelectionAfterSuccess)
+                {
+                    ClearSelection();
+                }
             }
 
             if (result.FailedMessages.Count > 0)
@@ -2759,9 +2840,34 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             ApplyState(GetCurrentListState(accountId, folderKey));
-            if (result.SucceededMessageKeys.Count > 0
-                && IsCurrentSearch(accountId, _activeSearchQuery, version, CancellationToken.None)
-                && _searchState is FolderState searchState)
+            if (result.SucceededMessageKeys.Count > 0 && refreshCurrentFolderAfterSuccess && !IsSearchActive)
+            {
+                FolderState currentState = GetState(accountId, folderKey);
+                PageRequest refreshRequest = currentState.CurrentPageRequest;
+                currentState.PrepareRefresh();
+                bool refreshed = await LoadPageAsync(
+                    account,
+                    folder,
+                    currentState,
+                    refreshRequest,
+                    version,
+                    GetActivationToken());
+                if (refreshed
+                    && currentState.Messages.Count == 0
+                    && currentState.TryCreatePreviousPageRequest(out PageRequest previousPage))
+                {
+                    await LoadPageAsync(
+                        account,
+                        folder,
+                        currentState,
+                        previousPage,
+                        version,
+                        GetActivationToken());
+                }
+            }
+            else if (result.SucceededMessageKeys.Count > 0
+                     && IsCurrentSearch(accountId, _activeSearchQuery, version, CancellationToken.None)
+                     && _searchState is FolderState searchState)
             {
                 searchState.PrepareRefresh();
                 await LoadSearchPageAsync(
@@ -2814,6 +2920,21 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         RemoveMessagesFromFolder(account.Id, MailFolderKind.Inbox, messageKeys);
     }
 
+    private void ApplyReportSpam(IReadOnlyCollection<string> messageKeys)
+    {
+        if (ActiveAccount is not MailAccount account)
+        {
+            return;
+        }
+
+        AdjustInboxUnreadForRemoval(account, messageKeys);
+        ApplyProviderLabelState(messageKeys, GmailSystemFolders.Inbox, isApplied: false);
+        ApplyProviderLabelState(messageKeys, GmailSystemFolders.Spam, isApplied: true);
+        RemoveMessagesFromFolder(account.Id, MailFolderKind.Inbox, messageKeys);
+        MarkFolderStale(account.Id, MailFolderKind.Spam);
+        MarkFolderStale(account.Id, MailFolderKind.AllMail);
+    }
+
     private void ApplyTrash(IReadOnlyCollection<string> messageKeys)
     {
         if (ActiveAccount is not MailAccount account)
@@ -2837,6 +2958,48 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         }
 
         MarkFolderStale(account.Id, MailFolderKind.Trash);
+    }
+
+    private void ApplyRestoreFromTrash(IReadOnlyCollection<string> messageKeys)
+    {
+        if (ActiveAccount is not MailAccount account)
+        {
+            return;
+        }
+
+        ApplyProviderLabelState(messageKeys, GmailSystemFolders.Trash, isApplied: false);
+        RemoveMessagesFromFolder(account.Id, MailFolderKind.Trash, messageKeys);
+        MarkFolderStale(account.Id, MailFolderKind.AllMail);
+    }
+
+    private void ApplyNotSpam(IReadOnlyCollection<string> messageKeys)
+    {
+        if (ActiveAccount is not MailAccount account)
+        {
+            return;
+        }
+
+        AdjustInboxUnreadForAddition(account, messageKeys);
+        ApplyProviderLabelState(messageKeys, GmailSystemFolders.Spam, isApplied: false);
+        ApplyProviderLabelState(messageKeys, GmailSystemFolders.Inbox, isApplied: true);
+        RemoveMessagesFromFolder(account.Id, MailFolderKind.Spam, messageKeys);
+        MarkFolderStale(account.Id, MailFolderKind.Inbox);
+        RequireFreshInbox(account.Id);
+    }
+
+    private void AdjustInboxUnreadForAddition(
+        MailAccount account,
+        IReadOnlyCollection<string> messageKeys)
+    {
+        if (account.InboxUnreadCount is not int unreadCount)
+        {
+            return;
+        }
+
+        int addedUnread = FindCachedMessages(account.Id, messageKeys)
+            .Count(message => message.IsUnread
+                && !message.ProviderLabelIds.Contains(GmailSystemFolders.Inbox));
+        account.InboxUnreadCount = Math.Max(0, unreadCount + addedUnread);
     }
 
     private void AdjustInboxUnreadForRemoval(
@@ -3263,9 +3426,27 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         CanMutateDetail()
         && SelectedMessageSummary!.ProviderLabelIds.Contains(GmailSystemFolders.Inbox);
 
+    private bool CanReportSelectionSpam() =>
+        CanMutateSelection() && ShowReportSpamAction;
+
+    private bool CanReportDetailSpam() =>
+        CanMutateDetail() && ShowReportSpamAction;
+
     private bool CanDeleteSelection() => CanMutateSelection() && CanDeleteCurrentFolder;
 
     private bool CanDeleteDetail() => CanMutateDetail() && CanDeleteCurrentFolder;
+
+    private bool CanRestoreSelection() =>
+        CanMutateSelection() && ShowRestoreAction;
+
+    private bool CanRestoreDetail() =>
+        CanMutateDetail() && ShowRestoreAction;
+
+    private bool CanMarkSelectionNotSpam() =>
+        CanMutateSelection() && ShowNotSpamAction;
+
+    private bool CanMarkDetailNotSpam() =>
+        CanMutateDetail() && ShowNotSpamAction;
 
     private bool CanChangeSelectedReadState() =>
         CanMutateSelection() && (IsSearchActive || SelectedFolder?.SupportsReadState == true);
@@ -3453,8 +3634,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ToggleSelectedStarCommand.NotifyCanExecuteChanged();
         ArchiveSelectedCommand.NotifyCanExecuteChanged();
         ArchiveDetailCommand.NotifyCanExecuteChanged();
+        ReportSelectedSpamCommand.NotifyCanExecuteChanged();
+        ReportDetailSpamCommand.NotifyCanExecuteChanged();
         DeleteSelectedCommand.NotifyCanExecuteChanged();
         DeleteDetailCommand.NotifyCanExecuteChanged();
+        RestoreSelectedCommand.NotifyCanExecuteChanged();
+        RestoreDetailCommand.NotifyCanExecuteChanged();
+        MarkSelectedNotSpamCommand.NotifyCanExecuteChanged();
+        MarkDetailNotSpamCommand.NotifyCanExecuteChanged();
         MarkSelectedReadCommand.NotifyCanExecuteChanged();
         MarkSelectedUnreadCommand.NotifyCanExecuteChanged();
         OpenLabelsForSelectionCommand.NotifyCanExecuteChanged();

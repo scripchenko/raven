@@ -280,7 +280,10 @@ public sealed class LanternMailUiTests
         Assert.DoesNotContain("Content=\"Переслать\"", detailMarkup, StringComparison.Ordinal);
         Assert.DoesNotContain("Content=\"←  К списку\"", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("ArchiveDetailCommand", detailMarkup, StringComparison.Ordinal);
+        Assert.Contains("ReportDetailSpamCommand", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("DeleteDetailCommand", detailMarkup, StringComparison.Ordinal);
+        Assert.Contains("RestoreDetailCommand", detailMarkup, StringComparison.Ordinal);
+        Assert.Contains("MarkDetailNotSpamCommand", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("ToggleStarCommand", detailMarkup, StringComparison.Ordinal);
         Assert.Contains("OpenLabelsForDetailCommand", detailMarkup, StringComparison.Ordinal);
     }
@@ -313,7 +316,10 @@ public sealed class LanternMailUiTests
         Assert.DoesNotContain("SelectedFolder.DisplayName", list.ToString(), StringComparison.Ordinal);
         Assert.Contains("SelectAllLoadedCommand", toolbar.ToString(), StringComparison.Ordinal);
         Assert.Contains("ArchiveSelectedCommand", toolbar.ToString(), StringComparison.Ordinal);
+        Assert.Contains("ReportSelectedSpamCommand", toolbar.ToString(), StringComparison.Ordinal);
         Assert.Contains("DeleteSelectedCommand", toolbar.ToString(), StringComparison.Ordinal);
+        Assert.Contains("RestoreSelectedCommand", toolbar.ToString(), StringComparison.Ordinal);
+        Assert.Contains("MarkSelectedNotSpamCommand", toolbar.ToString(), StringComparison.Ordinal);
         Assert.Contains("OpenLabelsForSelectionCommand", toolbar.ToString(), StringComparison.Ordinal);
     }
 
@@ -332,7 +338,10 @@ public sealed class LanternMailUiTests
         [
             "RefreshCommand",
             "ArchiveSelectedCommand",
+            "ReportSelectedSpamCommand",
             "DeleteSelectedCommand",
+            "RestoreSelectedCommand",
+            "MarkSelectedNotSpamCommand",
             "MarkSelectedReadCommand",
             "MarkSelectedUnreadCommand",
             "ToggleSelectedStarCommand",
@@ -357,7 +366,10 @@ public sealed class LanternMailUiTests
         Assert.DoesNotContain("Content=\"Снять выбор\"", listToolbar.ToString(), StringComparison.Ordinal);
 
         AssertSharedGeometry("ArchiveSelectedCommand", "ArchiveDetailCommand");
+        AssertSharedGeometry("ReportSelectedSpamCommand", "ReportDetailSpamCommand");
         AssertSharedGeometry("DeleteSelectedCommand", "DeleteDetailCommand");
+        AssertSharedGeometry("RestoreSelectedCommand", "RestoreDetailCommand");
+        AssertSharedGeometry("MarkSelectedNotSpamCommand", "MarkDetailNotSpamCommand");
         AssertSharedGeometry("OpenLabelsForSelectionCommand", "OpenLabelsForDetailCommand");
 
         void AssertSharedGeometry(string listCommand, string detailCommand)
@@ -435,6 +447,9 @@ public sealed class LanternMailUiTests
             buttons,
             button => Assert.Equal("{Binding BackToMessageListCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding ArchiveDetailCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding ReportDetailSpamCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding RestoreDetailCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding MarkDetailNotSpamCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding DeleteDetailCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding ToggleStarCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding OpenLabelsForDetailCommand}", (string?)button.Attribute("Command")),
@@ -477,7 +492,7 @@ public sealed class LanternMailUiTests
         XElement[] vectorButtons = buttons
             .Where(button => button.Elements(presentation + "Viewbox").Any())
             .ToArray();
-        Assert.Equal(9, vectorButtons.Length);
+        Assert.Equal(12, vectorButtons.Length);
         Assert.All(vectorButtons, button =>
         {
             XElement viewbox = Assert.Single(button.Elements(presentation + "Viewbox"));
