@@ -263,6 +263,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             OnPropertyChanged(nameof(ShowReportSpamAction));
             OnPropertyChanged(nameof(ShowRestoreAction));
             OnPropertyChanged(nameof(ShowNotSpamAction));
+            OnPropertyChanged(nameof(EmptyListMessage));
             if (_isApplyingState || value is null || ActiveAccount is null)
             {
                 return;
@@ -722,7 +723,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool IsEmpty => HasLoaded && !IsListLoading && !HasMessages && !HasListError;
     public string EmptyListMessage => IsSearchActive
         ? "По вашему запросу ничего не найдено."
-        : "В этой папке пока нет писем.";
+        : SelectedFolder?.IsUserLabel == true
+            ? "В этом ярлыке нет писем."
+            : "В этой папке пока нет писем.";
     public bool HasSelectedMessage => SelectedMessageSummary is not null;
     public bool HasSelectedContent => SelectedMessageContent is not null;
     public bool HasAttachments => SelectedMessageContent?.Attachments.Count > 0;
@@ -1007,6 +1010,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         InboxFreshnessState freshness = GetInboxFreshnessState(mailAccountId);
         freshness.MarkChanged();
         MarkFolderStale(mailAccountId, MailFolderKind.AllMail);
+        MarkUserLabelFoldersStale(mailAccountId);
         if (isAccountActivelyViewed && IsActiveGmailInbox(mailAccountId))
         {
             freshness.AutoRefreshRequested = true;
@@ -1102,6 +1106,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
             accountState.Folders.Clear();
             accountState.Folders.AddRange(folders.Where(folder => folder.IsAvailable));
+            PrimeUserLabelCatalog(account, accountState.Folders);
             accountState.HasLoaded = true;
             ApplyFolders(accountState);
             MailFolder? selected = ResolveSelectedFolder(accountState);
@@ -1428,6 +1433,21 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 _viewVersion,
                 GetActivationToken());
             return;
+        }
+
+        if (account.Provider is MailProviderType.Gmail)
+        {
+            MailFolder? refreshedFolder = await RefreshUserLabelCatalogAsync(
+                account,
+                folder,
+                _viewVersion,
+                GetActivationToken());
+            if (refreshedFolder is null)
+            {
+                return;
+            }
+
+            folder = refreshedFolder;
         }
 
         FolderState state = GetState(account.Id, folder.Key);
@@ -1873,6 +1893,26 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         {
             return false;
         }
+        catch (MailReadException exception) when (
+            exception.FailureKind is MailReadFailureKind.FolderUnavailable
+            && folder.IsUserLabel
+            && IsCurrent(account.Id, folder.Key, version, cancellationToken))
+        {
+            if (await TryRecoverUnavailableUserLabelAsync(
+                account,
+                folder,
+                version,
+                activationToken))
+            {
+                return false;
+            }
+
+            state.HasLoaded = true;
+            state.ListErrorMessage = exception.UserMessage;
+            state.FailureKind = exception.FailureKind;
+            ApplyState(state);
+            return false;
+        }
         catch (MailReadException exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
             state.HasLoaded = true;
@@ -1897,6 +1937,55 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 IsListLoading = false;
             }
         }
+    }
+
+    private async Task<bool> TryRecoverUnavailableUserLabelAsync(
+        MailAccount account,
+        MailFolder unavailableFolder,
+        long version,
+        CancellationToken activationToken)
+    {
+        IReadOnlyList<GmailUserLabel>? labels = await TryLoadUserLabelCatalogAsync(
+            account,
+            version,
+            activationToken);
+        if (labels is null || !IsCurrentAccount(account.Id, version, activationToken))
+        {
+            return false;
+        }
+
+        SynchronizeUserLabelFolders(account, labels);
+        if (SelectedFolder is not MailFolder safeFolder
+            || string.Equals(safeFolder.Key, unavailableFolder.Key, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        MailboxActionErrorMessage = "Ярлык больше недоступен. Открыты входящие.";
+        FolderState safeState = GetState(account.Id, safeFolder.Key);
+        safeState.PrepareRefresh();
+        ApplyState(safeState);
+        if (IsTrackedGmailInbox(account, safeFolder))
+        {
+            await RefreshInboxFirstPageAsync(
+                account,
+                safeFolder,
+                safeState,
+                version,
+                activationToken);
+        }
+        else
+        {
+            await LoadPageAsync(
+                account,
+                safeFolder,
+                safeState,
+                PageRequest.First,
+                version,
+                activationToken);
+        }
+
+        return true;
     }
 
     private async Task LoadSelectedMessageAsync(MailMessageSummary summary)
@@ -2437,6 +2526,15 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         return folder is not null && !GetState(accountId, folder.Key).HasLoaded;
     }
 
+    internal bool IsUserLabelFolderStateStale(Guid accountId, string labelId)
+    {
+        AccountFolderState account = GetAccountFolderState(accountId);
+        MailFolder? folder = account.Folders.FirstOrDefault(item =>
+            item.IsUserLabel
+            && string.Equals(item.ProviderLocator, labelId, StringComparison.Ordinal));
+        return folder is not null && !GetState(accountId, folder.Key).HasLoaded;
+    }
+
     private void OnComposePropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
         if (eventArgs.PropertyName is nameof(MailComposeViewModel.IsOpen)
@@ -2473,6 +2571,141 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             RaiseGmailReauthenticationStateChanged();
+        }
+    }
+
+    private void PrimeUserLabelCatalog(MailAccount account, IReadOnlyList<MailFolder> folders)
+    {
+        if (account.Provider is not MailProviderType.Gmail || _gmailMailboxService is null)
+        {
+            return;
+        }
+
+        _gmailMailboxService.UseUserLabelCatalog(
+            account.Id,
+            folders
+                .Where(folder => folder.IsUserLabel)
+                .Select(folder => new GmailUserLabel(folder.ProviderLocator, folder.DisplayName))
+                .ToArray());
+    }
+
+    private async Task<MailFolder?> RefreshUserLabelCatalogAsync(
+        MailAccount account,
+        MailFolder currentFolder,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<GmailUserLabel>? labels = await TryLoadUserLabelCatalogAsync(
+            account,
+            version,
+            cancellationToken);
+        if (labels is null)
+        {
+            return currentFolder;
+        }
+
+        string currentFolderKey = currentFolder.Key;
+        SynchronizeUserLabelFolders(account, labels);
+        MailFolder? refreshedFolder = SelectedFolder;
+        if (currentFolder.IsUserLabel
+            && !string.Equals(currentFolderKey, refreshedFolder?.Key, StringComparison.Ordinal))
+        {
+            MailboxActionErrorMessage = "Ярлык больше недоступен.";
+        }
+
+        return refreshedFolder;
+    }
+
+    private async Task<IReadOnlyList<GmailUserLabel>?> TryLoadUserLabelCatalogAsync(
+        MailAccount account,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            IReadOnlyList<MailFolder> folders = await _providerFactory
+                .Get(account.Provider)
+                .GetFoldersAsync(account, cancellationToken);
+            if (!IsCurrentAccount(account.Id, version, cancellationToken))
+            {
+                return null;
+            }
+
+            return folders
+                .Where(folder => folder.IsUserLabel)
+                .Select(folder => new GmailUserLabel(folder.ProviderLocator, folder.DisplayName))
+                .ToArray();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (MailReadException exception)
+        {
+            MarkGmailReauthenticationRequired(account, exception.FailureKind);
+            return null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private void SynchronizeUserLabelFolders(
+        MailAccount account,
+        IReadOnlyList<GmailUserLabel> labels)
+    {
+        AccountFolderState accountState = GetAccountFolderState(account.Id);
+        string? selectedKey = accountState.SelectedFolderKey ??
+            (ActiveAccount?.Id == account.Id ? SelectedFolder?.Key : null);
+        HashSet<string> previousKeys = accountState.Folders
+            .Where(folder => folder.IsUserLabel)
+            .Select(folder => folder.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        GmailUserLabel[] normalized = labels
+            .Where(label => !string.IsNullOrWhiteSpace(label.Id)
+                && !string.IsNullOrWhiteSpace(label.DisplayName))
+            .GroupBy(label => label.Id, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(label => label.DisplayName, GmailUserLabelNameComparer.Instance)
+            .ThenBy(label => label.Id, StringComparer.Ordinal)
+            .ToArray();
+
+        accountState.Folders.RemoveAll(folder => folder.IsUserLabel);
+        for (int index = 0; index < normalized.Length; index++)
+        {
+            GmailUserLabel label = normalized[index];
+            accountState.Folders.Add(MailFolderCatalog.CreateUserLabel(
+                label.Id,
+                label.DisplayName,
+                showsSectionHeader: index == 0));
+        }
+
+        _gmailMailboxService?.UseUserLabelCatalog(account.Id, normalized);
+        HashSet<string> currentKeys = accountState.Folders
+            .Where(folder => folder.IsUserLabel)
+            .Select(folder => folder.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (string removedKey in previousKeys.Except(currentKeys, StringComparer.Ordinal))
+        {
+            _folderStates.Remove(new FolderStateKey(account.Id, removedKey));
+        }
+
+        MailFolder? replacement = selectedKey is null
+            ? null
+            : accountState.Folders.FirstOrDefault(folder =>
+                string.Equals(folder.Key, selectedKey, StringComparison.Ordinal));
+        replacement ??= accountState.Folders.FirstOrDefault(folder => folder.Kind is MailFolderKind.Inbox)
+            ?? accountState.Folders.FirstOrDefault();
+        accountState.SelectedFolderKey = replacement?.Key;
+
+        if (ActiveAccount?.Id == account.Id)
+        {
+            ApplyFolders(accountState);
+            if (replacement is not null)
+            {
+                SetSelectedFolderWithoutSwitch(replacement);
+            }
         }
     }
 
@@ -2700,6 +2933,15 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 return;
             }
 
+            string? previousFolderKey = SelectedFolder?.Key;
+            SynchronizeUserLabelFolders(account, result.Labels);
+            if (!string.Equals(previousFolderKey, SelectedFolder?.Key, StringComparison.Ordinal))
+            {
+                MailboxActionErrorMessage = "Ярлык больше недоступен.";
+                CurrentFolderLoadTask = RefreshAsync();
+                return;
+            }
+
             _labelMenuTargetsDetail = targetsDetail;
             _labelMenuMessageKeys.Clear();
             _labelMenuMessageKeys.UnionWith(keys);
@@ -2743,6 +2985,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             {
                 ApplyProviderLabelState(succeeded, option.Id, apply);
                 InvalidateFolderTotalByProviderLocator(account.Id, option.Id);
+                if (apply)
+                {
+                    MarkFolderStaleByProviderLocator(account.Id, option.Id);
+                }
+                else
+                {
+                    RemoveMessagesFromFolderByProviderLocator(account.Id, option.Id, succeeded);
+                }
                 IReadOnlyList<MailMessageSummary> targets = FindCachedMessages(account.Id, keys);
                 int appliedCount = targets.Count(message => message.ProviderLabelIds.Contains(option.Id));
                 option.IsApplied = appliedCount == 0
@@ -3150,6 +3400,39 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             {
                 RaisePaginationStateChanged();
             }
+        }
+    }
+
+    private void MarkFolderStaleByProviderLocator(Guid accountId, string providerLocator)
+    {
+        AccountFolderState account = GetAccountFolderState(accountId);
+        foreach (MailFolder folder in account.Folders.Where(folder =>
+                     string.Equals(folder.ProviderLocator, providerLocator, StringComparison.Ordinal)))
+        {
+            GetState(accountId, folder.Key).MarkStale();
+        }
+    }
+
+    private void MarkUserLabelFoldersStale(Guid accountId)
+    {
+        AccountFolderState account = GetAccountFolderState(accountId);
+        foreach (MailFolder folder in account.Folders.Where(folder => folder.IsUserLabel))
+        {
+            GetState(accountId, folder.Key).MarkStale();
+        }
+    }
+
+    private void RemoveMessagesFromFolderByProviderLocator(
+        Guid accountId,
+        string providerLocator,
+        IReadOnlyCollection<string> messageKeys)
+    {
+        AccountFolderState account = GetAccountFolderState(accountId);
+        HashSet<string> keys = messageKeys.ToHashSet(StringComparer.Ordinal);
+        foreach (MailFolder folder in account.Folders.Where(folder =>
+                     string.Equals(folder.ProviderLocator, providerLocator, StringComparison.Ordinal)))
+        {
+            RemoveMessages(GetState(accountId, folder.Key), keys);
         }
     }
 

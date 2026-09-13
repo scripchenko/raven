@@ -48,6 +48,9 @@ internal sealed record GmailApiHistoryDelta(
 
 internal sealed record GmailApiRawMessage(byte[] RawMime, bool IsUnread, string? ThreadId = null);
 internal sealed record GmailApiUserLabel(string Id, string Name);
+internal sealed record GmailApiLabelCatalog(
+    IReadOnlySet<string> SystemLabelIds,
+    IReadOnlyList<GmailApiUserLabel> UserLabels);
 internal sealed record GmailApiTrashResult(
     IReadOnlySet<string> SucceededMessageIds,
     IReadOnlyDictionary<string, Exception> FailedMessages);
@@ -112,6 +115,14 @@ internal interface IGmailApiReadClient
         CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlySet<string>>(
             new HashSet<string>(GmailSystemFolders.LabelIds, StringComparer.Ordinal));
+
+    async Task<GmailApiLabelCatalog> GetLabelCatalogAsync(
+        MailCredential credential,
+        Guid accountId,
+        CancellationToken cancellationToken = default) =>
+        new(
+            await GetSystemLabelIdsAsync(credential, accountId, cancellationToken),
+            []);
 
     Task<GmailApiInboxPage> GetFolderPageAsync(
         MailCredential credential,
@@ -216,6 +227,29 @@ internal static class GmailSystemFolders
         }
         return folders;
     }
+
+    public static IReadOnlyList<MailFolder> Map(GmailApiLabelCatalog catalog)
+    {
+        List<MailFolder> folders = Map(catalog.SystemLabelIds).ToList();
+        GmailApiUserLabel[] userLabels = catalog.UserLabels
+            .Where(label => !string.IsNullOrWhiteSpace(label.Id)
+                && !string.IsNullOrWhiteSpace(label.Name))
+            .GroupBy(label => label.Id, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(label => label.Name, GmailUserLabelNameComparer.Instance)
+            .ThenBy(label => label.Id, StringComparer.Ordinal)
+            .ToArray();
+        for (int index = 0; index < userLabels.Length; index++)
+        {
+            GmailApiUserLabel label = userLabels[index];
+            folders.Add(MailFolderCatalog.CreateUserLabel(
+                label.Id,
+                label.Name,
+                showsSectionHeader: index == 0));
+        }
+
+        return folders;
+    }
 }
 
 internal sealed class GmailMailReadProvider(
@@ -282,7 +316,7 @@ internal sealed class GmailMailReadProvider(
     {
         ValidateAccount(account, pageSize: 1);
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
-        IReadOnlySet<string> labels = await apiClient.GetSystemLabelIdsAsync(
+        GmailApiLabelCatalog labels = await apiClient.GetLabelCatalogAsync(
             credential,
             account.Id,
             cancellationToken);
@@ -562,7 +596,9 @@ internal sealed class GmailMailReadProvider(
         ArgumentNullException.ThrowIfNull(folder);
         bool isValid = folder.Kind is MailFolderKind.AllMail
             ? string.Equals(folder.ProviderLocator, GmailSystemFolders.AllMailView, StringComparison.Ordinal)
-            : GmailSystemFolders.LabelIds.Contains(folder.ProviderLocator, StringComparer.Ordinal);
+            : folder.Kind is MailFolderKind.UserLabel
+                ? !string.IsNullOrWhiteSpace(folder.ProviderLocator)
+                : GmailSystemFolders.LabelIds.Contains(folder.ProviderLocator, StringComparer.Ordinal);
         if (!isValid)
         {
             throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка Gmail недоступна.");
@@ -857,11 +893,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         {
             using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(credential, accountId, cancellationToken);
             ListLabelsResponse response = await session.Service.Users.Labels.List("me").ExecuteAsync(cancellationToken);
-            return response.Labels?
-                .Where(label => label.Type is "system" && !string.IsNullOrWhiteSpace(label.Id))
-                .Select(label => label.Id)
-                .ToHashSet(StringComparer.Ordinal)
-                ?? new HashSet<string>(StringComparer.Ordinal);
+            return MapLabelCatalog(response.Labels).SystemLabelIds;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -892,18 +924,14 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             }
 
             UsersResource.MessagesResource.ListRequest listRequest = service.Users.Messages.List("me");
-            listRequest.LabelIds = new[] { labelId };
-            listRequest.IncludeSpamTrash = includeSpamTrash;
-            listRequest.MaxResults = pageSize;
-            listRequest.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
+            ConfigureFolderRequest(listRequest, labelId, includeSpamTrash, pageToken, pageSize);
             ListMessagesResponse response = await ExecuteWithRateLimitRetryAsync(
                 () => listRequest.ExecuteAsync(cancellationToken),
                 cancellationToken);
             GmailMessage[] listed = response.Messages?.Where(item => !string.IsNullOrWhiteSpace(item.Id)).ToArray() ?? [];
-            long? labelMessagesTotal = await TryGetMessageOrientedLabelTotalAsync(
-                service,
-                labelId,
-                cancellationToken);
+            long? labelMessagesTotal = SupportsExactLabelTotal(labelId)
+                ? await TryGetMessageOrientedLabelTotalAsync(service, labelId, cancellationToken)
+                : null;
 
             using SemaphoreSlim gate = new(MaximumMetadataConcurrency, MaximumMetadataConcurrency);
             Task<(int Index, GmailApiSummaryData Summary)?>[] tasks = listed
@@ -915,11 +943,42 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
                     cancellationToken))
                 .ToArray();
             (int Index, GmailApiSummaryData Summary)?[] metadata = await Task.WhenAll(tasks);
-            return new GmailApiInboxPage(
+            IReadOnlyList<GmailApiSummaryData> summaries = await ResolveDraftIdentitiesAsync(
+                service,
                 SelectAvailableSummaries(metadata),
+                cancellationToken);
+            return new GmailApiInboxPage(
+                summaries,
                 response.NextPageToken,
                 labelMessagesTotal,
                 response.ResultSizeEstimate);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (IsUnavailableUserLabelFailure(exception, labelId))
+        {
+            throw new MailReadException(
+                MailReadFailureKind.FolderUnavailable,
+                "Этот ярлык Gmail больше недоступен.");
+        }
+        catch (Exception exception)
+        {
+            throw MapListException(exception);
+        }
+    }
+
+    public async Task<GmailApiLabelCatalog> GetLabelCatalogAsync(
+        MailCredential credential,
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using AuthorizedGmailSession session = await CreateAuthorizedServiceAsync(credential, accountId, cancellationToken);
+            ListLabelsResponse response = await session.Service.Users.Labels.List("me").ExecuteAsync(cancellationToken);
+            return MapLabelCatalog(response.Labels);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -929,6 +988,52 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         {
             throw MapListException(exception);
         }
+    }
+
+    internal static void ConfigureFolderRequest(
+        UsersResource.MessagesResource.ListRequest request,
+        string labelId,
+        bool includeSpamTrash,
+        string? pageToken,
+        int pageSize)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.LabelIds = new[] { labelId };
+        request.IncludeSpamTrash = includeSpamTrash;
+        request.MaxResults = pageSize;
+        request.PageToken = string.IsNullOrWhiteSpace(pageToken) ? null : pageToken;
+    }
+
+    internal static bool IsUnavailableUserLabelFailure(Exception exception, string labelId) =>
+        !GmailSystemFolders.LabelIds.Contains(labelId, StringComparer.Ordinal)
+        && exception is GoogleApiException
+        {
+            HttpStatusCode: HttpStatusCode.BadRequest or HttpStatusCode.NotFound
+        };
+
+    internal static bool SupportsExactLabelTotal(string labelId) =>
+        GmailSystemFolders.LabelIds.Contains(labelId, StringComparer.Ordinal);
+
+    internal static GmailApiLabelCatalog MapLabelCatalog(
+        IEnumerable<Google.Apis.Gmail.v1.Data.Label>? labels)
+    {
+        Google.Apis.Gmail.v1.Data.Label[] safeLabels = labels?.ToArray() ?? [];
+        HashSet<string> systemLabelIds = safeLabels
+            .Where(label => string.Equals(label.Type, "system", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(label.Id))
+            .Select(label => label.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        GmailApiUserLabel[] userLabels = safeLabels
+            .Where(label => string.Equals(label.Type, "user", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(label.Id)
+                && !string.IsNullOrWhiteSpace(label.Name))
+            .Select(label => new GmailApiUserLabel(label.Id, label.Name))
+            .GroupBy(label => label.Id, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(label => label.Name, GmailUserLabelNameComparer.Instance)
+            .ThenBy(label => label.Id, StringComparer.Ordinal)
+            .ToArray();
+        return new GmailApiLabelCatalog(systemLabelIds, userLabels);
     }
 
     public async Task<GmailApiRawMessage> GetRawMessageAsync(
@@ -1361,14 +1466,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             accountId,
             cancellationToken);
         ListLabelsResponse response = await session.Service.Users.Labels.List("me").ExecuteAsync(cancellationToken);
-        return response.Labels?
-            .Where(label => label.Type is "user"
-                && !string.IsNullOrWhiteSpace(label.Id)
-                && !string.IsNullOrWhiteSpace(label.Name))
-            .Select(label => new GmailApiUserLabel(label.Id, label.Name))
-            .OrderBy(label => label.Name, StringComparer.CurrentCultureIgnoreCase)
-            .ToArray()
-            ?? [];
+        return MapLabelCatalog(response.Labels).UserLabels;
     }
 
     public async Task ModifyLabelsAsync(

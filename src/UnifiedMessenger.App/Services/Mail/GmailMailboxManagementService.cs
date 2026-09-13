@@ -43,6 +43,10 @@ public interface IGmailMailboxManagementService
         bool forceRefresh = false,
         CancellationToken cancellationToken = default);
 
+    void UseUserLabelCatalog(Guid accountId, IReadOnlyList<GmailUserLabel> labels)
+    {
+    }
+
     Task<GmailMailboxMutationResult> SetStarredAsync(
         MailAccount account,
         IReadOnlyCollection<string> messageKeys,
@@ -119,11 +123,8 @@ internal sealed class GmailMailboxManagementService(
                 credential,
                 account.Id,
                 cancellationToken);
-            GmailUserLabel[] safeLabels = labels
-                .Where(label => !string.IsNullOrWhiteSpace(label.Id)
-                    && !string.IsNullOrWhiteSpace(label.Name))
-                .Select(label => new GmailUserLabel(label.Id, label.Name))
-                .ToArray();
+            GmailUserLabel[] safeLabels = NormalizeLabels(labels.Select(label =>
+                new GmailUserLabel(label.Id, label.Name)));
             _labelCache[account.Id] = safeLabels;
             return new GmailUserLabelResult(safeLabels);
         }
@@ -135,6 +136,12 @@ internal sealed class GmailMailboxManagementService(
         {
             return new GmailUserLabelResult([], Classify(exception));
         }
+    }
+
+    public void UseUserLabelCatalog(Guid accountId, IReadOnlyList<GmailUserLabel> labels)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+        _labelCache[accountId] = NormalizeLabels(labels);
     }
 
     public Task<GmailMailboxMutationResult> SetStarredAsync(
@@ -295,6 +302,16 @@ internal sealed class GmailMailboxManagementService(
     }
 
     public void RemoveAccount(Guid accountId) => _labelCache.Remove(accountId);
+
+    private static GmailUserLabel[] NormalizeLabels(IEnumerable<GmailUserLabel> labels) =>
+        labels
+            .Where(label => !string.IsNullOrWhiteSpace(label.Id)
+                && !string.IsNullOrWhiteSpace(label.DisplayName))
+            .GroupBy(label => label.Id, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(label => label.DisplayName, GmailUserLabelNameComparer.Instance)
+            .ThenBy(label => label.Id, StringComparer.Ordinal)
+            .ToArray();
 
     private async Task<GmailMailboxMutationResult> ModifyLabelsAsync(
         MailAccount account,

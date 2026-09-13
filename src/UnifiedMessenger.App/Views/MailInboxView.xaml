@@ -13,6 +13,7 @@
         <Geometry x:Key="MailFolderAllMailGeometry">M2,4 L16,4 16,15 2,15 Z M4,2 L14,2 14,4 M2,7 L16,7</Geometry>
         <Geometry x:Key="MailFolderSpamGeometry">M9,2 L17,16 1,16 Z M9,7 L9,11 M9,13 L9,14</Geometry>
         <Geometry x:Key="MailFolderTrashGeometry">M4,5 L14,5 13,16 5,16 Z M3,5 L15,5 M6,5 L6,3 12,3 12,5 M7,8 L7,13 M11,8 L11,13</Geometry>
+        <Geometry x:Key="MailFolderLabelGeometry">M3,4 L11,4 16,9 10,15 3,8 Z M7,7 L7.1,7</Geometry>
         <Geometry x:Key="MailActionArchiveGeometry">M4,5 L20,5 L20,9 L4,9 Z M6,9 L6,20 L18,20 L18,9 M12,11 L12,17 M9,14 L12,17 L15,14</Geometry>
         <Geometry x:Key="MailActionTrashGeometry">M4,7 L20,7 M9,4 L15,4 L16,7 M7,7 L8,20 L16,20 L17,7 M10,10 L10.5,17 M14,10 L13.5,17</Geometry>
         <Geometry x:Key="MailActionReportSpamGeometry">M12,3 L21,20 3,20 Z M12,8 L12,14 M12,17 L12,18</Geometry>
@@ -36,14 +37,27 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="FolderBackground"
-                                Padding="12,8"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="10">
-                            <ContentPresenter />
-                        </Border>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Margin="12,14,0,7"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="Ярлыки"
+                                       Visibility="{Binding ShowsUserLabelSectionHeader, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Border x:Name="FolderBackground"
+                                    Grid.Row="1"
+                                    Padding="12,8"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="10">
+                                <ContentPresenter />
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="FolderBackground" Property="Background" Value="#FFEAF2FF" />
@@ -281,7 +295,7 @@
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid>
+                            <Grid x:Name="FolderRow" ToolTip="{Binding DisplayName}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="24" />
                                     <ColumnDefinition Width="*" />
@@ -321,6 +335,10 @@
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Trash}">
                                     <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderTrashGeometry}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.UserLabel}">
+                                    <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderLabelGeometry}" />
+                                    <Setter TargetName="FolderRow" Property="Margin" Value="4,0,0,0" />
                                 </DataTrigger>
                             </DataTemplate.Triggers>
                         </DataTemplate>

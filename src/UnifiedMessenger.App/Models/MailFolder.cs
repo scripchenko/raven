@@ -8,7 +8,8 @@ public enum MailFolderKind
     AllMail,
     Spam,
     Trash,
-    Starred
+    Starred,
+    UserLabel
 }
 
 public sealed record MailFolder
@@ -19,7 +20,8 @@ public sealed record MailFolder
         MailFolderKind kind,
         bool isAvailable,
         string providerLocator,
-        bool supportsReadState)
+        bool supportsReadState,
+        bool showsUserLabelSectionHeader = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
@@ -30,6 +32,7 @@ public sealed record MailFolder
         IsAvailable = isAvailable;
         ProviderLocator = providerLocator;
         SupportsReadState = supportsReadState;
+        ShowsUserLabelSectionHeader = showsUserLabelSectionHeader;
     }
 
     public string Key { get; }
@@ -37,6 +40,8 @@ public sealed record MailFolder
     public MailFolderKind Kind { get; }
     public bool IsAvailable { get; }
     public bool SupportsReadState { get; }
+    public bool IsUserLabel => Kind is MailFolderKind.UserLabel;
+    public bool ShowsUserLabelSectionHeader { get; }
 
     // Provider locators are deliberately not exposed to WPF bindings or public callers.
     internal string ProviderLocator { get; }
@@ -51,6 +56,7 @@ internal static class MailFolderCatalog
     public const string AllMailKey = "system:all-mail";
     public const string SpamKey = "system:spam";
     public const string TrashKey = "system:trash";
+    private const string GmailUserLabelKeyPrefix = "gmail:user-label:";
 
     public static MailFolder Create(
         MailFolderKind kind,
@@ -83,6 +89,23 @@ internal static class MailFolderCatalog
             true,
             providerLocator,
             supportsReadState && kind is not MailFolderKind.Drafts);
+
+    public static MailFolder CreateUserLabel(
+        string labelId,
+        string displayName,
+        bool showsSectionHeader = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(labelId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        return new MailFolder(
+            GmailUserLabelKeyPrefix + labelId,
+            displayName,
+            MailFolderKind.UserLabel,
+            true,
+            labelId,
+            supportsReadState: true,
+            showsSectionHeader);
+    }
 
     public static MailFolder Inbox(string providerLocator = "INBOX") =>
         Create(MailFolderKind.Inbox, providerLocator);
