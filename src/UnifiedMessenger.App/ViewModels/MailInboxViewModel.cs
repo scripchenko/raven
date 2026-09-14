@@ -233,6 +233,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 OnPropertyChanged(nameof(ProviderDisplayName));
                 OnPropertyChanged(nameof(EmailAddress));
                 OnPropertyChanged(nameof(IsGmailMailboxAvailable));
+                OnPropertyChanged(nameof(IsYandexMailbox));
                 OnPropertyChanged(nameof(IsSearchAvailable));
                 OnPropertyChanged(nameof(CanUseMailboxActions));
                 OnPropertyChanged(nameof(RequiresGmailReauthentication));
@@ -611,6 +612,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool IsGmailMailboxAvailable =>
         ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }
         && _gmailMailboxService is not null;
+    public bool IsYandexMailbox =>
+        ActiveAccount is { Provider: MailProviderType.Yandex, IsEnabled: true };
     public bool CanUseMailboxActions => IsGmailMailboxAvailable && !IsMailboxChanging;
     public bool IsSearchAvailable =>
         ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }

@@ -11,6 +11,24 @@ namespace UnifiedMessenger.Tests;
 public sealed class LanternMailUiTests
 {
     [Fact]
+    public async Task YandexPresentationFlag_IsProviderSpecificAndDoesNotExposeGmailSearch()
+    {
+        foreach (MailProviderType providerType in Enum.GetValues<MailProviderType>())
+        {
+            UiMailProvider provider = new();
+            using MailInboxViewModel viewModel = CreateViewModel(provider);
+
+            await viewModel.ActivateAsync(Account(providerType));
+
+            Assert.Equal(providerType is MailProviderType.Yandex, viewModel.IsYandexMailbox);
+            if (providerType is MailProviderType.Yandex)
+            {
+                Assert.False(viewModel.IsSearchAvailable);
+            }
+        }
+    }
+
+    [Fact]
     public async Task MailPresentation_DefaultsToWideFolderMessageList()
     {
         UiMailProvider provider = new();
@@ -197,7 +215,7 @@ public sealed class LanternMailUiTests
     }
 
     [Fact]
-    public void MailNavigation_UsesFilledComposeAndSharedOutlineFolderSelection()
+    public void MailNavigation_PreservesSharedDefaultsAndAddsProviderScopedYandexSkin()
     {
         XDocument view = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
@@ -240,6 +258,10 @@ public sealed class LanternMailUiTests
         Assert.Equal("#FF2356B8", TriggerValue(selectedTrigger, presentation, "Foreground"));
         Assert.Equal("#FFEAF2FF", TriggerValue(hoverTrigger, presentation, "Background"));
         Assert.DoesNotContain("#FFDDEAFF", folderStyle.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IsYandexMailbox", composeStyle.ToString(), StringComparison.Ordinal);
+        Assert.Contains("#FFFFCC4D", composeStyle.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IsYandexMailbox", folderStyle.ToString(), StringComparison.Ordinal);
+        Assert.Contains("#FFE1E3E6", folderStyle.ToString(), StringComparison.OrdinalIgnoreCase);
 
         XElement folderList = Assert.Single(
             view.Descendants(presentation + "ListBox"),
@@ -247,12 +269,189 @@ public sealed class LanternMailUiTests
         Assert.Equal(
             "{StaticResource MailFolderItemStyle}",
             (string?)folderList.Attribute("ItemContainerStyle"));
+    }
+
+    [Fact]
+    public void YandexVisualSkin_AddsDenseListAndDetailSenderCuesWithoutFakeSearch()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        string markup = view.ToString();
+
+        Assert.Contains("IsYandexMailbox", markup, StringComparison.Ordinal);
+        Assert.Contains("YandexSenderAvatar", markup, StringComparison.Ordinal);
+        Assert.Contains("YandexUnreadDot", markup, StringComparison.Ordinal);
+        Assert.Contains("SenderInitials", markup, StringComparison.Ordinal);
+        Assert.Contains("SenderAvatarBackground", markup, StringComparison.Ordinal);
+        Assert.Contains("#FFFFCC4D", markup, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(Named(view, presentation, xaml, "Border", "MessageListToolbar"));
+        Assert.NotNull(Named(view, presentation, xaml, "Border", "MessageDetailToolbar"));
+        Assert.NotNull(Named(view, presentation, xaml, "Border", "MessageDetailHeader"));
+        Assert.DoesNotContain("YandexSearchCommand", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void YandexDetail_UsesTextSenderBlockWithoutAvatarAndPreservesDateAndCommands()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        XElement list = Named(view, presentation, xaml, "Grid", "MessageListSurface");
+        XElement detail = Named(view, presentation, xaml, "Grid", "MessageDetailSurface");
+        XElement header = Named(view, presentation, xaml, "Border", "MessageDetailHeader");
+        XElement subject = Named(view, presentation, xaml, "TextBlock", "MessageDetailSubject");
+        XElement sender = Named(view, presentation, xaml, "TextBlock", "MessageDetailSenderName");
+        XElement email = Named(view, presentation, xaml, "TextBlock", "MessageDetailSenderEmail");
+        XElement recipient = Named(view, presentation, xaml, "TextBlock", "MessageDetailRecipient");
+        XElement date = Named(view, presentation, xaml, "TextBlock", "MessageDetailDate");
+        string detailMarkup = detail.ToString();
+
+        Assert.Contains("YandexSenderAvatar", list.ToString(), StringComparison.Ordinal);
+        Assert.Contains("SenderInitials", list.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedMessageSummary.SenderInitials", header.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedMessageSummary.SenderAvatarBackground", header.ToString(), StringComparison.Ordinal);
+        Assert.Equal("{Binding SelectedMessageContent.Subject}", (string?)subject.Attribute("Text"));
+        Assert.Equal("Wrap", (string?)subject.Attribute("TextWrapping"));
+        Assert.Contains("Property=\"FontSize\" Value=\"23\"", subject.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Property=\"FontSize\" Value=\"21\"", subject.ToString(), StringComparison.Ordinal);
+        Assert.Equal("{Binding SelectedMessageContent.SenderDisplay}", (string?)sender.Attribute("Text"));
+        Assert.Equal("SemiBold", (string?)sender.Attribute("FontWeight"));
+        Assert.Equal("{Binding SelectedMessageContent.FromAddress}", (string?)email.Attribute("Text"));
+        Assert.Equal("{Binding SelectedMessageContent.To, StringFormat=Кому: {0}}", (string?)recipient.Attribute("Text"));
+        Assert.Equal("1", (string?)date.Attribute("Grid.Column"));
+        Assert.Equal("{Binding SelectedMessageDisplayDate}", (string?)date.Attribute("Text"));
+        Assert.Contains("Property=\"HorizontalAlignment\" Value=\"Right\"", date.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Property=\"VerticalAlignment\" Value=\"Top\"", date.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Value=\"28,20,28,16\"", header.ToString(), StringComparison.Ordinal);
+
         Assert.All(
-            new[] { MailProviderType.Gmail, MailProviderType.Yandex, MailProviderType.MailRu },
-            provider => Assert.DoesNotContain(
-                provider.ToString(),
-                folderStyle.ToString(),
-                StringComparison.OrdinalIgnoreCase));
+            new[]
+            {
+                "BackToMessageListCommand",
+                "SetReadStateCommand",
+                "Compose.ReplyCommand",
+                "Compose.ForwardCommand"
+            },
+            command => Assert.Contains(command, detailMarkup, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void YandexMessageRow_ReservesRightAlignedDateAndKeepsTextEllipsized()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        XElement sender = Named(view, presentation, xaml, "TextBlock", "SenderText");
+        XElement subject = Named(view, presentation, xaml, "TextBlock", "SubjectText");
+        XElement preview = Named(view, presentation, xaml, "TextBlock", "PreviewText");
+        XElement date = Named(view, presentation, xaml, "TextBlock", "MessageDateText");
+        XElement messageButton = Named(view, presentation, xaml, "Button", "MessageButton");
+        XElement senderColumn = Named(view, presentation, xaml, "ColumnDefinition", "MessageSenderColumn");
+        XElement contentColumn = Named(view, presentation, xaml, "ColumnDefinition", "MessageContentColumn");
+
+        Assert.Equal("CharacterEllipsis", (string?)sender.Attribute("TextTrimming"));
+        Assert.Equal("CharacterEllipsis", (string?)subject.Attribute("TextTrimming"));
+        Assert.Equal("CharacterEllipsis", (string?)preview.Attribute("TextTrimming"));
+        Assert.Equal("{Binding DisplayDate}", (string?)date.Attribute("Text"));
+        Assert.Equal("3", (string?)date.Attribute("Grid.Column"));
+        Assert.Equal("Right", (string?)date.Attribute("HorizontalAlignment"));
+        Assert.Equal("Right", (string?)date.Attribute("TextAlignment"));
+        Assert.Equal("CharacterEllipsis", (string?)date.Attribute("TextTrimming"));
+        Assert.Contains("Value=\"90\"", date.ToString(), StringComparison.Ordinal);
+        Assert.Null(messageButton.Attribute("Grid.Column"));
+
+        XElement messageButtonStyle = Assert.Single(
+            messageButton.Element(presentation + "Button.Style")!.Elements(presentation + "Style"));
+        Assert.Contains(
+            messageButtonStyle.Elements(presentation + "Setter"),
+            setter => (string?)setter.Attribute("Property") == "Grid.Column"
+                && (string?)setter.Attribute("Value") == "2");
+        XElement yandexSpanTrigger = Assert.Single(
+            messageButtonStyle.Descendants(presentation + "DataTrigger"),
+            trigger => ((string?)trigger.Attribute("Binding"))?.Contains("IsYandexMailbox", StringComparison.Ordinal) == true);
+        Assert.Contains(
+            yandexSpanTrigger.Elements(presentation + "Setter"),
+            setter => (string?)setter.Attribute("Property") == "Grid.Column"
+                && (string?)setter.Attribute("Value") == "0");
+        Assert.Contains(
+            yandexSpanTrigger.Elements(presentation + "Setter"),
+            setter => (string?)setter.Attribute("Property") == "Grid.ColumnSpan"
+                && (string?)setter.Attribute("Value") == "3");
+        Assert.Contains("Value=\"2*\"", senderColumn.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Value=\"4*\"", contentColumn.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Value=\"80\"", contentColumn.ToString(), StringComparison.Ordinal);
+
+        XElement unreadTrigger = Assert.Single(
+            view.Descendants(presentation + "DataTrigger"),
+            trigger => (string?)trigger.Attribute("Binding") == "{Binding IsUnread}"
+                && trigger.Elements(presentation + "Setter").Any(
+                    setter => (string?)setter.Attribute("TargetName") == "SenderText"));
+        string unreadMarkup = unreadTrigger.ToString();
+        Assert.Contains("TargetName=\"SenderText\" Property=\"FontWeight\" Value=\"SemiBold\"", unreadMarkup, StringComparison.Ordinal);
+        Assert.Contains("TargetName=\"SubjectText\" Property=\"FontWeight\" Value=\"SemiBold\"", unreadMarkup, StringComparison.Ordinal);
+        Assert.DoesNotContain("PreviewText", unreadMarkup, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Яндекс Метрика", "ЯМ")]
+    [InlineData("noreply@example.test", "N")]
+    [InlineData("", "?")]
+    public void MessageSummary_ProvidesStableSenderInitials(string senderName, string expected)
+    {
+        MailMessageSummary summary = new(
+            "message",
+            "Subject",
+            senderName,
+            string.IsNullOrEmpty(senderName) ? string.Empty : "sender@example.test",
+            DateTimeOffset.UtcNow,
+            "Preview",
+            false);
+
+        Assert.Equal(expected, summary.SenderInitials);
+    }
+
+    [Fact]
+    public void MessageSummary_UsesDeterministicCaseInsensitiveSenderAvatarColor()
+    {
+        MailMessageSummary first = Summary("First display", "sender@example.test");
+        MailMessageSummary sameSender = Summary("Renamed display", "SENDER@EXAMPLE.TEST");
+
+        Assert.Equal("#FFF7DCE6", first.SenderAvatarBackground);
+        Assert.Equal(first.SenderAvatarBackground, sameSender.SenderAvatarBackground);
+
+        static MailMessageSummary Summary(string displayName, string address) => new(
+            Guid.NewGuid().ToString("N"),
+            "Subject",
+            displayName,
+            address,
+            DateTimeOffset.UtcNow,
+            "Preview",
+            false);
+    }
+
+    [Fact]
+    public void MessageSummary_DisplayDateUsesLocalTimeTodayAndCompactDateForOlderMail()
+    {
+        DateTime localToday = DateTime.Today.AddHours(11).AddMinutes(19);
+        DateTime localOlder = DateTime.Today.AddDays(-8).AddHours(9);
+        MailMessageSummary today = Summary(new DateTimeOffset(localToday, TimeZoneInfo.Local.GetUtcOffset(localToday)));
+        MailMessageSummary older = Summary(new DateTimeOffset(localOlder, TimeZoneInfo.Local.GetUtcOffset(localOlder)));
+
+        Assert.Equal(localToday.ToString("HH:mm", CultureInfo.CurrentCulture), today.DisplayDate);
+        Assert.Equal(localOlder.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture), older.DisplayDate);
+
+        static MailMessageSummary Summary(DateTimeOffset receivedAt) => new(
+            Guid.NewGuid().ToString("N"),
+            "Subject",
+            "Sender",
+            "sender@example.test",
+            receivedAt,
+            "Preview",
+            false);
     }
 
     [Fact]
@@ -626,11 +825,11 @@ public sealed class LanternMailUiTests
     private static MailInboxViewModel CreateViewModel(UiMailProvider provider) =>
         new(new UiMailProviderFactory(provider));
 
-    private static MailAccount Account() =>
+    private static MailAccount Account(MailProviderType provider = MailProviderType.Yandex) =>
         new()
         {
             Id = Guid.NewGuid(),
-            Provider = MailProviderType.Yandex,
+            Provider = provider,
             EmailAddress = "account@example.test",
             CredentialKey = Guid.NewGuid().ToString("N"),
             AuthenticationKind = MailAuthenticationKind.Password,

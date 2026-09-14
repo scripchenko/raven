@@ -69,6 +69,24 @@
                                 <Setter Property="Foreground" Value="#FF2356B8" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" Value="True" />
+                                    <Condition Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter TargetName="FolderBackground" Property="Background" Value="#FFE9EAEC" />
+                            </MultiDataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource TemplatedParent}}" Value="True" />
+                                    <Condition Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter TargetName="FolderBackground" Property="Background" Value="#FFE1E3E6" />
+                                <Setter TargetName="FolderBackground" Property="BorderBrush" Value="Transparent" />
+                                <Setter TargetName="FolderBackground" Property="BorderThickness" Value="0" />
+                                <Setter Property="Foreground" Value="#FF202124" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </MultiDataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -170,6 +188,14 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                    <Setter Property="Width" Value="36" />
+                    <Setter Property="Height" Value="36" />
+                    <Setter Property="Padding" Value="7" />
+                    <Setter Property="Foreground" Value="#FF30343B" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="MailToolbarIconViewboxStyle" TargetType="Viewbox">
@@ -252,14 +278,40 @@
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="ComposeBorder" Property="Background" Value="#FFCFE1FC" />
                             </Trigger>
+                            <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                                <Setter TargetName="ComposeBorder" Property="CornerRadius" Value="12" />
+                            </DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" Value="True" />
+                                    <Condition Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter TargetName="ComposeBorder" Property="Background" Value="#FFFFD65C" />
+                            </MultiDataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsPressed, RelativeSource={RelativeSource TemplatedParent}}" Value="True" />
+                                    <Condition Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter TargetName="ComposeBorder" Property="Background" Value="#FFF2BE35" />
+                            </MultiDataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                    <Setter Property="MinHeight" Value="40" />
+                    <Setter Property="Foreground" Value="#FF1F2328" />
+                    <Setter Property="Background" Value="#FFFFCC4D" />
+                    <Setter Property="BorderBrush" Value="#FFFFCC4D" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
     </UserControl.Resources>
 
-    <Grid Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}">
+    <Grid x:Name="MailRoot"
+          Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="218" />
             <ColumnDefinition Width="1" />
@@ -267,9 +319,19 @@
         </Grid.ColumnDefinitions>
 
         <Border x:Name="MailNavigationPanel"
-                Grid.Column="0"
-                Padding="14,18"
-                Background="#FFF8FAFC">
+                Grid.Column="0">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Padding" Value="14,18" />
+                    <Setter Property="Background" Value="#FFF8FAFC" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                            <Setter Property="Padding" Value="14,16" />
+                            <Setter Property="Background" Value="#FFF3F4F5" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -284,8 +346,8 @@
                         FontWeight="SemiBold"
                         Style="{StaticResource MailComposeButtonStyle}" />
 
-                <ListBox Grid.Row="1"
-                         Margin="0,16,0,0"
+                <ListBox x:Name="MailFolderList"
+                         Grid.Row="1"
                          ItemsSource="{Binding Folders}"
                          SelectedItem="{Binding SelectedFolder, Mode=TwoWay}"
                          Background="Transparent"
@@ -293,6 +355,16 @@
                          HorizontalContentAlignment="Stretch"
                          ItemContainerStyle="{StaticResource MailFolderItemStyle}"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.Style>
+                        <Style TargetType="ListBox">
+                            <Setter Property="Margin" Value="0,16,0,0" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                                    <Setter Property="Margin" Value="0,14,0,0" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ListBox.Style>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <Grid x:Name="FolderRow" ToolTip="{Binding DisplayName}">
@@ -349,7 +421,17 @@
 
         <Border Grid.Column="1" Background="{DynamicResource DividerBrush}" />
 
-        <Grid Grid.Column="2" Background="{DynamicResource SurfaceBrush}">
+        <Grid x:Name="MailContentPanel" Grid.Column="2">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                            <Setter Property="Background" Value="#FFFAFAFB" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -455,10 +537,21 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border Padding="18,0"
-                        Background="White"
+                <Border x:Name="MessageListToolbar"
                         BorderBrush="{DynamicResource DividerBrush}"
                         BorderThickness="0,0,0,1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Padding" Value="18,0" />
+                            <Setter Property="Background" Value="White" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                                    <Setter Property="Padding" Value="14,0" />
+                                    <Setter Property="Background" Value="#FFFAFAFA" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <StackPanel HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
                                 Orientation="Horizontal">
@@ -488,10 +581,19 @@
                             </Viewbox>
                         </Button>
                         <StackPanel x:Name="MailPaginationPanel"
-                                    Margin="20,0,0,0"
                                     VerticalAlignment="Center"
                                     Orientation="Horizontal"
                                     Visibility="{Binding IsPageNavigationVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Margin" Value="20,0,0,0" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                                            <Setter Property="Margin" Value="8,0,0,0" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
                             <TextBlock Margin="0,0,10,0"
                                        VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextSecondaryBrush}"
@@ -717,32 +819,111 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
-                                </Button>
-                                <Button x:Name="MessageButton"
-                                    Grid.Column="2"
-                                    Command="{Binding DataContext.OpenMessageCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                    CommandParameter="{Binding}"
-                                    Style="{StaticResource MailMessageButtonStyle}">
-                                <Border x:Name="MessageRow"
-                                        MinHeight="46"
-                                        Padding="20,7"
-                                        Background="Transparent"
-                                        BorderBrush="{DynamicResource DividerBrush}"
-                                        BorderThickness="0,0,0,1">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="180" MinWidth="140" />
-                                            <ColumnDefinition Width="*" MinWidth="180" />
-                                            <ColumnDefinition Width="78" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock x:Name="SenderText"
-                                                   Margin="0,0,18,0"
-                                                   VerticalAlignment="Center"
-                                                   FontSize="14.5"
-                                                   FontWeight="Normal"
-                                                   Text="{Binding SenderDisplay}"
-                                                   TextTrimming="CharacterEllipsis" />
-                                        <Grid Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                                 </Button>
+                                 <Button x:Name="MessageButton"
+                                     Command="{Binding DataContext.OpenMessageCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                     CommandParameter="{Binding}">
+                                 <Button.Style>
+                                     <Style TargetType="Button" BasedOn="{StaticResource MailMessageButtonStyle}">
+                                         <Setter Property="Grid.Column" Value="2" />
+                                         <Setter Property="Grid.ColumnSpan" Value="1" />
+                                         <Style.Triggers>
+                                             <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
+                                                 <Setter Property="Grid.Column" Value="0" />
+                                                 <Setter Property="Grid.ColumnSpan" Value="3" />
+                                             </DataTrigger>
+                                         </Style.Triggers>
+                                     </Style>
+                                 </Button.Style>
+                                 <Border x:Name="MessageRow"
+                                         Background="Transparent"
+                                         BorderBrush="{DynamicResource DividerBrush}"
+                                         BorderThickness="0,0,0,1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="MinHeight" Value="46" />
+                                            <Setter Property="Padding" Value="20,7" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
+                                                    <Setter Property="MinHeight" Value="44" />
+                                                    <Setter Property="Padding" Value="14,5" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                     <Grid>
+                                         <Grid.ColumnDefinitions>
+                                             <ColumnDefinition Width="Auto" />
+                                             <ColumnDefinition x:Name="MessageSenderColumn">
+                                                 <ColumnDefinition.Style>
+                                                     <Style TargetType="ColumnDefinition">
+                                                         <Setter Property="Width" Value="180" />
+                                                         <Setter Property="MinWidth" Value="140" />
+                                                         <Style.Triggers>
+                                                             <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
+                                                                 <Setter Property="Width" Value="2*" />
+                                                                 <Setter Property="MinWidth" Value="105" />
+                                                                 <Setter Property="MaxWidth" Value="180" />
+                                                             </DataTrigger>
+                                                         </Style.Triggers>
+                                                     </Style>
+                                                 </ColumnDefinition.Style>
+                                             </ColumnDefinition>
+                                             <ColumnDefinition x:Name="MessageContentColumn">
+                                                 <ColumnDefinition.Style>
+                                                     <Style TargetType="ColumnDefinition">
+                                                         <Setter Property="Width" Value="*" />
+                                                         <Setter Property="MinWidth" Value="180" />
+                                                         <Style.Triggers>
+                                                             <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
+                                                                 <Setter Property="Width" Value="4*" />
+                                                                 <Setter Property="MinWidth" Value="80" />
+                                                             </DataTrigger>
+                                                         </Style.Triggers>
+                                                     </Style>
+                                                 </ColumnDefinition.Style>
+                                             </ColumnDefinition>
+                                             <ColumnDefinition Width="Auto" />
+                                         </Grid.ColumnDefinitions>
+                                         <Border x:Name="YandexSenderAvatar"
+                                                 Width="32"
+                                                 Height="32"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"
+                                                 Background="{Binding SenderAvatarBackground}"
+                                                 CornerRadius="16"
+                                                 Visibility="Collapsed">
+                                             <TextBlock HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        FontSize="11"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="#FF242629"
+                                                        Text="{Binding SenderInitials}" />
+                                         </Border>
+                                         <Grid Grid.Column="1" Margin="0,0,18,0">
+                                             <Grid.ColumnDefinitions>
+                                                 <ColumnDefinition Width="*" />
+                                                 <ColumnDefinition Width="Auto" />
+                                             </Grid.ColumnDefinitions>
+                                             <TextBlock x:Name="SenderText"
+                                                        Grid.Column="0"
+                                                        VerticalAlignment="Center"
+                                                        FontSize="14.5"
+                                                        FontWeight="Normal"
+                                                        Text="{Binding SenderDisplay}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                             <Border x:Name="YandexUnreadDot"
+                                                     Grid.Column="1"
+                                                     Width="7"
+                                                     Height="7"
+                                                     Margin="8,0,0,0"
+                                                     HorizontalAlignment="Right"
+                                                     VerticalAlignment="Center"
+                                                     Background="#FFFFCC4D"
+                                                     CornerRadius="4"
+                                                     Visibility="Collapsed" />
+                                         </Grid>
+                                         <Grid Grid.Column="2" Margin="0,0,16,0" VerticalAlignment="Center">
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
                                                 <RowDefinition Height="Auto" />
@@ -757,7 +938,8 @@
                                                            FontWeight="Normal"
                                                            Text="{Binding Subject}"
                                                            TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Grid.Column="1"
+                                                 <TextBlock x:Name="PreviewText"
+                                                            Grid.Column="1"
                                                            Margin="8,0,0,0"
                                                            FontSize="14"
                                                            Foreground="#FF5F6368"
@@ -853,12 +1035,27 @@
                                                 </Border>
                                             </StackPanel>
                                         </Grid>
-                                        <TextBlock Grid.Column="2"
+                                         <TextBlock x:Name="MessageDateText"
+                                                    Grid.Column="3"
                                                    VerticalAlignment="Center"
                                                    HorizontalAlignment="Right"
                                                    FontSize="13"
-                                                   Foreground="{DynamicResource TextSecondaryBrush}"
-                                                   Text="{Binding DisplayDate}" />
+                                                   Text="{Binding DisplayDate}"
+                                                   TextAlignment="Right"
+                                                   TextTrimming="CharacterEllipsis">
+                                             <TextBlock.Style>
+                                                 <Style TargetType="TextBlock">
+                                                     <Setter Property="Width" Value="78" />
+                                                     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+                                                     <Style.Triggers>
+                                                         <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
+                                                             <Setter Property="Width" Value="90" />
+                                                             <Setter Property="Foreground" Value="#FF5B616A" />
+                                                         </DataTrigger>
+                                                     </Style.Triggers>
+                                                 </Style>
+                                             </TextBlock.Style>
+                                         </TextBlock>
                                     </Grid>
                                 </Border>
                                 </Button>
@@ -869,10 +1066,28 @@
                                     <Setter TargetName="SenderText" Property="FontWeight" Value="SemiBold" />
                                     <Setter TargetName="SubjectText" Property="FontWeight" Value="SemiBold" />
                                 </DataTrigger>
-                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                    <Setter TargetName="MessageButton" Property="Background" Value="#FFE7F0FF" />
-                                </DataTrigger>
-                            </DataTemplate.Triggers>
+                                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                     <Setter TargetName="MessageButton" Property="Background" Value="#FFE7F0FF" />
+                                 </DataTrigger>
+                                 <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
+                                     <Setter TargetName="YandexSenderAvatar" Property="Visibility" Value="Visible" />
+                                 </DataTrigger>
+                                 <MultiDataTrigger>
+                                     <MultiDataTrigger.Conditions>
+                                         <Condition Binding="{Binding IsUnread}" Value="True" />
+                                         <Condition Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True" />
+                                     </MultiDataTrigger.Conditions>
+                                     <Setter TargetName="MessageButton" Property="Background" Value="#FFF7F8FA" />
+                                     <Setter TargetName="YandexUnreadDot" Property="Visibility" Value="Visible" />
+                                 </MultiDataTrigger>
+                                 <MultiDataTrigger>
+                                     <MultiDataTrigger.Conditions>
+                                         <Condition Binding="{Binding IsSelected}" Value="True" />
+                                         <Condition Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True" />
+                                     </MultiDataTrigger.Conditions>
+                                     <Setter TargetName="MessageButton" Property="Background" Value="#FFEDEFF2" />
+                                 </MultiDataTrigger>
+                             </DataTemplate.Triggers>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
@@ -995,9 +1210,21 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Border Padding="18,0"
+                <Border x:Name="MessageDetailToolbar"
                         BorderBrush="{DynamicResource DividerBrush}"
                         BorderThickness="0,0,0,1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Padding" Value="18,0" />
+                            <Setter Property="Background" Value="White" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                                    <Setter Property="Padding" Value="14,0" />
+                                    <Setter Property="Background" Value="#FFFAFAFA" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <StackPanel HorizontalAlignment="Left" Orientation="Horizontal">
                         <Button HorizontalAlignment="Left"
                                 AutomationProperties.Name="Назад к списку"
@@ -1253,44 +1480,83 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="1"
-                        Padding="28,20,28,16"
-                        Background="White"
+                <Border x:Name="MessageDetailHeader"
+                        Grid.Row="1"
                         BorderBrush="{DynamicResource DividerBrush}"
                         BorderThickness="0,0,0,1"
                         Visibility="{Binding HasSelectedContent, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Padding" Value="28,20,28,16" />
+                            <Setter Property="Background" Value="White" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                                    <Setter Property="Padding" Value="28,18,28,16" />
+                                    <Setter Property="Background" Value="#FFFFFFFF" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <StackPanel>
-                        <TextBlock FontSize="23"
-                                   FontWeight="SemiBold"
-                                   LineHeight="31"
+                        <TextBlock x:Name="MessageDetailSubject"
                                    Text="{Binding SelectedMessageContent.Subject}"
-                                   TextWrapping="Wrap" />
+                                   TextWrapping="Wrap">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="FontSize" Value="23" />
+                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                    <Setter Property="LineHeight" Value="31" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                                            <Setter Property="FontSize" Value="21" />
+                                            <Setter Property="LineHeight" Value="28" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                         <Grid Margin="0,14,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock FontSize="15"
+                            <StackPanel Grid.Column="0">
+                                <TextBlock x:Name="MessageDetailSenderName"
+                                           FontSize="15"
                                            FontWeight="SemiBold"
                                            Text="{Binding SelectedMessageContent.SenderDisplay}"
                                            TextWrapping="Wrap" />
-                                <TextBlock Margin="0,3,0,0"
+                                <TextBlock x:Name="MessageDetailSenderEmail"
+                                           Margin="0,3,0,0"
                                            FontSize="13"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
                                            Text="{Binding SelectedMessageContent.FromAddress}"
                                            TextWrapping="Wrap" />
-                                <TextBlock Margin="0,3,0,0"
+                                <TextBlock x:Name="MessageDetailRecipient"
+                                           Margin="0,3,0,0"
                                            FontSize="13"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
                                            Text="{Binding SelectedMessageContent.To, StringFormat=Кому: {0}}"
                                            TextWrapping="Wrap" />
                             </StackPanel>
-                            <TextBlock Grid.Column="1"
+                            <TextBlock x:Name="MessageDetailDate"
+                                       Grid.Column="1"
                                        Margin="18,1,0,0"
                                        FontSize="13"
                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="{Binding SelectedMessageDisplayDate}" />
+                                       Text="{Binding SelectedMessageDisplayDate}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsYandexMailbox}" Value="True">
+                                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                                <Setter Property="VerticalAlignment" Value="Top" />
+                                                <Setter Property="TextAlignment" Value="Right" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </Grid>
 
                         <StackPanel Margin="0,13,0,0"

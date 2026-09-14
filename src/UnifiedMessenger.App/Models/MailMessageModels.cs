@@ -11,6 +11,16 @@ public sealed record MailMessageSummary(
     string Preview,
     bool IsUnread) : INotifyPropertyChanged
 {
+    private static readonly string[] SenderAvatarBackgroundPalette =
+    [
+        "#FFD7E9FF",
+        "#FFE5DDF8",
+        "#FFD7EFE5",
+        "#FFFFE2C4",
+        "#FFF7DCE6",
+        "#FFD8ECEE"
+    ];
+
     private bool _isSelected;
 
     public MailMessageAttachmentSummary AttachmentSummary { get; init; } = MailMessageAttachmentSummary.Empty;
@@ -45,6 +55,42 @@ public sealed record MailMessageSummary(
     public string SenderDisplay => string.IsNullOrWhiteSpace(FromDisplayName)
         ? FromAddress
         : FromDisplayName;
+
+    public string SenderInitials
+    {
+        get
+        {
+            string[] parts = SenderDisplay
+                .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length == 0)
+            {
+                return "?";
+            }
+
+            string initials = parts.Length == 1
+                ? parts[0][0].ToString()
+                : string.Concat(parts[0][0], parts[^1][0]);
+            return initials.ToUpperInvariant();
+        }
+    }
+
+    public string SenderAvatarBackground
+    {
+        get
+        {
+            string identity = string.IsNullOrWhiteSpace(FromAddress)
+                ? SenderDisplay.Trim()
+                : FromAddress.Trim();
+            uint hash = 2166136261;
+            foreach (char symbol in identity)
+            {
+                hash ^= char.ToLowerInvariant(symbol);
+                hash = unchecked(hash * 16777619u);
+            }
+
+            return SenderAvatarBackgroundPalette[hash % (uint)SenderAvatarBackgroundPalette.Length];
+        }
+    }
 
     public string DisplayDate
     {
