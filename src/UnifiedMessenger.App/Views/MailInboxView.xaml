@@ -399,6 +399,9 @@
                                 <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Drafts}">
                                     <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderDraftGeometry}" />
                                 </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.Archive}">
+                                    <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailActionArchiveGeometry}" />
+                                </DataTrigger>
                                 <DataTrigger Binding="{Binding Kind}" Value="{x:Static models:MailFolderKind.AllMail}">
                                     <Setter TargetName="FolderIcon" Property="Data" Value="{StaticResource MailFolderAllMailGeometry}" />
                                 </DataTrigger>
@@ -562,7 +565,7 @@
                                   IsChecked="{Binding LoadedSelectionState, Mode=OneWay}"
                                   IsThreeState="True"
                                   ToolTip="Выбрать все загруженные письма"
-                                  Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                  Visibility="{Binding IsMailboxManagementAvailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Button Margin="0,0,4,0"
                                 AutomationProperties.Name="Обновить"
                                 Command="{Binding RefreshCommand}"
@@ -629,6 +632,7 @@
                             <Button Margin="4,0,0,0"
                                     AutomationProperties.Name="Архивировать"
                                     Command="{Binding ArchiveSelectedCommand}"
+                                    Visibility="{Binding ShowArchiveAction, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
                                     ToolTip="Архивировать">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
@@ -687,6 +691,7 @@
                             <Button Margin="4,0,0,0"
                                     AutomationProperties.Name="Пометить как прочитанное"
                                     Command="{Binding MarkSelectedReadCommand}"
+                                    Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
                                     ToolTip="Пометить как прочитанное">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
@@ -698,6 +703,7 @@
                             <Button Margin="4,0,0,0"
                                     AutomationProperties.Name="Пометить как непрочитанное"
                                     Command="{Binding MarkSelectedUnreadCommand}"
+                                    Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
                                     ToolTip="Пометить как непрочитанное">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
@@ -707,8 +713,37 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
+                                    AutomationProperties.Name="{Binding YandexSelectedReadStateActionText}"
+                                    Command="{Binding ToggleYandexSelectedReadStateCommand}"
+                                    Visibility="{Binding ShowYandexSelectedReadStateAction, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                    Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                    ToolTip="{Binding YandexSelectedReadStateActionText}">
+                                <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Fill="Transparent"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              StrokeStartLineCap="Round"
+                                              StrokeThickness="1.65">
+                                            <Path.Style>
+                                                <Style TargetType="Path">
+                                                    <Setter Property="Data" Value="{StaticResource MailActionMarkUnreadGeometry}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding YandexSelectedReadStateWillMarkRead}" Value="True">
+                                                            <Setter Property="Data" Value="{StaticResource MailActionMarkReadGeometry}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Path.Style>
+                                        </Path>
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button Margin="4,0,0,0"
                                     AutomationProperties.Name="{Binding SelectedStarActionText}"
                                     Command="{Binding ToggleSelectedStarCommand}"
+                                    Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     FontSize="20"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
                                     ToolTip="{Binding SelectedStarActionText}">
@@ -730,6 +765,7 @@
                             <Button Margin="4,0,0,0"
                                     AutomationProperties.Name="Ярлыки"
                                     Command="{Binding OpenLabelsForSelectionCommand}"
+                                    Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
                                     ToolTip="Ярлыки">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
@@ -790,7 +826,7 @@
                                           Command="{Binding DataContext.ToggleMessageSelectionCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                           CommandParameter="{Binding}"
                                           IsChecked="{Binding IsSelected, Mode=OneWay}"
-                                          Visibility="{Binding DataContext.IsGmailMailboxAvailable, RelativeSource={RelativeSource AncestorType=ListBox}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                          Visibility="{Binding DataContext.IsMailboxManagementAvailable, RelativeSource={RelativeSource AncestorType=ListBox}, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 <Button Grid.Column="1"
                                          Width="32"
                                          Height="32"
@@ -829,8 +865,8 @@
                                          <Setter Property="Grid.ColumnSpan" Value="1" />
                                          <Style.Triggers>
                                              <DataTrigger Binding="{Binding DataContext.IsYandexMailbox, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
-                                                 <Setter Property="Grid.Column" Value="0" />
-                                                 <Setter Property="Grid.ColumnSpan" Value="3" />
+                                                 <Setter Property="Grid.Column" Value="1" />
+                                                 <Setter Property="Grid.ColumnSpan" Value="2" />
                                              </DataTrigger>
                                          </Style.Triggers>
                                      </Style>
@@ -1248,7 +1284,7 @@
                                 Command="{Binding ArchiveDetailCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
                                 ToolTip="Архивировать"
-                                Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                Visibility="{Binding ShowArchiveAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
                                     <Path Data="{StaticResource MailActionArchiveGeometry}"
@@ -1320,7 +1356,7 @@
                                 Command="{Binding DeleteDetailCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
                                 ToolTip="Удалить"
-                                Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                Visibility="{Binding IsMailboxManagementAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
                                     <Path Data="{StaticResource MailActionTrashGeometry}"
@@ -1380,7 +1416,7 @@
                                 IsEnabled="{Binding CanChangeReadState}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
                                 ToolTip="{Binding ReadStateActionText}"
-                                Visibility="{Binding ShowReadStateAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                Visibility="{Binding ShowStandardReadStateAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
                                     <Path Fill="Transparent"
@@ -1394,6 +1430,35 @@
                                                 <Setter Property="Data" Value="{StaticResource MailActionMarkUnreadGeometry}" />
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding SelectedMessageSummary.IsUnread}" Value="True">
+                                                        <Setter Property="Data" Value="{StaticResource MailActionMarkReadGeometry}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Path.Style>
+                                    </Path>
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button Margin="4,0,0,0"
+                                AutomationProperties.Name="{Binding YandexDetailReadStateActionText}"
+                                Command="{Binding ToggleYandexDetailReadStateCommand}"
+                                IsEnabled="{Binding CanChangeReadState}"
+                                Style="{StaticResource MailDetailToolbarButtonStyle}"
+                                ToolTip="{Binding YandexDetailReadStateActionText}"
+                                Visibility="{Binding ShowYandexDetailReadStateAction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
+                                <Canvas Width="24" Height="24">
+                                    <Path Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          StrokeStartLineCap="Round"
+                                          StrokeThickness="1.65">
+                                        <Path.Style>
+                                            <Style TargetType="Path">
+                                                <Setter Property="Data" Value="{StaticResource MailActionMarkUnreadGeometry}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding YandexDetailReadStateWillMarkRead}" Value="True">
                                                         <Setter Property="Data" Value="{StaticResource MailActionMarkReadGeometry}" />
                                                     </DataTrigger>
                                                 </Style.Triggers>

@@ -62,9 +62,11 @@ public sealed class MailBackgroundPollingMonitor(
     IApplicationSettingsStore settingsStore,
     IMailReadProviderFactory providerFactory,
     IUiDispatcher uiDispatcher,
-    TimeProvider timeProvider) : IMailBackgroundPollingMonitor
+    TimeProvider timeProvider,
+    ImapMailboxChangeTracker? imapMailboxChanges = null) : IMailBackgroundPollingMonitor
 {
     public static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(60);
+    private readonly ImapMailboxChangeTracker _imapMailboxChanges = imapMailboxChanges ?? new();
 
     private readonly Dictionary<Guid, MailInboxBaseline> _baselines = [];
     private readonly Dictionary<Guid, ulong> _historyCursors = [];
@@ -192,6 +194,8 @@ public sealed class MailBackgroundPollingMonitor(
     {
         try
         {
+            using IDisposable? imapLease = account.Provider is MailProviderType.Yandex
+                ? await _imapMailboxChanges.EnterAsync(account.Id, cancellationToken) : null;
             IMailReadProvider provider = providerFactory.Get(account.Provider);
             if (account.Provider is MailProviderType.Gmail)
             {
@@ -221,13 +225,34 @@ public sealed class MailBackgroundPollingMonitor(
                 .Where(identity => !string.IsNullOrWhiteSpace(identity))
                 .ToHashSet(StringComparer.Ordinal);
             int newMessageCount = 0;
+            bool yandex = account.Provider is MailProviderType.Yandex;
+            bool forceBaseline = yandex && _imapMailboxChanges.ConsumeBaselineRequest(account.Id);
+            uint highWaterUid = yandex
+                ? identities.Select(identity => uint.TryParse(identity, out uint uid) ? uid : 0).DefaultIfEmpty().Max()
+                : 0;
             if (_baselines.TryGetValue(account.Id, out MailInboxBaseline? previous)
                 && string.Equals(previous.IdentityScope, snapshot.IdentityScope, StringComparison.Ordinal))
             {
-                newMessageCount = identities.Count(identity => !previous.MessageIdentities.Contains(identity));
+                if (yandex)
+                {
+                    // Removing a message exposes older UIDs below the top-100 window.
+                    // Only UIDs above the previous high-water mark are new arrivals.
+                    newMessageCount = forceBaseline ? 0 : identities.Count(identity =>
+                        uint.TryParse(identity, out uint uid) && uid > previous.HighWaterUid
+                        && !_imapMailboxChanges.IsLocalInboxMove(account.Id, snapshot.IdentityScope, identity));
+                    highWaterUid = Math.Max(highWaterUid, previous.HighWaterUid);
+                }
+                else
+                {
+                    newMessageCount = identities.Count(identity => !previous.MessageIdentities.Contains(identity));
+                }
             }
 
-            _baselines[account.Id] = new MailInboxBaseline(snapshot.IdentityScope, identities);
+            _baselines[account.Id] = new MailInboxBaseline(snapshot.IdentityScope, identities, highWaterUid);
+            if (yandex)
+            {
+                _imapMailboxChanges.RetireThrough(account.Id, snapshot.IdentityScope, highWaterUid);
+            }
             int unreadCount = Math.Max(0, snapshot.UnreadCount);
             uiDispatcher.Post(() => ApplySuccessfulPoll(account.Id, unreadCount, newMessageCount, preview: null));
         }
@@ -327,5 +352,6 @@ public sealed class MailBackgroundPollingMonitor(
 
     private sealed record MailInboxBaseline(
         string IdentityScope,
-        HashSet<string> MessageIdentities);
+        HashSet<string> MessageIdentities,
+        uint HighWaterUid = 0);
 }

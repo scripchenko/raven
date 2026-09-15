@@ -176,6 +176,7 @@ public interface IMailReadProviderFactory
     IGmailScopeUpgradeService? GmailScopeUpgradeService => null;
     IGmailReauthenticationService? GmailReauthenticationService => null;
     IGmailMailboxManagementService? GmailMailboxManagementService => null;
+    IMailMailboxManagementService? MailboxManagementService => null;
 }
 
 public interface IMailContentExtractor

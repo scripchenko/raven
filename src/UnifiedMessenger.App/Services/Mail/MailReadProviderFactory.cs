@@ -6,7 +6,8 @@ public sealed class MailReadProviderFactory(
     IEnumerable<IMailReadProvider> providers,
     IGmailScopeUpgradeService? gmailScopeUpgradeService = null,
     IGmailReauthenticationService? gmailReauthenticationService = null,
-    IGmailMailboxManagementService? gmailMailboxManagementService = null)
+    IGmailMailboxManagementService? gmailMailboxManagementService = null,
+    IMailMailboxManagementService? mailboxManagementService = null)
     : IMailReadProviderFactory
 {
     private readonly IReadOnlyList<IMailReadProvider> _providers = providers.ToArray();
@@ -14,6 +15,7 @@ public sealed class MailReadProviderFactory(
     public IGmailScopeUpgradeService? GmailScopeUpgradeService { get; } = gmailScopeUpgradeService;
     public IGmailReauthenticationService? GmailReauthenticationService { get; } = gmailReauthenticationService;
     public IGmailMailboxManagementService? GmailMailboxManagementService { get; } = gmailMailboxManagementService;
+    public IMailMailboxManagementService? MailboxManagementService { get; } = mailboxManagementService;
 
     public IMailReadProvider Get(MailProviderType providerType)
     {

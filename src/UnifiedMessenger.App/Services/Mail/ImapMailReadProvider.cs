@@ -23,7 +23,10 @@ internal sealed record ImapSummaryData(
 
 internal sealed record ImapInboxPageData(IReadOnlyList<ImapSummaryData> Items, string? NextCursor);
 internal sealed record ImapMessageData(MimeMessage Message, bool IsUnread);
-internal sealed record ImapFolderDescriptor(MailFolderKind Kind, string FullName);
+internal sealed record ImapFolderDescriptor(MailFolderKind Kind, string FullName)
+{
+    public bool CanAcceptArchive { get; init; }
+}
 internal sealed record ImapInboxTechnicalSnapshot(
     int UnreadCount,
     uint UidValidity,
@@ -169,10 +172,12 @@ internal sealed class ImapMailReadProvider(
             credential.Secret,
             cancellationToken);
         return folders
+            .Where(folder => folder.Kind is not MailFolderKind.Archive || account.Provider is MailProviderType.Yandex)
             .GroupBy(folder => folder.Kind)
             .Select(group => group.First())
             .OrderBy(folder => folder.Kind)
-            .Select(folder => MailFolderCatalog.Create(folder.Kind, folder.FullName))
+            .Select(folder => MailFolderCatalog.Create(folder.Kind, folder.FullName,
+                canAcceptArchive: folder.CanAcceptArchive))
             .ToArray();
     }
 
@@ -400,7 +405,7 @@ internal sealed class ImapMailReadProvider(
 
     private static ImapFolderDescriptor ToDescriptor(MailFolder folder) => new(folder.Kind, folder.ProviderLocator);
 
-    private static (uint UidValidity, uint UniqueId) ParseMessageKey(
+    internal static (uint UidValidity, uint UniqueId) ParseMessageKey(
         MailFolderKind expectedFolder,
         string messageKey)
     {
@@ -595,6 +600,12 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             AddSpecialFolder(client, folders, MailFolderKind.Drafts, SpecialFolder.Drafts);
             AddSpecialFolder(client, folders, MailFolderKind.Spam, SpecialFolder.Junk);
             AddSpecialFolder(client, folders, MailFolderKind.Trash, SpecialFolder.Trash);
+            if (client.GetFolder(SpecialFolder.Archive) is IMailFolder archive
+                && DescribeArchiveFolder(archive.FullName, client.Inbox.FullName,
+                    archive.Attributes, client.Capabilities) is ImapFolderDescriptor descriptor)
+            {
+                folders.Add(descriptor);
+            }
             return folders;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -806,6 +817,27 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         }
 
         return index;
+    }
+
+    internal static ImapFolderDescriptor? DescribeArchiveFolder(
+        string fullName, string inboxName, FolderAttributes attributes, ImapCapabilities capabilities)
+    {
+        // A display name is not an archive contract. Only an actual, selectable
+        // server-designated archive may be offered as a destination.
+        const FolderAttributes conflicting = FolderAttributes.NoSelect | FolderAttributes.NonExistent
+            | FolderAttributes.Inbox | FolderAttributes.All | FolderAttributes.Junk
+            | FolderAttributes.Trash | FolderAttributes.Sent | FolderAttributes.Drafts;
+        if (!attributes.HasFlag(FolderAttributes.Archive) || (attributes & conflicting) != 0
+            || string.IsNullOrWhiteSpace(fullName)
+            || string.Equals(fullName, inboxName, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return new(MailFolderKind.Archive, fullName)
+        {
+            CanAcceptArchive = (capabilities & (ImapCapabilities.Move | ImapCapabilities.UidPlus)) != 0
+        };
     }
 
     private static void AddSpecialFolder(

@@ -376,10 +376,13 @@ public sealed class MailNotificationCoordinatorTests
         Assert.True(ApplicationTrayCoordinator.HasTaskbarActivity([web], [mail]));
     }
 
-    [Fact]
-    public void PopupClick_ClearsActivityAndOpensCorrectAccountInbox()
+    [Theory]
+    [InlineData(MailProviderType.Gmail)]
+    [InlineData(MailProviderType.Yandex)]
+    public void PopupClick_ClearsActivityAndOpensCorrectAccountInbox(MailProviderType provider)
     {
         using Fixture fixture = new();
+        fixture.First.Provider = provider;
         fixture.First.InboxUnreadCount = 14;
         fixture.Handle(fixture.First, 1);
         Guid popupId = Assert.Single(fixture.Popup.Shown).NotificationId;
@@ -392,10 +395,13 @@ public sealed class MailNotificationCoordinatorTests
         Assert.Equal([fixture.First.Id], fixture.Navigation.OpenedInboxAccountIds);
     }
 
-    [Fact]
-    public void InactiveGmailDetection_ReusesSignalForInboxFreshnessWithoutChangingPresentation()
+    [Theory]
+    [InlineData(MailProviderType.Gmail)]
+    [InlineData(MailProviderType.Yandex)]
+    public void InactiveDetection_ReusesSignalForInboxFreshnessWithoutChangingPresentation(MailProviderType provider)
     {
         using Fixture fixture = new();
+        fixture.First.Provider = provider;
 
         fixture.Handle(fixture.First, 1);
 

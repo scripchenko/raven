@@ -124,7 +124,7 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         }
 
         bool isSelectedAndActive = IsSelectedAndActive(account);
-        if (account.Provider is MailProviderType.Gmail)
+        if (account.Provider is MailProviderType.Gmail or MailProviderType.Yandex)
         {
             _inboxFreshness.OnNewMailDetected(
                 account.Id,
@@ -307,7 +307,7 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         if (account is not null)
         {
             _activityCoordinator.Clear(account);
-            if (account.Provider is MailProviderType.Gmail)
+            if (account.Provider is MailProviderType.Gmail or MailProviderType.Yandex)
             {
                 _inboxFreshness.RequireFreshInbox(account.Id);
             }

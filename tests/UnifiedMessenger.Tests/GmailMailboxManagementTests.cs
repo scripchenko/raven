@@ -423,6 +423,8 @@ public sealed class GmailMailboxManagementTests
         await viewModel.CurrentMessageLoadTask;
 
         Assert.True(viewModel.IsMessageDetailVisible);
+        Assert.True(viewModel.ShowArchiveAction);
+        Assert.DoesNotContain(viewModel.Folders, folder => folder.CanAcceptArchive);
         Assert.True(viewModel.ArchiveDetailCommand.CanExecute(null));
         Assert.True(viewModel.DeleteDetailCommand.CanExecute(null));
         Assert.True(viewModel.OpenLabelsForDetailCommand.CanExecute(null));

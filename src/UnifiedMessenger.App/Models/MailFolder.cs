@@ -9,7 +9,8 @@ public enum MailFolderKind
     Spam,
     Trash,
     Starred,
-    UserLabel
+    UserLabel,
+    Archive
 }
 
 public sealed record MailFolder
@@ -21,7 +22,8 @@ public sealed record MailFolder
         bool isAvailable,
         string providerLocator,
         bool supportsReadState,
-        bool showsUserLabelSectionHeader = false)
+        bool showsUserLabelSectionHeader = false,
+        bool canAcceptArchive = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
@@ -33,6 +35,7 @@ public sealed record MailFolder
         ProviderLocator = providerLocator;
         SupportsReadState = supportsReadState;
         ShowsUserLabelSectionHeader = showsUserLabelSectionHeader;
+        CanAcceptArchive = kind is MailFolderKind.Archive && canAcceptArchive;
     }
 
     public string Key { get; }
@@ -42,6 +45,7 @@ public sealed record MailFolder
     public bool SupportsReadState { get; }
     public bool IsUserLabel => Kind is MailFolderKind.UserLabel;
     public bool ShowsUserLabelSectionHeader { get; }
+    public bool CanAcceptArchive { get; }
 
     // Provider locators are deliberately not exposed to WPF bindings or public callers.
     internal string ProviderLocator { get; }
@@ -56,12 +60,14 @@ internal static class MailFolderCatalog
     public const string AllMailKey = "system:all-mail";
     public const string SpamKey = "system:spam";
     public const string TrashKey = "system:trash";
+    public const string ArchiveKey = "system:archive";
     private const string GmailUserLabelKeyPrefix = "gmail:user-label:";
 
     public static MailFolder Create(
         MailFolderKind kind,
         string providerLocator,
-        bool supportsReadState = true) =>
+        bool supportsReadState = true,
+        bool canAcceptArchive = false) =>
         new(
             kind switch
             {
@@ -72,6 +78,7 @@ internal static class MailFolderCatalog
                 MailFolderKind.AllMail => AllMailKey,
                 MailFolderKind.Spam => SpamKey,
                 MailFolderKind.Trash => TrashKey,
+                MailFolderKind.Archive => ArchiveKey,
                 _ => throw new ArgumentOutOfRangeException(nameof(kind))
             },
             kind switch
@@ -83,12 +90,14 @@ internal static class MailFolderCatalog
                 MailFolderKind.AllMail => "Вся почта",
                 MailFolderKind.Spam => "Спам",
                 MailFolderKind.Trash => "Корзина",
+                MailFolderKind.Archive => "Архив",
                 _ => throw new ArgumentOutOfRangeException(nameof(kind))
             },
             kind,
             true,
             providerLocator,
-            supportsReadState && kind is not MailFolderKind.Drafts);
+            supportsReadState && kind is not MailFolderKind.Drafts,
+            canAcceptArchive: canAcceptArchive);
 
     public static MailFolder CreateUserLabel(
         string labelId,

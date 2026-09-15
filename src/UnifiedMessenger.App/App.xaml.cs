@@ -252,6 +252,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IGmailMailboxManagementService, GmailMailboxManagementService>();
         services.AddSingleton<IGmailMailboxManagementService, GmailMailboxManagementService>();
         services.AddSingleton<IImapInboxClient, MailKitImapInboxClient>();
+        services.AddSingleton<ImapMailboxChangeTracker>();
+        services.AddSingleton<IImapMailboxSessionFactory, MailKitMailboxSessionFactory>();
+        services.AddSingleton<IMailMailboxManagementService, ImapMailboxManagementService>();
         services.AddSingleton<MailMessageSourceCache>();
         services.AddSingleton<GmailMailReadProvider>();
         services.AddSingleton<ImapMailReadProvider>();

@@ -13,7 +13,7 @@ public sealed class MailBackgroundPollingMonitorTests
     {
         MailAccount account = Account();
         SnapshotProvider provider = new();
-        provider.Enqueue(account.Id, Snapshot(8, "a", "b"));
+        provider.Enqueue(account.Id, Snapshot(8, "1", "2"));
         using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
         List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
 
@@ -28,8 +28,8 @@ public sealed class MailBackgroundPollingMonitorTests
     {
         MailAccount account = Account();
         SnapshotProvider provider = new();
-        provider.Enqueue(account.Id, Snapshot(2, "a", "b"));
-        provider.Enqueue(account.Id, Snapshot(3, "new", "a", "b"));
+        provider.Enqueue(account.Id, Snapshot(2, "1", "2"));
+        provider.Enqueue(account.Id, Snapshot(3, "3", "1", "2"));
         using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
         List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
 
@@ -46,9 +46,9 @@ public sealed class MailBackgroundPollingMonitorTests
     {
         MailAccount account = Account();
         SnapshotProvider provider = new();
-        provider.Enqueue(account.Id, Snapshot(1, "old"));
-        provider.Enqueue(account.Id, Snapshot(2, "new", "old"));
-        provider.Enqueue(account.Id, Snapshot(2, "new", "old"));
+        provider.Enqueue(account.Id, Snapshot(1, "1"));
+        provider.Enqueue(account.Id, Snapshot(2, "2", "1"));
+        provider.Enqueue(account.Id, Snapshot(2, "2", "1"));
         using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
         List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
 
@@ -64,8 +64,8 @@ public sealed class MailBackgroundPollingMonitorTests
     {
         MailAccount account = Account();
         SnapshotProvider provider = new();
-        provider.Enqueue(account.Id, Snapshot(1, "old"));
-        provider.Enqueue(account.Id, Snapshot(4, "three", "two", "one", "old"));
+        provider.Enqueue(account.Id, Snapshot(1, "1"));
+        provider.Enqueue(account.Id, Snapshot(4, "4", "3", "2", "1"));
         using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
         List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
 
@@ -80,8 +80,8 @@ public sealed class MailBackgroundPollingMonitorTests
     {
         MailAccount account = Account();
         SnapshotProvider provider = new();
-        provider.Enqueue(account.Id, Snapshot(9, "old"));
-        provider.Enqueue(account.Id, Snapshot(4, "new", "old"));
+        provider.Enqueue(account.Id, Snapshot(9, "1"));
+        provider.Enqueue(account.Id, Snapshot(4, "2", "1"));
         using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
         List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
 
@@ -98,8 +98,8 @@ public sealed class MailBackgroundPollingMonitorTests
     {
         MailAccount account = Account();
         SnapshotProvider provider = new();
-        provider.Enqueue(account.Id, Snapshot(5, "a", "b"));
-        provider.Enqueue(account.Id, Snapshot(4, "a", "b"));
+        provider.Enqueue(account.Id, Snapshot(5, "1", "2"));
+        provider.Enqueue(account.Id, Snapshot(4, "1", "2"));
         using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
         List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
 
@@ -117,7 +117,7 @@ public sealed class MailBackgroundPollingMonitorTests
         MailAccount healthy = Account(MailProviderType.Yandex);
         SnapshotProvider provider = new();
         provider.EnqueueFailure(failing.Id);
-        provider.Enqueue(healthy.Id, Snapshot(7, "healthy"));
+        provider.Enqueue(healthy.Id, Snapshot(7, "1"));
         using MailBackgroundPollingMonitor monitor = CreateMonitor([failing, healthy], provider);
 
         await monitor.PollOnceAsync();
@@ -147,13 +147,13 @@ public sealed class MailBackgroundPollingMonitorTests
     {
         MailAccount account = Account();
         SnapshotProvider provider = new();
-        provider.Enqueue(account.Id, Snapshot(1, "old"));
+        provider.Enqueue(account.Id, Snapshot(1, "1"));
         using (MailBackgroundPollingMonitor first = CreateMonitor([account], provider))
         {
             await first.PollOnceAsync();
         }
 
-        provider.Enqueue(account.Id, Snapshot(2, "new-since-previous-process", "old"));
+        provider.Enqueue(account.Id, Snapshot(2, "2", "1"));
         using MailBackgroundPollingMonitor restarted = CreateMonitor([account], provider);
         List<MailNewMessageDetectedEventArgs> events = Subscribe(restarted);
 
@@ -224,7 +224,7 @@ public sealed class MailBackgroundPollingMonitorTests
     {
         MailAccount account = Account();
         SnapshotProvider provider = new();
-        provider.Enqueue(account.Id, Snapshot(1, "baseline"));
+        provider.Enqueue(account.Id, Snapshot(1, "1"));
         using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
 
         monitor.Start();
@@ -293,16 +293,119 @@ public sealed class MailBackgroundPollingMonitorTests
         Assert.Equal("imap.yandex.com", client.Server?.Host);
     }
 
+    [Fact]
+    public async Task YandexRemovingNewestMail_DoesNotDetectOlderUidsExposedBySlidingWindow()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(2, "100", "101"));
+        provider.Enqueue(account.Id, Snapshot(1, "99", "100"));
+        provider.Enqueue(account.Id, Snapshot(2, "102", "100"));
+        using var monitor = CreateMonitor([account], provider);
+        var events = Subscribe(monitor);
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+        Assert.Empty(events);
+        await monitor.PollOnceAsync();
+        Assert.Equal(1, Assert.Single(events).NewMessageCount);
+    }
+
+    [Fact]
+    public async Task YandexRestoreSuppressesOnlyMappedUid_NotConcurrentNewMailOrOtherAccount()
+    {
+        MailAccount first = Account();
+        MailAccount second = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(first.Id, Snapshot(1, "100"));
+        provider.Enqueue(second.Id, Snapshot(1, "100"));
+        provider.Enqueue(first.Id, Snapshot(3, "100", "101", "102"));
+        provider.Enqueue(second.Id, Snapshot(2, "100", "101"));
+        ImapMailboxChangeTracker tracker = new();
+        using var monitor = CreateMonitor([first, second], provider, tracker);
+        var events = Subscribe(monitor);
+        await monitor.PollOnceAsync();
+        using (await tracker.EnterAsync(first.Id, CancellationToken.None))
+        {
+            tracker.RecordInboxMove(first.Id, 812, [101]);
+        }
+        await monitor.PollOnceAsync();
+        Assert.Equal(2, events.Count);
+        Assert.All(events, item => Assert.Equal(1, item.NewMessageCount));
+        Assert.Contains(events, item => item.MailAccountId == first.Id);
+        Assert.Contains(events, item => item.MailAccountId == second.Id);
+    }
+
+    [Fact]
+    public async Task YandexPollingWaitsForMutationUidMapping()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "100"));
+        provider.Enqueue(account.Id, Snapshot(2, "100", "101"));
+        ImapMailboxChangeTracker tracker = new();
+        using var monitor = CreateMonitor([account], provider, tracker);
+        var events = Subscribe(monitor);
+        await monitor.PollOnceAsync();
+        IDisposable lease = await tracker.EnterAsync(account.Id, CancellationToken.None);
+        Task poll = monitor.PollOnceAsync();
+        Assert.False(poll.IsCompleted);
+        Assert.Equal(1, provider.PollCount(account.Id));
+        tracker.RecordInboxMove(account.Id, 812, [101]);
+        lease.Dispose();
+        await poll;
+        Assert.Empty(events);
+    }
+
+    [Fact]
+    public async Task YandexAmbiguousMoveRebaselinesOnce_ThenDetectsNewMailNormally()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "100"));
+        provider.Enqueue(account.Id, Snapshot(2, "100", "101"));
+        provider.Enqueue(account.Id, Snapshot(3, "100", "101", "102"));
+        ImapMailboxChangeTracker tracker = new();
+        using var monitor = CreateMonitor([account], provider, tracker);
+        var events = Subscribe(monitor);
+        await monitor.PollOnceAsync();
+        tracker.RequireBaseline(account.Id);
+        await monitor.PollOnceAsync();
+        Assert.Empty(events);
+        await monitor.PollOnceAsync();
+        Assert.Equal(1, Assert.Single(events).NewMessageCount);
+    }
+
+    [Fact]
+    public async Task YandexDisableReenableAndUidValidityChange_BaselineWithoutFlood()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "100"));
+        provider.Enqueue(account.Id, Snapshot(2, "100", "101"));
+        provider.Enqueue(account.Id, Snapshot(3, "500", "501") with { IdentityScope = "imap-inbox:999" });
+        using var monitor = CreateMonitor([account], provider);
+        var events = Subscribe(monitor);
+        await monitor.PollOnceAsync();
+        account.IsEnabled = false;
+        await monitor.PollOnceAsync();
+        account.IsEnabled = true;
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+        Assert.Empty(events);
+    }
+
     private static MailBackgroundPollingMonitor CreateMonitor(
         IReadOnlyList<MailAccount> accounts,
-        SnapshotProvider provider)
+        SnapshotProvider provider,
+        ImapMailboxChangeTracker? changes = null)
     {
         TestSettingsStore settings = new(new AppSettings { MailAccounts = accounts.ToList() });
         return new MailBackgroundPollingMonitor(
             settings,
             new TestProviderFactory(provider),
             new ImmediateDispatcher(),
-            TimeProvider.System);
+            TimeProvider.System,
+            changes);
     }
 
     private static List<MailNewMessageDetectedEventArgs> Subscribe(MailBackgroundPollingMonitor monitor)
@@ -313,7 +416,7 @@ public sealed class MailBackgroundPollingMonitorTests
     }
 
     private static MailInboxTechnicalSnapshot Snapshot(int unreadCount, params string[] identities) =>
-        new(unreadCount, "scope-1", identities);
+        new(unreadCount, "imap-inbox:812", identities);
 
     private static MailAccount Account(MailProviderType provider = MailProviderType.Yandex) =>
         new()

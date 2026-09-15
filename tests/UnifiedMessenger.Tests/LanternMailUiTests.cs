@@ -11,6 +11,32 @@ namespace UnifiedMessenger.Tests;
 public sealed class LanternMailUiTests
 {
     [Fact]
+    public void StarButtons_AreGmailOnly_InRowSelectionAndDetail()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile("src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
+        XElement[] buttons = view.Descendants().Where(element => element.Name.LocalName == "Button"
+            && ((string?)element.Attribute("Command")) is string command
+            && (command.Contains("ToggleStarCommand", StringComparison.Ordinal)
+                || command.Contains("ToggleSelectedStarCommand", StringComparison.Ordinal))).ToArray();
+        Assert.Equal(3, buttons.Length);
+        Assert.All(buttons, button => Assert.Contains("IsGmailMailboxAvailable",
+            (string?)button.Attribute("Visibility") ?? string.Empty, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BothArchiveButtons_UseAccountScopedAvailability()
+    {
+        XDocument view = XDocument.Load(FindRepositoryFile("src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
+        foreach (string command in new[] { "ArchiveSelectedCommand", "ArchiveDetailCommand" })
+        {
+            XElement button = Assert.Single(view.Descendants(), element =>
+                element.Name.LocalName == "Button" && (string?)element.Attribute("Command") == $"{{Binding {command}}}");
+            Assert.Equal("{Binding ShowArchiveAction, Converter={StaticResource BooleanToVisibilityConverter}}",
+                (string?)button.Attribute("Visibility"));
+        }
+    }
+
+    [Fact]
     public async Task YandexPresentationFlag_IsProviderSpecificAndDoesNotExposeGmailSearch()
     {
         foreach (MailProviderType providerType in Enum.GetValues<MailProviderType>())
@@ -376,11 +402,11 @@ public sealed class LanternMailUiTests
         Assert.Contains(
             yandexSpanTrigger.Elements(presentation + "Setter"),
             setter => (string?)setter.Attribute("Property") == "Grid.Column"
-                && (string?)setter.Attribute("Value") == "0");
+                && (string?)setter.Attribute("Value") == "1");
         Assert.Contains(
             yandexSpanTrigger.Elements(presentation + "Setter"),
             setter => (string?)setter.Attribute("Property") == "Grid.ColumnSpan"
-                && (string?)setter.Attribute("Value") == "3");
+                && (string?)setter.Attribute("Value") == "2");
         Assert.Contains("Value=\"2*\"", senderColumn.ToString(), StringComparison.Ordinal);
         Assert.Contains("Value=\"4*\"", contentColumn.ToString(), StringComparison.Ordinal);
         Assert.Contains("Value=\"80\"", contentColumn.ToString(), StringComparison.Ordinal);
@@ -543,6 +569,7 @@ public sealed class LanternMailUiTests
             "MarkSelectedNotSpamCommand",
             "MarkSelectedReadCommand",
             "MarkSelectedUnreadCommand",
+            "ToggleYandexSelectedReadStateCommand",
             "ToggleSelectedStarCommand",
             "OpenLabelsForSelectionCommand",
             "ClearSelectionCommand"
@@ -557,6 +584,26 @@ public sealed class LanternMailUiTests
             Assert.False(string.IsNullOrWhiteSpace((string?)button.Attribute("ToolTip")));
             Assert.False(string.IsNullOrWhiteSpace((string?)button.Attribute("AutomationProperties.Name")));
         }
+
+        XElement yandexSelectionToggle = Assert.Single(
+            listToolbar.Descendants(presentation + "Button"),
+            candidate => (string?)candidate.Attribute("Command") == "{Binding ToggleYandexSelectedReadStateCommand}");
+        Assert.Contains("ShowYandexSelectedReadStateAction", (string?)yandexSelectionToggle.Attribute("Visibility"));
+        Assert.Contains("YandexSelectedReadStateActionText", (string?)yandexSelectionToggle.Attribute("ToolTip"));
+        Assert.All(
+            listToolbar.Descendants(presentation + "Button")
+                .Where(candidate => (string?)candidate.Attribute("Command") is "{Binding MarkSelectedReadCommand}"
+                    or "{Binding MarkSelectedUnreadCommand}"),
+            candidate => Assert.Contains("IsGmailMailboxAvailable", (string?)candidate.Attribute("Visibility")));
+        XElement yandexDetailToggle = Assert.Single(
+            detailToolbar.Descendants(presentation + "Button"),
+            candidate => (string?)candidate.Attribute("Command") == "{Binding ToggleYandexDetailReadStateCommand}");
+        Assert.Contains("ShowYandexDetailReadStateAction", (string?)yandexDetailToggle.Attribute("Visibility"));
+        Assert.Contains("YandexDetailReadStateActionText", (string?)yandexDetailToggle.Attribute("ToolTip"));
+        XElement standardDetailReadState = Assert.Single(
+            detailToolbar.Descendants(presentation + "Button"),
+            candidate => (string?)candidate.Attribute("Command") == "{Binding SetReadStateCommand}");
+        Assert.Contains("ShowStandardReadStateAction", (string?)standardDetailReadState.Attribute("Visibility"));
 
         Assert.DoesNotContain("Content=\"Архив\"", listToolbar.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Content=\"Удалить\"", listToolbar.ToString(), StringComparison.Ordinal);
@@ -653,6 +700,7 @@ public sealed class LanternMailUiTests
             button => Assert.Equal("{Binding ToggleStarCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding OpenLabelsForDetailCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding SetReadStateCommand}", (string?)button.Attribute("Command")),
+            button => Assert.Equal("{Binding ToggleYandexDetailReadStateCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding Compose.ReplyCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding Compose.ReplyAllCommand}", (string?)button.Attribute("Command")),
             button => Assert.Equal("{Binding Compose.ForwardCommand}", (string?)button.Attribute("Command")),
@@ -691,7 +739,7 @@ public sealed class LanternMailUiTests
         XElement[] vectorButtons = buttons
             .Where(button => button.Elements(presentation + "Viewbox").Any())
             .ToArray();
-        Assert.Equal(12, vectorButtons.Length);
+        Assert.Equal(13, vectorButtons.Length);
         Assert.All(vectorButtons, button =>
         {
             XElement viewbox = Assert.Single(button.Elements(presentation + "Viewbox"));

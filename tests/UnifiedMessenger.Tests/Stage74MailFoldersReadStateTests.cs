@@ -162,6 +162,26 @@ public sealed class Stage74MailFoldersReadStateTests
         Assert.Equal("server-junk", folders.Single(folder => folder.Kind is MailFolderKind.Spam).ProviderLocator);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ImapArchiveAvailability_PropagatesServerCapabilityToFolder(bool canArchive)
+    {
+        FakeImapClient client = new()
+        {
+            Folders =
+            [
+                new(MailFolderKind.Inbox, "INBOX"),
+                new(MailFolderKind.Archive, "server/store-17") { CanAcceptArchive = canArchive }
+            ]
+        };
+        IReadOnlyList<MailFolder> folders = await CreateImapProvider(client).GetFoldersAsync(ImapAccount());
+        MailFolder archive = Assert.Single(folders, folder => folder.Kind is MailFolderKind.Archive);
+        Assert.Equal(canArchive, archive.CanAcceptArchive);
+        Assert.Equal("server/store-17", archive.ProviderLocator);
+        Assert.False(folders.Single(folder => folder.Kind is MailFolderKind.Inbox).CanAcceptArchive);
+    }
+
     [Fact]
     public async Task ImapMissingSpecialFolder_DoesNotCrashOrGuessName()
     {
