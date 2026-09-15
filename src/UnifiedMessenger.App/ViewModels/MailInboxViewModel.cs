@@ -656,7 +656,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && catalog.HasLoaded
         && catalog.Folders.Any(folder => folder.IsAvailable && folder.CanAcceptArchive);
     public bool IsSearchAvailable =>
-        ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }
+        ActiveAccount is { Provider: MailProviderType.Gmail or MailProviderType.Yandex, IsEnabled: true }
         && !IsComposeOpen;
     public bool IsSearchActive =>
         ActiveAccount is MailAccount account
@@ -1260,7 +1260,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             return;
         }
 
-        if (ActiveAccount is not { Provider: MailProviderType.Gmail, IsEnabled: true } account
+        if (ActiveAccount is not { Provider: MailProviderType.Gmail or MailProviderType.Yandex, IsEnabled: true } account
             || SelectedFolder is null
             || _providerFactory.Get(account.Provider) is not IMailSearchProvider)
         {
@@ -1405,8 +1405,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 return false;
             }
 
+            MailFolder folder = SelectedFolder
+                ?? throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка недоступна.");
             MailPage<MailMessageSummary> page = await searchProvider.SearchAsync(
                 account,
+                folder,
                 query,
                 request.Token,
                 PageSize,
@@ -1441,7 +1444,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 state.ContentMode = MailInboxPresentationMode.MessageList;
             }
 
-            state.ApplyPage(request, page.ContinuationToken, totalCount: null);
+            state.ApplyPage(
+                request,
+                page.ContinuationToken,
+                account.Provider is MailProviderType.Yandex
+                    ? page.TotalCount ?? state.TotalCount
+                    : null);
             state.HasLoaded = true;
             state.ListErrorMessage = null;
             state.FailureKind = null;
@@ -1493,7 +1501,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             await LoadSearchPageAsync(
                 account,
                 searchState,
-                searchState.CurrentPageRequest,
+                account.Provider is MailProviderType.Yandex
+                    ? PageRequest.First
+                    : searchState.CurrentPageRequest,
                 _viewVersion,
                 GetActivationToken());
             return;
@@ -1518,7 +1528,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ContinuationToken = null;
         ListErrorMessage = null;
         FailureKind = null;
-        if (IsTrackedInbox(account, folder) && state.PageIndex == 0)
+        if (account.Provider is MailProviderType.Yandex)
+        {
+            state.PrepareRefresh();
+            await LoadPageAsync(account, folder, state, PageRequest.First, _viewVersion, GetActivationToken());
+        }
+        else if (IsTrackedInbox(account, folder) && state.PageIndex == 0)
         {
             await RefreshInboxFirstPageAsync(account, folder, state, _viewVersion, GetActivationToken());
         }
@@ -1977,7 +1992,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 state.Messages.Add(retained);
             }
 
-            state.ApplyPage(request, page.ContinuationToken, page.TotalCount);
+            state.ApplyPage(
+                request,
+                page.ContinuationToken,
+                account.Provider is MailProviderType.Yandex && request.PageIndex > 0
+                    ? page.TotalCount ?? state.TotalCount
+                    : page.TotalCount);
             state.HasLoaded = true;
             state.ListErrorMessage = null;
             state.FailureKind = null;
@@ -3320,7 +3340,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         CancellationToken cancellationToken = cancellation.Token;
         _mutationCancellation = cancellation;
         long version = _viewVersion;
-        FolderState state = GetState(account.Id, folder.Key);
+        bool searchWasActive = IsSearchActive && _searchState is not null;
+        FolderState folderState = GetState(account.Id, folder.Key);
+        FolderState state = searchWasActive ? _searchState! : folderState;
         Dictionary<string, MailMessageSummary> sourceMessages = state.Messages
             .Where(message => messageKeys.Contains(message.MessageKey, StringComparer.Ordinal))
             .ToDictionary(message => message.MessageKey, StringComparer.Ordinal);
@@ -3356,6 +3378,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                         state.ContentMode = MailInboxPresentationMode.MessageList;
                     }
                     state.MarkStale();
+                    if (searchWasActive)
+                    {
+                        folderState.MarkStale();
+                    }
                     foreach (MailMessageSummary message in state.Messages)
                     {
                         message.IsSelected = false;
@@ -3389,6 +3415,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                         }
                     }
                     state.HasLoaded = false;
+                    if (searchWasActive)
+                    {
+                        folderState.MarkStale();
+                    }
                 }
             }
 
@@ -3399,10 +3429,28 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             ApplyState(state);
             if (result.RequiresRefresh || succeeded.Count > 0)
             {
-                // A move changes sequence indexes. Reset page history instead of
-                // reusing a cursor from before the mutation.
-                await LoadPageAsync(account, folder, state,
-                    structural ? PageRequest.First : currentPage, version, GetActivationToken());
+                // Structural changes create a fresh UID snapshot. Flag changes may
+                // retain the confirmed snapshot, but the visible search is always
+                // reconciled against the server after the mutation.
+                if (searchWasActive)
+                {
+                    await LoadSearchPageAsync(
+                        account,
+                        state,
+                        structural ? PageRequest.First : currentPage,
+                        version,
+                        GetActivationToken());
+                }
+                else
+                {
+                    await LoadPageAsync(
+                        account,
+                        folder,
+                        state,
+                        structural ? PageRequest.First : currentPage,
+                        version,
+                        GetActivationToken());
+                }
                 if (result.DestinationFolder is MailFolderKind.Inbox
                     && IsCurrent(account.Id, folder.Key, version, cancellationToken))
                 {
@@ -3439,13 +3487,25 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 MailboxActionErrorMessage =
                     "Не удалось подтвердить изменение. Исходная и целевая папки будут обновлены без повторной отправки команды.";
                 ApplyState(state);
-                await LoadPageAsync(
-                    account,
-                    folder,
-                    state,
-                    PageRequest.First,
-                    version,
-                    GetActivationToken());
+                if (searchWasActive)
+                {
+                    await LoadSearchPageAsync(
+                        account,
+                        state,
+                        PageRequest.First,
+                        version,
+                        GetActivationToken());
+                }
+                else
+                {
+                    await LoadPageAsync(
+                        account,
+                        folder,
+                        state,
+                        PageRequest.First,
+                        version,
+                        GetActivationToken());
+                }
             }
         }
         finally
@@ -4042,7 +4102,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && !(IsYandexMailbox && IsMailboxChanging);
     private bool CanRetry() => IsActive && HasListError && !RequiresGmailReauthentication && !IsListLoading;
     private bool CanSearch() =>
-        ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }
+        ActiveAccount is { Provider: MailProviderType.Gmail or MailProviderType.Yandex, IsEnabled: true }
         && !IsComposeOpen
         && (IsSearchActive || !string.IsNullOrWhiteSpace(SearchText));
     private bool CanClearSearchCommand() => CanClearSearch;

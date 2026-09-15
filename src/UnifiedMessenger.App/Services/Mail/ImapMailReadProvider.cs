@@ -1,7 +1,10 @@
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using MailKit;
 using MailKit.Net.Imap;
+using MailKit.Search;
 using MailKit.Security;
 using MimeKit;
 using UnifiedMessenger.App.Models;
@@ -21,7 +24,10 @@ internal sealed record ImapSummaryData(
     public MailMessageAttachmentSummary AttachmentSummary { get; init; } = MailMessageAttachmentSummary.Empty;
 }
 
-internal sealed record ImapInboxPageData(IReadOnlyList<ImapSummaryData> Items, string? NextCursor);
+internal sealed record ImapInboxPageData(
+    IReadOnlyList<ImapSummaryData> Items,
+    string? NextCursor,
+    long? TotalCount = null);
 internal sealed record ImapMessageData(MimeMessage Message, bool IsUnread);
 internal sealed record ImapFolderDescriptor(MailFolderKind Kind, string FullName)
 {
@@ -82,6 +88,24 @@ internal interface IImapInboxClient
         return GetInboxPageAsync(server, secret, cursor, pageSize, cancellationToken);
     }
 
+    Task<ImapInboxPageData> GetUidSafeFolderPageAsync(
+        MailServerSettings server,
+        string secret,
+        ImapFolderDescriptor folder,
+        string? query,
+        string? cursor,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            return Task.FromException<ImapInboxPageData>(
+                new MailReadException(MailReadFailureKind.InvalidSearchQuery, "Поиск для этого аккаунта недоступен."));
+        }
+
+        return GetFolderPageAsync(server, secret, folder, cursor, pageSize, cancellationToken);
+    }
+
     Task<ImapMessageData> GetMessageAsync(
         MailServerSettings server,
         string secret,
@@ -115,7 +139,7 @@ internal sealed class ImapMailReadProvider(
     IMailProviderFactory providerFactory,
     IImapInboxClient inboxClient,
     IMailContentExtractor contentExtractor,
-    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailSearchProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider
 {
     private const string MessageKeyPrefix = "imap:";
     private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
@@ -191,16 +215,72 @@ internal sealed class ImapMailReadProvider(
         MailServerSettings server = ResolveImapSettings(account, pageSize);
         ValidateFolder(folder);
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
-        ImapInboxPageData page = await inboxClient.GetFolderPageAsync(
+        ImapInboxPageData page = account.Provider is MailProviderType.Yandex
+            ? await inboxClient.GetUidSafeFolderPageAsync(
+                server,
+                credential.Secret,
+                ToDescriptor(folder),
+                query: null,
+                continuationToken,
+                pageSize,
+                cancellationToken)
+            : await inboxClient.GetFolderPageAsync(
+                server,
+                credential.Secret,
+                ToDescriptor(folder),
+                continuationToken,
+                pageSize,
+                cancellationToken);
+        return new MailPage<MailMessageSummary>(
+            page.Items.Select(item => MapSummary(folder.Kind, item)).ToArray(),
+            page.NextCursor,
+            page.TotalCount);
+    }
+
+    public Task<MailPage<MailMessageSummary>> SearchAsync(
+        MailAccount account,
+        string query,
+        string? continuationToken,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        SearchAsync(
+            account,
+            MailFolderCatalog.Create(MailFolderKind.Inbox, "INBOX"),
+            query,
+            continuationToken,
+            pageSize,
+            cancellationToken);
+
+    public async Task<MailPage<MailMessageSummary>> SearchAsync(
+        MailAccount account,
+        MailFolder folder,
+        string query,
+        string? continuationToken,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        MailServerSettings server = ResolveImapSettings(account, pageSize);
+        ValidateFolder(folder);
+        if (account.Provider is not MailProviderType.Yandex || string.IsNullOrWhiteSpace(query))
+        {
+            throw new MailReadException(
+                MailReadFailureKind.InvalidSearchQuery,
+                "Не удалось выполнить поиск. Проверьте запрос.");
+        }
+
+        MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+        ImapInboxPageData page = await inboxClient.GetUidSafeFolderPageAsync(
             server,
             credential.Secret,
             ToDescriptor(folder),
+            query.Trim(),
             continuationToken,
             pageSize,
             cancellationToken);
         return new MailPage<MailMessageSummary>(
             page.Items.Select(item => MapSummary(folder.Kind, item)).ToArray(),
-            page.NextCursor);
+            page.NextCursor,
+            page.TotalCount);
     }
 
     public Task<MailMessageContent> GetMessageAsync(
@@ -454,6 +534,8 @@ internal sealed class ImapMailReadProvider(
 internal sealed class MailKitImapInboxClient : IImapInboxClient
 {
     private const string CursorPrefix = "imap-index:";
+    private const string UidCursorPrefix = "imap-uid:1:";
+    private const uint UidSearchWindowSize = 2048;
     internal const int BackgroundSnapshotMessageLimit = 100;
     internal static FolderAccess InboxAccess => FolderAccess.ReadOnly;
     internal static FolderAccess MutationAccess => FolderAccess.ReadWrite;
@@ -839,6 +921,264 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             CanAcceptArchive = (capabilities & (ImapCapabilities.Move | ImapCapabilities.UidPlus)) != 0
         };
     }
+
+    public async Task<ImapInboxPageData> GetUidSafeFolderPageAsync(
+        MailServerSettings server,
+        string secret,
+        ImapFolderDescriptor folder,
+        string? query,
+        string? cursor,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        using ImapClient client = new();
+        try
+        {
+            await ConnectAndAuthenticateAsync(client, server, secret, cancellationToken);
+            IMailFolder mailFolder = ResolveFolder(client, folder);
+            FolderAccess access = await mailFolder.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
+            if (access != FolderAccess.ReadOnly)
+            {
+                throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Сервер не открыл папку только для чтения.");
+            }
+
+            string normalizedQuery = query?.Trim() ?? string.Empty;
+            string scope = CreateUidCursorScope(folder.FullName, normalizedQuery);
+            SearchQuery searchQuery = normalizedQuery.Length == 0
+                ? SearchQuery.All
+                : SearchQuery.MessageContains(normalizedQuery);
+            ImapUidPageCursor? parsed = ParseUidCursor(cursor, scope);
+            uint upperInclusive;
+            uint snapshotMaxUid;
+            long totalCount;
+            long? displayedTotalCount;
+            IReadOnlyList<UniqueId>? initialMatches = null;
+            bool supportsExtendedSearch = client.Capabilities.HasFlag(ImapCapabilities.ESearch);
+            if (parsed is ImapUidPageCursor continuation)
+            {
+                EnsureUidCursorValidity(continuation, mailFolder.UidValidity);
+
+                snapshotMaxUid = continuation.SnapshotMaxUid;
+                upperInclusive = continuation.UpperInclusive;
+                totalCount = continuation.TotalCount;
+                if (supportsExtendedSearch)
+                {
+                    SearchResults currentSnapshot = await mailFolder.SearchAsync(
+                        SearchOptions.Count,
+                        new UniqueIdRange(new UniqueId(1), new UniqueId(snapshotMaxUid)),
+                        searchQuery,
+                        cancellationToken);
+                    totalCount = currentSnapshot.Count;
+                    displayedTotalCount = totalCount;
+                }
+                else
+                {
+                    // The initial snapshot total remains truthful for navigation.
+                    // Local mailbox mutations adjust the displayed count in the VM;
+                    // avoid overwriting that adjustment with a stale cursor value.
+                    displayedTotalCount = null;
+                }
+            }
+            else
+            {
+                if (normalizedQuery.Length == 0)
+                {
+                    totalCount = mailFolder.Count;
+                    UniqueId? uidNext = mailFolder.UidNext;
+                    snapshotMaxUid = uidNext is { IsValid: true } && uidNext.Value.Id > 1
+                        ? uidNext.Value.Id - 1
+                        : 0;
+                    if (totalCount > 0 && snapshotMaxUid == 0)
+                    {
+                        IList<UniqueId> all = await mailFolder.SearchAsync(SearchQuery.All, cancellationToken);
+                        snapshotMaxUid = all.Where(uid => uid.IsValid).Select(uid => uid.Id).DefaultIfEmpty().Max();
+                    }
+                }
+                else if (supportsExtendedSearch)
+                {
+                    SearchResults snapshot = await mailFolder.SearchAsync(
+                        SearchOptions.Count | SearchOptions.Max,
+                        searchQuery,
+                        cancellationToken);
+                    totalCount = snapshot.Count;
+                    snapshotMaxUid = snapshot.Max?.Id ?? 0;
+                }
+                else
+                {
+                    IList<UniqueId> matches = await mailFolder.SearchAsync(searchQuery, cancellationToken);
+                    initialMatches = SelectNewestUids(matches, uint.MaxValue, pageSize + 1);
+                    totalCount = matches.LongCount(uid => uid.IsValid);
+                    snapshotMaxUid = matches.Where(uid => uid.IsValid).Select(uid => uid.Id).DefaultIfEmpty().Max();
+                }
+
+                upperInclusive = snapshotMaxUid;
+                displayedTotalCount = totalCount;
+            }
+
+            if (upperInclusive == 0 || snapshotMaxUid == 0 || totalCount == 0)
+            {
+                return new ImapInboxPageData([], null, displayedTotalCount);
+            }
+
+            IReadOnlyList<UniqueId> candidates = initialMatches ?? await FindPageUidsAsync(
+                    mailFolder,
+                    searchQuery,
+                    Math.Min(upperInclusive, snapshotMaxUid),
+                    pageSize + 1,
+                    cancellationToken);
+            UniqueId[] pageUids = candidates.Take(pageSize).ToArray();
+            if (pageUids.Length == 0)
+            {
+                return new ImapInboxPageData([], null, displayedTotalCount);
+            }
+
+            IList<IMessageSummary> fetched = await mailFolder.FetchAsync(
+                pageUids,
+                MessageSummaryItems.UniqueId
+                    | MessageSummaryItems.Envelope
+                    | MessageSummaryItems.InternalDate
+                    | MessageSummaryItems.Flags
+                    | MessageSummaryItems.BodyStructure,
+                cancellationToken);
+            ImapSummaryData[] summaries = fetched
+                .Where(summary => summary.UniqueId.IsValid)
+                .Select(summary => MapProtocolSummary(mailFolder.UidValidity, summary))
+                .OrderByDescending(summary => summary.UniqueId)
+                .ToArray();
+            bool hasMore = candidates.Count > pageSize;
+            uint nextUpperInclusive = pageUids.Min(uid => uid.Id) - 1;
+            string? nextCursor = hasMore && nextUpperInclusive > 0
+                ? CreateUidCursor(scope, mailFolder.UidValidity, snapshotMaxUid, nextUpperInclusive, totalCount)
+                : null;
+            return new ImapInboxPageData(summaries, nextCursor, displayedTotalCount);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (MailReadException)
+        {
+            throw;
+        }
+        catch (MailKit.Security.AuthenticationException)
+        {
+            throw new MailReadException(MailReadFailureKind.AuthenticationFailed, "Не удалось войти в почту. Проверьте пароль приложения.");
+        }
+        catch (Exception exception) when (IsExpectedConnectionException(exception))
+        {
+            throw new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                string.IsNullOrWhiteSpace(query)
+                    ? "Не удалось загрузить почту. Проверьте подключение к сети."
+                    : "Не удалось выполнить поиск. Проверьте подключение к сети.");
+        }
+        finally
+        {
+            await DisconnectQuietlyAsync(client);
+        }
+    }
+
+    private static async Task<IReadOnlyList<UniqueId>> FindPageUidsAsync(
+        IMailFolder folder,
+        SearchQuery query,
+        uint upperInclusive,
+        int requestedCount,
+        CancellationToken cancellationToken)
+    {
+        List<UniqueId> matches = new(requestedCount);
+        uint high = upperInclusive;
+        while (high > 0 && matches.Count < requestedCount)
+        {
+            uint low = high >= UidSearchWindowSize ? high - UidSearchWindowSize + 1 : 1;
+            UniqueIdRange range = new(new UniqueId(low), new UniqueId(high));
+            IList<UniqueId> results = await folder.SearchAsync(range, query, cancellationToken);
+            matches.AddRange(SelectNewestUids(
+                results,
+                high,
+                requestedCount - matches.Count));
+            high = low == 1 ? 0 : low - 1;
+        }
+
+        return matches;
+    }
+
+    internal static IReadOnlyList<UniqueId> SelectNewestUids(
+        IEnumerable<UniqueId> uniqueIds,
+        uint upperInclusive,
+        int requestedCount) =>
+        uniqueIds
+            .Where(uid => uid.IsValid && uid.Id <= upperInclusive)
+            .Distinct()
+            .OrderByDescending(uid => uid.Id)
+            .Take(Math.Max(0, requestedCount))
+            .ToArray();
+
+    internal static string CreateUidCursorScope(string folderLocator, string query)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(folderLocator + "\0" + query));
+        return Convert.ToHexString(hash.AsSpan(0, 8));
+    }
+
+    internal static string CreateUidCursor(
+        string scope,
+        uint uidValidity,
+        uint snapshotMaxUid,
+        uint upperInclusive,
+        long totalCount) =>
+        string.Join(
+            ':',
+            UidCursorPrefix.TrimEnd(':'),
+            scope,
+            uidValidity.ToString(CultureInfo.InvariantCulture),
+            snapshotMaxUid.ToString(CultureInfo.InvariantCulture),
+            upperInclusive.ToString(CultureInfo.InvariantCulture),
+            totalCount.ToString(CultureInfo.InvariantCulture));
+
+    internal static ImapUidPageCursor? ParseUidCursor(string? cursor, string expectedScope)
+    {
+        if (string.IsNullOrWhiteSpace(cursor))
+        {
+            return null;
+        }
+
+        string[] parts = cursor.Split(':');
+        if (parts.Length != 7
+            || !string.Equals(parts[0], "imap-uid", StringComparison.Ordinal)
+            || !string.Equals(parts[1], "1", StringComparison.Ordinal)
+            || !string.Equals(parts[2], expectedScope, StringComparison.Ordinal)
+            || !uint.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out uint uidValidity)
+            || !uint.TryParse(parts[4], NumberStyles.None, CultureInfo.InvariantCulture, out uint snapshotMaxUid)
+            || !uint.TryParse(parts[5], NumberStyles.None, CultureInfo.InvariantCulture, out uint upperInclusive)
+            || !long.TryParse(parts[6], NumberStyles.None, CultureInfo.InvariantCulture, out long totalCount)
+            || uidValidity == 0
+            || snapshotMaxUid == 0
+            || upperInclusive == 0
+            || upperInclusive >= snapshotMaxUid
+            || totalCount < 0)
+        {
+            throw new MailReadException(
+                MailReadFailureKind.InvalidConfiguration,
+                "Не удалось продолжить загрузку списка писем. Обновите папку.");
+        }
+
+        return new ImapUidPageCursor(uidValidity, snapshotMaxUid, upperInclusive, totalCount);
+    }
+
+    internal static void EnsureUidCursorValidity(ImapUidPageCursor cursor, uint currentUidValidity)
+    {
+        if (cursor.UidValidity != currentUidValidity)
+        {
+            throw new MailReadException(
+                MailReadFailureKind.InvalidConfiguration,
+                "Состав папки изменился. Обновите её, чтобы начать загрузку заново.");
+        }
+    }
+
+    internal readonly record struct ImapUidPageCursor(
+        uint UidValidity,
+        uint SnapshotMaxUid,
+        uint UpperInclusive,
+        long TotalCount);
 
     private static void AddSpecialFolder(
         ImapClient client,

@@ -130,6 +130,15 @@ public interface IMailSearchProvider
         string? continuationToken,
         int pageSize,
         CancellationToken cancellationToken = default);
+
+    Task<MailPage<MailMessageSummary>> SearchAsync(
+        MailAccount account,
+        MailFolder folder,
+        string query,
+        string? continuationToken,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        SearchAsync(account, query, continuationToken, pageSize, cancellationToken);
 }
 
 public enum GmailReauthenticationOutcome

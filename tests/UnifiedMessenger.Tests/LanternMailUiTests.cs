@@ -37,7 +37,7 @@ public sealed class LanternMailUiTests
     }
 
     [Fact]
-    public async Task YandexPresentationFlag_IsProviderSpecificAndDoesNotExposeGmailSearch()
+    public async Task YandexPresentationFlag_IsProviderSpecificAndExposesSharedSearch()
     {
         foreach (MailProviderType providerType in Enum.GetValues<MailProviderType>())
         {
@@ -47,10 +47,9 @@ public sealed class LanternMailUiTests
             await viewModel.ActivateAsync(Account(providerType));
 
             Assert.Equal(providerType is MailProviderType.Yandex, viewModel.IsYandexMailbox);
-            if (providerType is MailProviderType.Yandex)
-            {
-                Assert.False(viewModel.IsSearchAvailable);
-            }
+            Assert.Equal(
+                providerType is MailProviderType.Gmail or MailProviderType.Yandex,
+                viewModel.IsSearchAvailable);
         }
     }
 
@@ -306,7 +305,7 @@ public sealed class LanternMailUiTests
     }
 
     [Fact]
-    public void YandexVisualSkin_AddsDenseListAndDetailSenderCuesWithoutFakeSearch()
+    public void YandexVisualSkin_AddsDenseListAndDetailSenderCuesWithSharedSearchUi()
     {
         XDocument view = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));

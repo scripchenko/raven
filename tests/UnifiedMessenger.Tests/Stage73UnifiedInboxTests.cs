@@ -103,22 +103,27 @@ public sealed class Stage73UnifiedInboxTests
     }
 
     [Fact]
-    public async Task ImapProvider_PreservesOlderPageCursor()
+    public async Task YandexProvider_UsesUidSafePageContract()
     {
+        string scope = MailKitImapInboxClient.CreateUidCursorScope("INBOX", string.Empty);
+        string current = MailKitImapInboxClient.CreateUidCursor(scope, 7, 100, 50, 100);
+        string next = MailKitImapInboxClient.CreateUidCursor(scope, 7, 100, 20, 100);
         FakeImapInboxClient imap = new()
         {
-            Page = new ImapInboxPageData([], "imap-index:17")
+            Page = new ImapInboxPageData([], next, 100)
         };
         ImapMailReadProvider provider = CreateImapProvider(imap);
 
         MailPage<MailMessageSummary> result = await provider.GetInboxPageAsync(
             CreateAccount(MailProviderType.Yandex),
-            "imap-index:47",
+            current,
             30);
 
-        Assert.Equal("imap-index:47", imap.ReceivedCursor);
-        Assert.Equal("imap-index:17", result.ContinuationToken);
-        Assert.Equal(17, MailKitImapInboxClient.ParseCursor(result.ContinuationToken));
+        Assert.True(imap.UsedUidSafePagination);
+        Assert.Equal(current, imap.ReceivedCursor);
+        Assert.Equal(next, result.ContinuationToken);
+        Assert.Equal(100, result.TotalCount);
+        Assert.DoesNotContain("imap-index", result.ContinuationToken, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2376,6 +2381,7 @@ public sealed class Stage73UnifiedInboxTests
     {
         public ImapInboxPageData Page { get; set; } = new([], null);
         public string? ReceivedCursor { get; private set; }
+        public bool UsedUidSafePagination { get; private set; }
 
         public Task<ImapInboxPageData> GetInboxPageAsync(
             MailServerSettings server,
@@ -2384,6 +2390,20 @@ public sealed class Stage73UnifiedInboxTests
             int pageSize,
             CancellationToken cancellationToken = default)
         {
+            ReceivedCursor = cursor;
+            return Task.FromResult(Page);
+        }
+
+        public Task<ImapInboxPageData> GetUidSafeFolderPageAsync(
+            MailServerSettings server,
+            string secret,
+            ImapFolderDescriptor folder,
+            string? query,
+            string? cursor,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+        {
+            UsedUidSafePagination = true;
             ReceivedCursor = cursor;
             return Task.FromResult(Page);
         }
