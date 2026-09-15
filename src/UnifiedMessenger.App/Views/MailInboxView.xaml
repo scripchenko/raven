@@ -1914,9 +1914,20 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="Тема:" />
                             <TextBox x:Name="ComposeSubjectTextBox"
+                                     Grid.Column="1"
+                                     Grid.ColumnSpan="2"
                                      Padding="10,8"
                                      IsEnabled="{Binding Compose.CanEdit}"
                                      TabIndex="4"
@@ -2029,7 +2040,7 @@
                                     Command="{Binding Compose.DiscardDraftCommand}"
                                     Content="Удалить черновик"
                                     Style="{StaticResource MailSecondaryButtonStyle}"
-                                    Visibility="{Binding Compose.IsGmailServerDraft, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    Visibility="{Binding Compose.IsServerDraft, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,0,10,0"
                                     Command="{Binding Compose.CancelCommand}"
                                     Content="{Binding Compose.CancelButtonText}"

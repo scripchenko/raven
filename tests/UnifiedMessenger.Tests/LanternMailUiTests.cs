@@ -238,6 +238,14 @@ public sealed class LanternMailUiTests
         Assert.Contains("BackToMessageListCommand", detail.ToString(), StringComparison.Ordinal);
         Assert.Contains("OpenMessageCommand", list.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Grid.Column=\"4\"", view.ToString(), StringComparison.Ordinal);
+
+        XElement subjectLabel = Assert.Single(
+            compose.Descendants(presentation + "TextBlock"),
+            element => (string?)element.Attribute("Text") == "Тема:");
+        XElement subjectInput = Named(view, presentation, xaml, "TextBox", "ComposeSubjectTextBox");
+        Assert.Equal("1", (string?)subjectInput.Attribute("Grid.Column"));
+        Assert.Equal("2", (string?)subjectInput.Attribute("Grid.ColumnSpan"));
+        Assert.Equal("0", (string?)subjectLabel.Attribute("Grid.Column"));
     }
 
     [Fact]

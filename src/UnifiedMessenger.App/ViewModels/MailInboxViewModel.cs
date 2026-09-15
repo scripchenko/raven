@@ -128,6 +128,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Compose.PropertyChanged += OnComposePropertyChanged;
         Compose.Sent += OnMailSent;
         Compose.GmailDraftChanged += OnGmailDraftChanged;
+        Compose.YandexDraftChanged += OnYandexDraftChanged;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, CanRefresh);
         PreviousPageCommand = new AsyncRelayCommand(PreviousPageAsync, CanGoToPreviousPage);
         NextPageCommand = new AsyncRelayCommand(NextPageAsync, CanGoToNextPage);
@@ -1134,6 +1135,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Compose.PropertyChanged -= OnComposePropertyChanged;
         Compose.Sent -= OnMailSent;
         Compose.GmailDraftChanged -= OnGmailDraftChanged;
+        Compose.YandexDraftChanged -= OnYandexDraftChanged;
         Compose.Dispose();
         _folderStates.Clear();
         _accountFolderStates.Clear();
@@ -2676,9 +2678,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             RaisePresentationStateChanged();
 
             if (!Compose.IsOpen
-                && ActiveAccount is { Provider: MailProviderType.Gmail } gmailAccount
-                && SelectedFolder is { Kind: MailFolderKind.Drafts or MailFolderKind.AllMail } folder
-                && !GetState(gmailAccount.Id, folder.Key).HasLoaded
+                && ActiveAccount is { Provider: MailProviderType.Gmail or MailProviderType.Yandex } mailAccount
+                && SelectedFolder is { } folder
+                && (folder.Kind is MailFolderKind.Drafts
+                    || mailAccount.Provider is MailProviderType.Gmail && folder.Kind is MailFolderKind.AllMail)
+                && !GetState(mailAccount.Id, folder.Key).HasLoaded
                 && !IsListLoading)
             {
                 CurrentFolderLoadTask = RefreshAsync();
@@ -3892,6 +3896,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             return;
         }
 
+        if (ActiveAccount is { Provider: MailProviderType.Yandex } yandexAccount
+            && SelectedFolder.Kind is MailFolderKind.Drafts)
+        {
+            CurrentMessageLoadTask = OpenYandexDraftAsync(yandexAccount, summary.MessageKey);
+            return;
+        }
+
         if (!ReferenceEquals(SelectedMessageSummary, summary))
         {
             SelectedMessageSummary = summary;
@@ -3984,6 +3995,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     {
         MarkFolderStale(eventArgs.AccountId, MailFolderKind.Drafts);
         MarkFolderStale(eventArgs.AccountId, MailFolderKind.AllMail);
+    }
+
+    private void OnYandexDraftChanged(object? sender, YandexDraftChangedEventArgs eventArgs)
+    {
+        MarkFolderStale(eventArgs.AccountId, MailFolderKind.Drafts);
     }
 
     private AccountFolderState GetAccountFolderState(Guid accountId)
@@ -4629,6 +4645,16 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         {
             MessageFailureKind = MailReadFailureKind.MessageUnavailable;
             MessageErrorMessage = Compose.ErrorMessage ?? "Не удалось открыть черновик Gmail.";
+        }
+    }
+
+    private async Task OpenYandexDraftAsync(MailAccount account, string messageKey)
+    {
+        bool opened = await Compose.OpenYandexDraftAsync(account, messageKey);
+        if (!opened && ActiveAccount?.Id == account.Id)
+        {
+            MessageFailureKind = MailReadFailureKind.MessageUnavailable;
+            MessageErrorMessage = Compose.ErrorMessage ?? "Не удалось открыть черновик Яндекс Почты.";
         }
     }
 

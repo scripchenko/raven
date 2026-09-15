@@ -171,7 +171,7 @@ public partial class App : System.Windows.Application
 
             if (_serviceProvider?.GetService<MailComposeViewModel>() is MailComposeViewModel compose)
             {
-                await compose.FlushPendingGmailDraftsAsync();
+                await compose.FlushPendingServerDraftsAsync();
             }
 
             if (MainWindow is MainWindow mainWindow)
@@ -281,6 +281,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailDraftAutosaveScheduler, SystemMailDraftAutosaveScheduler>();
         services.AddSingleton<IGmailDraftApiClient, GmailDraftApiClient>();
         services.AddSingleton<IGmailDraftService, GmailDraftService>();
+        services.AddSingleton<IYandexDraftSessionFactory, MailKitYandexDraftSessionFactory>();
+        services.AddSingleton<IYandexDraftService, YandexDraftService>();
         services.AddSingleton<IGmailApiSendClient, GmailApiSendClient>();
         services.AddSingleton<ISmtpClientSessionFactory, MailKitSmtpClientSessionFactory>();
         services.AddSingleton<ISmtpSubmissionClient, MailKitSmtpSubmissionClient>();
