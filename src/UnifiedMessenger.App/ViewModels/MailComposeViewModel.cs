@@ -389,7 +389,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         && HasError;
     public bool CanEdit => IsOpen && !IsSending && Draft?.IsReadOnly != true;
     public string FromAddress => ActiveAccount?.EmailAddress ?? string.Empty;
-    public bool IsReplyAllAvailable => ActiveAccount?.Provider is MailProviderType.Gmail;
+    public bool IsReplyAllAvailable => ActiveAccount?.Provider is MailProviderType.Gmail or MailProviderType.Yandex;
     public bool IsGmailServerDraft =>
         ActiveAccount?.Provider is MailProviderType.Gmail && _gmailDraftService is not null;
     public bool IsYandexServerDraft =>

@@ -273,7 +273,7 @@ public sealed class GmailReplyAllTests
     }
 
     [Fact]
-    public void ReplyAllIsExposedOnlyForGmailAccounts()
+    public void ReplyAllIsExposedForGmailAndYandexAccountsOnly()
     {
         using MailComposeViewModel compose = Compose();
         MailMessageContent source = Source();
@@ -282,12 +282,54 @@ public sealed class GmailReplyAllTests
         Assert.True(compose.IsReplyAllAvailable);
         Assert.True(compose.ReplyAllCommand.CanExecute(source));
 
-        MailAccount imap = Account("user@example.test");
-        imap.Provider = MailProviderType.Yandex;
-        compose.ActivateAccount(imap);
+        compose.ActivateAccount(Account("user@yandex.test", MailProviderType.Yandex));
+
+        Assert.True(compose.IsReplyAllAvailable);
+        Assert.True(compose.ReplyAllCommand.CanExecute(source));
+
+        compose.ActivateAccount(Account("user@example.test", MailProviderType.GenericImap));
 
         Assert.False(compose.IsReplyAllAvailable);
         Assert.False(compose.ReplyAllCommand.CanExecute(source));
+    }
+
+    [Fact]
+    public async Task YandexReplyAll_UsesSharedRecipientSemanticsAndYandexSendPipeline()
+    {
+        MailAccount account = Account("owner@yandex.test", MailProviderType.Yandex);
+        RecordingSendProvider sender = new();
+        using MailComposeViewModel compose = Compose(sender);
+        compose.ActivateAccount(account);
+        MailMessageContent source = Source(
+            replyTo: "Reply target <reply@example.test>",
+            to:
+            [
+                Address("Owner", "OWNER@yandex.test"),
+                Address("Second", "second@example.test"),
+                Address("Duplicate", "SECOND@example.test")
+            ],
+            cc:
+            [
+                Address("Copy", "copy@example.test"),
+                Address("Cross duplicate", "second@example.test"),
+                Address("Owner copy", "owner@yandex.test")
+            ],
+            messageId: "reply-source@example.test",
+            references: ["prior@example.test"]);
+
+        await compose.ReplyAllCommand.ExecuteAsync(source);
+
+        Assert.True(compose.IsOpen);
+        AssertAddresses(compose.Draft!.To, "reply@example.test", "second@example.test");
+        AssertAddresses(compose.Draft.Cc, "copy@example.test");
+        Assert.Equal("Re: Subject", compose.Draft.Subject);
+        Assert.Equal("reply-source@example.test", compose.Draft.ReplyContext!.InReplyTo);
+
+        await compose.SendCommand.ExecuteAsync(null);
+
+        Assert.Same(account, sender.Account);
+        Assert.Equal(MailProviderType.Yandex, sender.Account!.Provider);
+        Assert.Equal("reply-source@example.test", sender.Request!.ReplyContext!.InReplyTo);
     }
 
     private static MailComposeTemplate CreateReplyAll(MailAccount account, MailMessageContent source) =>
@@ -323,14 +365,16 @@ public sealed class GmailReplyAllTests
 
     private static MailMessageAddress Address(string name, string address) => new(name, address);
 
-    private static MailAccount Account(string email) => new()
+    private static MailAccount Account(string email, MailProviderType provider = MailProviderType.Gmail) => new()
     {
         Id = Guid.NewGuid(),
-        Provider = MailProviderType.Gmail,
+        Provider = provider,
         EmailAddress = email,
-        DisplayName = "Gmail user",
+        DisplayName = "Mail user",
         CredentialKey = Guid.NewGuid().ToString("N"),
-        AuthenticationKind = MailAuthenticationKind.OAuth,
+        AuthenticationKind = provider is MailProviderType.Gmail
+            ? MailAuthenticationKind.OAuth
+            : MailAuthenticationKind.Password,
         IsEnabled = true
     };
 
@@ -345,27 +389,34 @@ public sealed class GmailReplyAllTests
             Parse(value).Select(address => address.Address),
             StringComparer.OrdinalIgnoreCase);
 
-    private static MailComposeViewModel Compose() =>
+    private static MailComposeViewModel Compose(RecordingSendProvider? sender = null) =>
         new(
-            new SendProviderFactory(),
+            new SendProviderFactory(sender ?? new RecordingSendProvider()),
             new MailComposeRequestFactory(),
             new MailComposePreparationService(),
             new AlwaysConfirmService());
 
-    private sealed class SendProviderFactory : IMailSendProviderFactory
+    private sealed class SendProviderFactory(RecordingSendProvider sender) : IMailSendProviderFactory
     {
-        public IMailSendProvider Get(MailProviderType providerType) => new SendProvider();
+        public IMailSendProvider Get(MailProviderType providerType) => sender;
     }
 
-    private sealed class SendProvider : IMailSendProvider
+    private sealed class RecordingSendProvider : IMailSendProvider
     {
+        public MailAccount? Account { get; private set; }
+        public MailComposeRequest? Request { get; private set; }
+
         public bool Supports(MailProviderType providerType) => true;
 
         public Task<MailSendResult> SendAsync(
             MailAccount account,
             MailComposeRequest request,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(MailSendResult.Success());
+            CancellationToken cancellationToken = default)
+        {
+            Account = account;
+            Request = request;
+            return Task.FromResult(MailSendResult.Success());
+        }
     }
 
     private sealed class AlwaysConfirmService : IMailComposeConfirmationService

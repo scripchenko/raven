@@ -806,8 +806,8 @@ public sealed class LanternMailUiTests
 
         Assert.True(viewModel.BackToMessageListCommand.CanExecute(null));
         Assert.True(viewModel.Compose.ReplyCommand.CanExecute(viewModel.SelectedMessageContent));
-        Assert.False(viewModel.Compose.IsReplyAllAvailable);
-        Assert.False(viewModel.Compose.ReplyAllCommand.CanExecute(viewModel.SelectedMessageContent));
+        Assert.True(viewModel.Compose.IsReplyAllAvailable);
+        Assert.True(viewModel.Compose.ReplyAllCommand.CanExecute(viewModel.SelectedMessageContent));
         Assert.True(viewModel.Compose.ForwardCommand.CanExecute(viewModel.SelectedMessageContent));
 
         viewModel.SelectedFolder = viewModel.Folders.Single(folder => folder.Kind is MailFolderKind.Drafts);
