@@ -36,7 +36,11 @@ internal sealed record ImapFolderDescriptor(MailFolderKind Kind, string FullName
 internal sealed record ImapInboxTechnicalSnapshot(
     int UnreadCount,
     uint UidValidity,
-    IReadOnlyList<uint> UniqueIds);
+    IReadOnlyList<uint> UniqueIds)
+{
+    public IReadOnlyDictionary<uint, MailNotificationPreview> NotificationPreviews { get; init; } =
+        new Dictionary<uint, MailNotificationPreview>();
+}
 
 internal interface IImapInboxClient
 {
@@ -45,6 +49,14 @@ internal interface IImapInboxClient
         string secret,
         CancellationToken cancellationToken = default) =>
         Task.FromException<ImapInboxTechnicalSnapshot>(new NotSupportedException());
+
+    Task<MailNotificationPreview?> GetInboxNotificationPreviewAsync(
+        MailServerSettings server,
+        string secret,
+        uint uniqueId,
+        uint expectedUidValidity,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<MailNotificationPreview?>(null);
 
     Task<int> GetInboxUnreadCountAsync(
         MailServerSettings server,
@@ -139,7 +151,7 @@ internal sealed class ImapMailReadProvider(
     IMailProviderFactory providerFactory,
     IImapInboxClient inboxClient,
     IMailContentExtractor contentExtractor,
-    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailSearchProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider
+    MailMessageSourceCache? sourceCache = null) : IMailReadProvider, IMailSearchProvider, IMailMessageStateProvider, IMailAttachmentContentProvider, IMailInboxUnreadCountProvider, IMailInboxTechnicalSnapshotProvider, IMailInboxNotificationPreviewProvider
 {
     private const string MessageKeyPrefix = "imap:";
     private readonly MailMessageSourceCache _sourceCache = sourceCache ?? new MailMessageSourceCache();
@@ -170,7 +182,37 @@ internal sealed class ImapMailReadProvider(
             .Select(uniqueId => uniqueId.ToString(CultureInfo.InvariantCulture))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        return new MailInboxTechnicalSnapshot(snapshot.UnreadCount, identityScope, identities);
+        return new MailInboxTechnicalSnapshot(snapshot.UnreadCount, identityScope, identities)
+        {
+            NotificationPreviews = snapshot.NotificationPreviews
+                .Where(pair => pair.Key > 0)
+                .ToDictionary(
+                    pair => pair.Key.ToString(CultureInfo.InvariantCulture),
+                    pair => pair.Value,
+                    StringComparer.Ordinal)
+        };
+    }
+
+    async Task<MailNotificationPreview?> IMailInboxNotificationPreviewProvider.GetInboxNotificationPreviewAsync(
+        MailAccount account,
+        string identityScope,
+        string messageIdentity,
+        CancellationToken cancellationToken)
+    {
+        if (account.Provider is not MailProviderType.Yandex
+            || !TryParseInboxNotificationIdentity(identityScope, messageIdentity, out uint uidValidity, out uint uniqueId))
+        {
+            return null;
+        }
+
+        MailServerSettings server = ResolveImapSettings(account, pageSize: 1);
+        MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
+        return await inboxClient.GetInboxNotificationPreviewAsync(
+            server,
+            credential.Secret,
+            uniqueId,
+            uidValidity,
+            cancellationToken);
     }
 
     public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(
@@ -509,6 +551,33 @@ internal sealed class ImapMailReadProvider(
         return (uidValidity, uid);
     }
 
+    private static bool TryParseInboxNotificationIdentity(
+        string identityScope,
+        string messageIdentity,
+        out uint uidValidity,
+        out uint uniqueId)
+    {
+        const string scopePrefix = "imap-inbox:";
+        uidValidity = 0;
+        uniqueId = 0;
+        if (!identityScope.StartsWith(scopePrefix, StringComparison.Ordinal)
+            || !uint.TryParse(
+                identityScope.AsSpan(scopePrefix.Length),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out uidValidity)
+            || !uint.TryParse(
+                messageIdentity,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out uniqueId))
+        {
+            return false;
+        }
+
+        return uidValidity > 0 && uniqueId > 0;
+    }
+
     private static MailFolderKind ParseFolderKind(string messageKey)
     {
         if (string.IsNullOrWhiteSpace(messageKey)
@@ -535,6 +604,8 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
 {
     private const string CursorPrefix = "imap-index:";
     private const string UidCursorPrefix = "imap-uid:1:";
+    private const int NotificationPreviewFetchByteLimit = 8192;
+    private const int NotificationPreviewCharacterLimit = 280;
     private const uint UidSearchWindowSize = 2048;
     internal const int BackgroundSnapshotMessageLimit = 100;
     internal static FolderAccess InboxAccess => FolderAccess.ReadOnly;
@@ -600,17 +671,26 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             IList<IMessageSummary> fetched = await inbox.FetchAsync(
                 startIndex,
                 inbox.Count - 1,
-                MessageSummaryItems.UniqueId,
+                MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope,
                 cancellationToken);
             uint[] uniqueIds = fetched
                 .Where(summary => summary.UniqueId.IsValid)
                 .Select(summary => summary.UniqueId.Id)
                 .Distinct()
                 .ToArray();
-            return new ImapInboxTechnicalSnapshot(
+            ImapInboxTechnicalSnapshot result = new(
                 unreadCount,
                 inbox.UidValidity,
                 uniqueIds);
+            result = result with
+            {
+                NotificationPreviews = fetched
+                    .Where(summary => summary.UniqueId.IsValid)
+                    .ToDictionary(
+                        summary => summary.UniqueId.Id,
+                        MapNotificationPreview)
+            };
+            return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -631,6 +711,85 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             throw new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
                 "Не удалось проверить новые письма.");
+        }
+        finally
+        {
+            await DisconnectQuietlyAsync(client);
+        }
+    }
+
+    public async Task<MailNotificationPreview?> GetInboxNotificationPreviewAsync(
+        MailServerSettings server,
+        string secret,
+        uint uniqueId,
+        uint expectedUidValidity,
+        CancellationToken cancellationToken = default)
+    {
+        if (uniqueId == 0)
+        {
+            return null;
+        }
+
+        using ImapClient client = new();
+        try
+        {
+            await ConnectAndAuthenticateAsync(client, server, secret, cancellationToken);
+            IMailFolder inbox = client.Inbox;
+            FolderAccess access = await inbox.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
+            if (access != FolderAccess.ReadOnly)
+            {
+                return null;
+            }
+
+            EnsureUidValidity(inbox, expectedUidValidity);
+            UniqueId uid = new(uniqueId);
+            IList<IMessageSummary> summaries = await inbox.FetchAsync(
+                [uid],
+                MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.BodyStructure,
+                cancellationToken);
+            IMessageSummary? summary = summaries.FirstOrDefault(item => item.UniqueId == uid);
+            BodyPartText? textPart = FindNotificationPreviewTextPart(summary?.Body);
+            if (summary is null || textPart is null)
+            {
+                return null;
+            }
+
+            string section = ResolveNotificationPreviewSection(textPart);
+            using Stream bodyStream = await inbox.GetStreamAsync(
+                uid,
+                section,
+                0,
+                NotificationPreviewFetchByteLimit,
+                cancellationToken,
+                null);
+            string snippet = ExtractNotificationPreviewText(textPart, await ReadLimitedBytesAsync(bodyStream, cancellationToken));
+            if (string.IsNullOrWhiteSpace(snippet))
+            {
+                return null;
+            }
+
+            MailNotificationPreview envelope = MapNotificationPreview(summary);
+            return envelope with { Snippet = snippet };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (MailReadException)
+        {
+            throw;
+        }
+        catch (MailKit.Security.AuthenticationException)
+        {
+            throw new MailReadException(
+                MailReadFailureKind.AuthenticationFailed,
+                "Не удалось войти в почту. Проверьте пароль приложения.");
+        }
+        catch (Exception exception) when (IsExpectedConnectionException(exception))
+        {
+            throw new MailReadException(
+                MailReadFailureKind.ConnectionFailed,
+                "Не удалось получить предпросмотр нового письма.");
         }
         finally
         {
@@ -1212,6 +1371,457 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             AttachmentSummary = GetAttachmentSummary(summary.Attachments)
         };
+    }
+
+    private static MailNotificationPreview MapNotificationPreview(IMessageSummary summary)
+    {
+        (string displayName, string address) = MailContentExtractor.GetPrimaryMailbox(summary.Envelope?.From);
+        return new MailNotificationPreview(
+            displayName,
+            address,
+            MailContentExtractor.NormalizeSubject(summary.Envelope?.Subject),
+            string.Empty);
+    }
+
+    internal static BodyPartText? FindNotificationPreviewTextPart(BodyPart? root)
+    {
+        if (root is null)
+        {
+            return null;
+        }
+
+        List<BodyPartText> plainTextParts = [];
+        List<BodyPartText> htmlTextParts = [];
+        CollectNotificationPreviewTextParts(root, plainTextParts, htmlTextParts);
+        return plainTextParts.FirstOrDefault() ?? htmlTextParts.FirstOrDefault();
+    }
+
+    internal static string ResolveNotificationPreviewSection(BodyPartText textPart) =>
+        string.IsNullOrWhiteSpace(textPart.PartSpecifier) ? "TEXT" : textPart.PartSpecifier;
+
+    private static void CollectNotificationPreviewTextParts(
+        BodyPart part,
+        List<BodyPartText> plainTextParts,
+        List<BodyPartText> htmlTextParts)
+    {
+        if ((part is BodyPartBasic basic && (basic.IsAttachment || basic.ContentDisposition?.IsAttachment == true))
+            || (part is BodyPartMultipart multipartContainer && multipartContainer.ContentDisposition?.IsAttachment == true)
+            || part is BodyPartMessage
+            || IsTechnicalNotificationPart(part))
+        {
+            return;
+        }
+
+        if (part is BodyPartText text)
+        {
+            if (text.IsPlain)
+            {
+                plainTextParts.Add(text);
+            }
+            else if (text.IsHtml)
+            {
+                htmlTextParts.Add(text);
+            }
+
+            return;
+        }
+
+        if (part is BodyPartMultipart multipart)
+        {
+            foreach (BodyPart child in multipart.BodyParts)
+            {
+                CollectNotificationPreviewTextParts(child, plainTextParts, htmlTextParts);
+            }
+        }
+    }
+
+    private static bool IsTechnicalNotificationPart(BodyPart part)
+    {
+        string mimeType = part.ContentType?.MimeType ?? string.Empty;
+        return mimeType.Equals("multipart/report", StringComparison.OrdinalIgnoreCase)
+            || mimeType.Equals("message/delivery-status", StringComparison.OrdinalIgnoreCase)
+            || mimeType.Equals("message/disposition-notification", StringComparison.OrdinalIgnoreCase)
+            || mimeType.Equals("text/rfc822-headers", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string ExtractNotificationPreviewText(BodyPartText textPart, ReadOnlySpan<byte> bodyBytes)
+    {
+        if (textPart is null || bodyBytes.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        if (!TryDecodeTransferEncoding(textPart.ContentTransferEncoding, bodyBytes, out byte[] transferDecoded)
+            || !TryDecodePreviewCharset(textPart.ContentType?.Charset, transferDecoded, out string decodedText))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            string visible = textPart.IsHtml
+                ? MailContentExtractor.ExtractSafePlainText(decodedText)
+                : MailContentExtractor.NormalizePlainText(decodedText);
+            visible = RemoveLeadingTransportHeaders(visible);
+            return TruncateNotificationPreview(MailContentExtractor.NormalizePreview(visible));
+        }
+        catch (Exception)
+        {
+            // The source body is deliberately partial. Bad MIME must only remove the optional preview.
+            return string.Empty;
+        }
+    }
+
+    private static bool TryDecodeTransferEncoding(
+        string? transferEncoding,
+        ReadOnlySpan<byte> source,
+        out byte[] decoded)
+    {
+        string kind = transferEncoding?.Trim() ?? string.Empty;
+        if (kind.Equals("base64", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryDecodeBoundedBase64(source, out decoded);
+        }
+
+        if (kind.Equals("quoted-printable", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryDecodeBoundedQuotedPrintable(source, out decoded);
+        }
+
+        if (kind.Length == 0
+            || kind.Equals("7bit", StringComparison.OrdinalIgnoreCase)
+            || kind.Equals("8bit", StringComparison.OrdinalIgnoreCase)
+            || kind.Equals("binary", StringComparison.OrdinalIgnoreCase))
+        {
+            decoded = source.ToArray();
+            return true;
+        }
+
+        decoded = [];
+        return false;
+    }
+
+    private static bool TryDecodeBoundedBase64(ReadOnlySpan<byte> source, out byte[] decoded)
+    {
+        List<byte> encoded = new(source.Length);
+        foreach (byte value in source)
+        {
+            if (value is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
+            {
+                continue;
+            }
+
+            if ((value is >= (byte)'A' and <= (byte)'Z')
+                || (value is >= (byte)'a' and <= (byte)'z')
+                || (value is >= (byte)'0' and <= (byte)'9')
+                || value is (byte)'+' or (byte)'/' or (byte)'=')
+            {
+                encoded.Add(value);
+                continue;
+            }
+
+            decoded = [];
+            return false;
+        }
+
+        List<byte> result = new((encoded.Count / 4) * 3);
+        Span<char> quartet = stackalloc char[4];
+        Span<byte> block = stackalloc byte[3];
+        for (int index = 0; index + 4 <= encoded.Count; index += 4)
+        {
+            for (int offset = 0; offset < quartet.Length; offset++)
+            {
+                quartet[offset] = (char)encoded[index + offset];
+            }
+
+            bool hasPadding = quartet.IndexOf('=') >= 0;
+            if (hasPadding && index + 4 != encoded.Count)
+            {
+                decoded = [];
+                return false;
+            }
+
+            if (!Convert.TryFromBase64Chars(quartet, block, out int decodedCount))
+            {
+                decoded = [];
+                return false;
+            }
+
+            for (int offset = 0; offset < decodedCount; offset++)
+            {
+                result.Add(block[offset]);
+            }
+        }
+
+        decoded = result.ToArray();
+        return decoded.Length > 0;
+    }
+
+    private static bool TryDecodeBoundedQuotedPrintable(ReadOnlySpan<byte> source, out byte[] decoded)
+    {
+        List<byte> result = new(source.Length);
+        for (int index = 0; index < source.Length; index++)
+        {
+            byte value = source[index];
+            if (value != (byte)'=')
+            {
+                result.Add(value);
+                continue;
+            }
+
+            if (index + 1 >= source.Length)
+            {
+                break;
+            }
+
+            byte next = source[index + 1];
+            if (next == (byte)'\n')
+            {
+                index++;
+                continue;
+            }
+
+            if (next == (byte)'\r')
+            {
+                if (index + 2 >= source.Length)
+                {
+                    break;
+                }
+
+                if (source[index + 2] != (byte)'\n')
+                {
+                    decoded = [];
+                    return false;
+                }
+
+                index += 2;
+                continue;
+            }
+
+            if (index + 2 >= source.Length)
+            {
+                break;
+            }
+
+            int high = GetHexValue(next);
+            int low = GetHexValue(source[index + 2]);
+            if (high < 0 || low < 0)
+            {
+                decoded = [];
+                return false;
+            }
+
+            result.Add((byte)((high << 4) | low));
+            index += 2;
+        }
+
+        decoded = result.ToArray();
+        return decoded.Length > 0;
+    }
+
+    private static int GetHexValue(byte value) =>
+        value is >= (byte)'0' and <= (byte)'9' ? value - (byte)'0'
+        : value is >= (byte)'A' and <= (byte)'F' ? value - (byte)'A' + 10
+        : value is >= (byte)'a' and <= (byte)'f' ? value - (byte)'a' + 10
+        : -1;
+
+    private static bool TryDecodePreviewCharset(string? charset, byte[] source, out string text)
+    {
+        text = string.Empty;
+        if (source.Length == 0)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(charset))
+        {
+            return TryDecodeWithEncoding(Encoding.UTF8, TrimIncompleteCharacterTail("utf-8", source), out text)
+                || (source.All(value => value <= 0x7f)
+                    && TryDecodeWithEncoding(Encoding.ASCII, source, out text));
+        }
+
+        Encoding? encoding = ResolvePreviewEncoding(charset);
+        return encoding is not null
+            && TryDecodeWithEncoding(encoding, TrimIncompleteCharacterTail(charset, source), out text);
+    }
+
+    private static bool TryDecodeWithEncoding(Encoding encoding, byte[] source, out string text)
+    {
+        text = string.Empty;
+        if (source.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            string decoded = encoding.GetString(source);
+            if (decoded.Contains('\ufffd'))
+            {
+                return false;
+            }
+
+            text = decoded;
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+    }
+
+    private static byte[] TrimIncompleteCharacterTail(string charset, byte[] source)
+    {
+        if (charset.Equals("utf-8", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("utf8", StringComparison.OrdinalIgnoreCase))
+        {
+            return TrimIncompleteUtf8Tail(source);
+        }
+
+        if (charset.Equals("utf-16", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("utf-16le", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("utf-16be", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("unicode", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("bigendianunicode", StringComparison.OrdinalIgnoreCase))
+        {
+            return source.Length % 2 == 0 ? source : source[..^1];
+        }
+
+        if (charset.Equals("utf-32", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("utf-32le", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("utf-32be", StringComparison.OrdinalIgnoreCase))
+        {
+            int remainder = source.Length % 4;
+            return remainder == 0 ? source : source[..^remainder];
+        }
+
+        return source;
+    }
+
+    private static byte[] TrimIncompleteUtf8Tail(byte[] source)
+    {
+        int continuationCount = 0;
+        int leadingIndex = source.Length - 1;
+        while (leadingIndex >= 0 && source[leadingIndex] is >= 0x80 and <= 0xbf)
+        {
+            continuationCount++;
+            leadingIndex--;
+        }
+
+        if (leadingIndex < 0)
+        {
+            return [];
+        }
+
+        byte leading = source[leadingIndex];
+        int expectedContinuationCount = leading is >= 0xc2 and <= 0xdf ? 1
+            : leading is >= 0xe0 and <= 0xef ? 2
+            : leading is >= 0xf0 and <= 0xf4 ? 3
+            : -1;
+        return expectedContinuationCount >= 0 && continuationCount < expectedContinuationCount
+            ? source[..leadingIndex]
+            : source;
+    }
+
+    private static async Task<byte[]> ReadLimitedBytesAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        byte[] buffer = new byte[NotificationPreviewFetchByteLimit];
+        int totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            int read = await stream.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead), cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            totalRead += read;
+        }
+
+        return totalRead == buffer.Length ? buffer : buffer[..totalRead];
+    }
+
+    private static string TruncateNotificationPreview(string value) =>
+        value.Length <= NotificationPreviewCharacterLimit
+            ? value
+            : value[..NotificationPreviewCharacterLimit].TrimEnd() + "…";
+
+    private static string RemoveLeadingTransportHeaders(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        string[] lines = value.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+        if (lines.Length == 0 || !IsTransportHeader(lines[0]))
+        {
+            return value;
+        }
+
+        int index = 1;
+        for (; index < lines.Length; index++)
+        {
+            string line = lines[index];
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return string.Join("\n", lines[(index + 1)..]).Trim();
+            }
+
+            if (IsTransportHeader(line) || char.IsWhiteSpace(line[0]))
+            {
+                continue;
+            }
+
+            // A partial header block without a terminating blank line is not safe preview text.
+            return string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsTransportHeader(string line)
+    {
+        int separator = line.IndexOf(':');
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        return line[..separator].Trim() switch
+        {
+            var name when name.Equals("Received", StringComparison.OrdinalIgnoreCase) => true,
+            var name when name.Equals("Return-Path", StringComparison.OrdinalIgnoreCase) => true,
+            var name when name.Equals("Delivered-To", StringComparison.OrdinalIgnoreCase) => true,
+            var name when name.Equals("DKIM-Signature", StringComparison.OrdinalIgnoreCase) => true,
+            var name when name.Equals("Authentication-Results", StringComparison.OrdinalIgnoreCase) => true,
+            var name when name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) => true,
+            var name when name.Equals("Content-Transfer-Encoding", StringComparison.OrdinalIgnoreCase) => true,
+            var name when name.Equals("MIME-Version", StringComparison.OrdinalIgnoreCase) => true,
+            _ => false
+        };
+    }
+
+    private static Encoding? ResolvePreviewEncoding(string charset)
+    {
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding(
+                charset,
+                EncoderFallback.ExceptionFallback,
+                DecoderFallback.ExceptionFallback);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
     }
 
     internal static MailMessageAttachmentSummary GetAttachmentSummary(IEnumerable<BodyPartBasic>? attachments)

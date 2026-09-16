@@ -193,7 +193,8 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
                 notificationId,
                 account,
                 pending,
-                HasMultipleEnabledGmailAccounts());
+                HasMultipleEnabledGmailAccounts(),
+                HasMultipleEnabledYandexAccounts());
             if (_popupService.TryShow(popup))
             {
                 _active.Add(
@@ -211,13 +212,18 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         Guid notificationId,
         MailAccount account,
         PendingMailNotification pending,
-        bool hasMultipleEnabledGmailAccounts)
+        bool hasMultipleEnabledGmailAccounts,
+        bool hasMultipleEnabledYandexAccounts = false)
     {
         bool isSingle = pending.NewMessageCount == 1;
-        string serviceName = account.Provider is MailProviderType.Gmail
+        bool isGmail = account.Provider is MailProviderType.Gmail;
+        bool isYandex = account.Provider is MailProviderType.Yandex;
+        string serviceName = isGmail
             ? CreateGmailServiceName(account, hasMultipleEnabledGmailAccounts)
-            : "Почта";
-        if (account.Provider is MailProviderType.Gmail
+            : isYandex
+                ? CreateYandexServiceName(account, hasMultipleEnabledYandexAccounts)
+                : "Почта";
+        if ((isGmail || isYandex)
             && isSingle
             && pending.Preview is not null
             && pending.ShowPreview)
@@ -238,8 +244,9 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
                 title,
                 subject,
                 string.IsNullOrWhiteSpace(snippet) ? null : snippet,
-                NotificationPopupBrand.Gmail,
-                CreateSenderInitials(senderName, senderAddress));
+                isGmail ? NotificationPopupBrand.Gmail : NotificationPopupBrand.Yandex,
+                CreateSenderInitials(senderName, senderAddress),
+                string.IsNullOrWhiteSpace(senderAddress) ? null : senderAddress);
         }
 
         return new NotificationPopupDisplayModel(
@@ -250,8 +257,10 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
             isSingle
                 ? "Получено новое письмо"
                 : $"Получено новых писем: {pending.NewMessageCount}",
-            Brand: account.Provider is MailProviderType.Gmail
+            Brand: isGmail
                 ? NotificationPopupBrand.Gmail
+                : isYandex
+                    ? NotificationPopupBrand.Yandex
                 : NotificationPopupBrand.Default);
     }
 
@@ -294,6 +303,20 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
     private bool HasMultipleEnabledGmailAccounts() =>
         _settingsStore.Current.MailAccounts.Count(account =>
             account.IsEnabled && account.Provider is MailProviderType.Gmail) > 1;
+
+    private bool HasMultipleEnabledYandexAccounts() =>
+        _settingsStore.Current.MailAccounts.Count(account =>
+            account.IsEnabled && account.Provider is MailProviderType.Yandex) > 1;
+
+    private static string CreateYandexServiceName(
+        MailAccount account,
+        bool hasMultipleEnabledYandexAccounts)
+    {
+        string identity = account.DisplayLabel.Trim();
+        return hasMultipleEnabledYandexAccounts && !string.IsNullOrWhiteSpace(identity)
+            ? $"Яндекс Почта • {identity}"
+            : "Яндекс Почта";
+    }
 
     private void OnPopupClicked(object? sender, NotificationPopupEventArgs eventArgs)
     {

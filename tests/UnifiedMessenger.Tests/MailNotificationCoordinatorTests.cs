@@ -57,6 +57,7 @@ public sealed class MailNotificationCoordinatorTests
         Assert.Equal("Статус проекта", popup.Body);
         Assert.Equal("Короткий безопасный preview", popup.PreviewText);
         Assert.Equal(NotificationPopupBrand.Gmail, popup.Brand);
+        Assert.Equal(48d, popup.PreviewMaxHeight);
         Assert.Equal("АС", popup.SenderAvatarInitials);
         Assert.True(popup.ShowSenderInitials);
         Assert.False(popup.ShowContentSourceIcon);
@@ -75,6 +76,64 @@ public sealed class MailNotificationCoordinatorTests
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
         Assert.Equal("Gmail • first@example.test", popup.ServiceName);
         Assert.Equal(fixture.First.Id, popup.ServiceInstanceId);
+    }
+
+    [Fact]
+    public void SingleYandexAccount_UsesSenderSubjectAndYandexBranding()
+    {
+        using Fixture fixture = new(includeSecondAccount: false, provider: MailProviderType.Yandex);
+        fixture.Handle(fixture.First, 1,
+            new MailNotificationPreview("Иван Петров", "ivan@yandex.test", "Важное письмо", "Короткий preview"));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Яндекс Почта", popup.ServiceName);
+        Assert.Equal("Иван Петров", popup.Title);
+        Assert.Equal("Важное письмо", popup.Body);
+        Assert.Equal("Короткий preview", popup.PreviewText);
+        Assert.Equal(NotificationPopupBrand.Yandex, popup.Brand);
+        Assert.Equal(30d, popup.PreviewMaxHeight);
+        Assert.False(popup.IsGmail);
+        Assert.Equal("ИП", popup.SenderAvatarInitials);
+        Assert.True(popup.ShowSenderInitials);
+    }
+
+    [Fact]
+    public void MultipleYandexAccounts_IncludeAccountIdentity()
+    {
+        using Fixture fixture = new(provider: MailProviderType.Yandex);
+        fixture.Handle(fixture.First, 1,
+            new MailNotificationPreview("Sender", "sender@yandex.test", "Subject", string.Empty));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Яндекс Почта • first@example.test", popup.ServiceName);
+        Assert.Equal(NotificationPopupBrand.Yandex, popup.Brand);
+    }
+
+    [Fact]
+    public void YandexMissingSenderSubjectAndSnippet_UsesSafeFallbacks()
+    {
+        using Fixture fixture = new(includeSecondAccount: false, provider: MailProviderType.Yandex);
+        fixture.Handle(fixture.First, 1,
+            new MailNotificationPreview(string.Empty, string.Empty, string.Empty, string.Empty));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Неизвестный отправитель", popup.Title);
+        Assert.Equal("(без темы)", popup.Body);
+        Assert.Null(popup.PreviewText);
+        Assert.Null(popup.SenderAvatarInitials);
+        Assert.Equal(NotificationPopupBrand.Yandex, popup.Brand);
+    }
+
+    [Fact]
+    public void YandexInitialsAvatarColor_IsDeterministicBySenderIdentity()
+    {
+        using Fixture fixture = new(includeSecondAccount: false, provider: MailProviderType.Yandex);
+        MailNotificationPreview preview = new("Иван Петров", "ivan@yandex.test", "Subject", "Snippet");
+        fixture.Handle(fixture.First, 1, preview);
+        string first = Assert.Single(fixture.Popup.Shown).SenderAvatarBackground;
+        fixture.Popup.Shown.Clear();
+        fixture.Handle(fixture.First, 1, preview);
+        Assert.Equal(first, Assert.Single(fixture.Popup.Shown).SenderAvatarBackground);
     }
 
     [Fact]
@@ -438,10 +497,12 @@ public sealed class MailNotificationCoordinatorTests
                 .OrderBy(name => name, StringComparer.Ordinal));
     }
 
-    private static MailAccount Account(string emailAddress = "mail@example.test") => new()
+    private static MailAccount Account(
+        string emailAddress = "mail@example.test",
+        MailProviderType provider = MailProviderType.Gmail) => new()
     {
         Id = Guid.NewGuid(),
-        Provider = MailProviderType.Gmail,
+        Provider = provider,
         EmailAddress = emailAddress,
         IsEnabled = true,
         CredentialKey = "credential"
@@ -463,10 +524,10 @@ public sealed class MailNotificationCoordinatorTests
     {
         private readonly FakePollingMonitor _monitor = new();
 
-        public Fixture(bool includeSecondAccount = true)
+        public Fixture(bool includeSecondAccount = true, MailProviderType provider = MailProviderType.Gmail)
         {
-            First = Account("first@example.test");
-            Second = Account("second@example.test");
+            First = Account("first@example.test", provider);
+            Second = Account("second@example.test", provider);
             Settings = new TestSettingsStore(new AppSettings
             {
                 MailAccounts = includeSecondAccount ? [First, Second] : [First]

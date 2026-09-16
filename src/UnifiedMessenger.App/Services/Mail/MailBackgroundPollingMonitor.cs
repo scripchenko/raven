@@ -32,12 +32,28 @@ public interface IMailBackgroundPollingMonitor : IDisposable
 internal sealed record MailInboxTechnicalSnapshot(
     int UnreadCount,
     string IdentityScope,
-    IReadOnlyCollection<string> MessageIdentities);
+    IReadOnlyCollection<string> MessageIdentities)
+{
+    public IReadOnlyDictionary<string, MailNotificationPreview> NotificationPreviews { get; init; } =
+        new Dictionary<string, MailNotificationPreview>(StringComparer.Ordinal);
+}
 
 internal interface IMailInboxTechnicalSnapshotProvider
 {
     Task<MailInboxTechnicalSnapshot> GetInboxTechnicalSnapshotAsync(
         MailAccount account,
+        CancellationToken cancellationToken = default);
+}
+
+// This is deliberately separate from the snapshot contract: a polling snapshot stays
+// envelope-only, while an optional provider can enrich the one message that was
+// already established as genuinely new.
+internal interface IMailInboxNotificationPreviewProvider
+{
+    Task<MailNotificationPreview?> GetInboxNotificationPreviewAsync(
+        MailAccount account,
+        string identityScope,
+        string messageIdentity,
         CancellationToken cancellationToken = default);
 }
 
@@ -65,6 +81,7 @@ public sealed class MailBackgroundPollingMonitor(
     TimeProvider timeProvider,
     ImapMailboxChangeTracker? imapMailboxChanges = null) : IMailBackgroundPollingMonitor
 {
+    private static readonly TimeSpan NotificationPreviewTimeout = TimeSpan.FromSeconds(3);
     public static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(60);
     private readonly ImapMailboxChangeTracker _imapMailboxChanges = imapMailboxChanges ?? new();
 
@@ -254,7 +271,35 @@ public sealed class MailBackgroundPollingMonitor(
                 _imapMailboxChanges.RetireThrough(account.Id, snapshot.IdentityScope, highWaterUid);
             }
             int unreadCount = Math.Max(0, snapshot.UnreadCount);
-            uiDispatcher.Post(() => ApplySuccessfulPoll(account.Id, unreadCount, newMessageCount, preview: null));
+            MailNotificationPreview? preview = null;
+            NotificationSettings notificationSettings = settingsStore.Current.Notifications;
+            if (yandex
+                && newMessageCount == 1
+                && notificationSettings.IsEnabled
+                && !notificationSettings.DoNotDisturb
+                && notificationSettings.ShowNotificationPreview)
+            {
+                uint previousHighWater = previous?.HighWaterUid ?? 0;
+                string? newIdentity = identities.FirstOrDefault(identity =>
+                    uint.TryParse(identity, out uint uid)
+                    && uid > previousHighWater
+                    && !_imapMailboxChanges.IsLocalInboxMove(account.Id, snapshot.IdentityScope, identity));
+                if (newIdentity is not null)
+                {
+                    snapshot.NotificationPreviews.TryGetValue(newIdentity, out preview);
+                    if (snapshotProvider is IMailInboxNotificationPreviewProvider previewProvider)
+                    {
+                        preview = await TryEnrichYandexPreviewAsync(
+                            previewProvider,
+                            account,
+                            snapshot.IdentityScope,
+                            newIdentity,
+                            preview,
+                            cancellationToken);
+                    }
+                }
+            }
+            uiDispatcher.Post(() => ApplySuccessfulPoll(account.Id, unreadCount, newMessageCount, preview));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -263,6 +308,36 @@ public sealed class MailBackgroundPollingMonitor(
         catch (Exception)
         {
             // A background provider/network failure is isolated to this account and poll.
+        }
+    }
+
+    private static async Task<MailNotificationPreview?> TryEnrichYandexPreviewAsync(
+        IMailInboxNotificationPreviewProvider previewProvider,
+        MailAccount account,
+        string identityScope,
+        string messageIdentity,
+        MailNotificationPreview? envelopePreview,
+        CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(NotificationPreviewTimeout);
+        try
+        {
+            MailNotificationPreview? enriched = await previewProvider.GetInboxNotificationPreviewAsync(
+                account,
+                identityScope,
+                messageIdentity,
+                timeout.Token);
+            return enriched ?? envelopePreview;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Preview retrieval is presentation-only; envelope-only notifications remain valid.
+            return envelopePreview;
         }
     }
 

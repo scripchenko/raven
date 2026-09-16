@@ -3,6 +3,8 @@ using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Mail;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Tray;
+using MailKit;
+using MimeKit;
 
 namespace UnifiedMessenger.Tests;
 
@@ -277,7 +279,13 @@ public sealed class MailBackgroundPollingMonitorTests
     public async Task ImapSnapshot_ScopesUniqueIdsByUidValidity()
     {
         MailAccount account = Account(MailProviderType.Yandex);
-        ImapSnapshotClient client = new(new ImapInboxTechnicalSnapshot(4, 812, [19, 20, 20, 0]));
+        ImapSnapshotClient client = new(new ImapInboxTechnicalSnapshot(4, 812, [19, 20, 20, 0])
+        {
+            NotificationPreviews = new Dictionary<uint, MailNotificationPreview>
+            {
+                [20] = new("Sender", "sender@yandex.test", "Subject", string.Empty)
+            }
+        });
         ImapMailReadProvider provider = new(
             new TestCredentialStore(MailCredential.CreatePassword("password")),
             CreateMailProviderFactory(),
@@ -290,6 +298,7 @@ public sealed class MailBackgroundPollingMonitorTests
         Assert.Equal(4, snapshot.UnreadCount);
         Assert.Equal("imap-inbox:812", snapshot.IdentityScope);
         Assert.Equal(["19", "20"], snapshot.MessageIdentities);
+        Assert.Equal("Subject", snapshot.NotificationPreviews["20"].Subject);
         Assert.Equal("imap.yandex.com", client.Server?.Host);
     }
 
@@ -308,6 +317,351 @@ public sealed class MailBackgroundPollingMonitorTests
         Assert.Empty(events);
         await monitor.PollOnceAsync();
         Assert.Equal(1, Assert.Single(events).NewMessageCount);
+    }
+
+    [Fact]
+    public async Task YandexNewMail_UsesEnvelopePreviewWhenPartialBodyIsUnavailable()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "100"));
+        provider.Enqueue(account.Id, Snapshot(2, "100", "101") with
+        {
+            NotificationPreviews = new Dictionary<string, MailNotificationPreview>
+            {
+                ["101"] = new("Иван Петров", "ivan@yandex.test", "Новая тема", string.Empty)
+            }
+        });
+        using var monitor = CreateMonitor([account], provider);
+        var events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        MailNewMessageDetectedEventArgs detected = Assert.Single(events);
+        Assert.Equal("Иван Петров", detected.Preview?.SenderDisplayName);
+        Assert.Equal("Новая тема", detected.Preview?.Subject);
+        Assert.Equal(string.Empty, detected.Preview?.Snippet);
+        Assert.Equal(["101"], provider.PreviewRequests);
+    }
+
+    [Fact]
+    public async Task YandexNewMail_EnrichesOnlyConfirmedNewMessageWithBoundedPreview()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "100"));
+        provider.Enqueue(account.Id, Snapshot(2, "100", "101") with
+        {
+            NotificationPreviews = new Dictionary<string, MailNotificationPreview>
+            {
+                ["101"] = new("Иван Петров", "ivan@yandex.test", "Новая тема", string.Empty)
+            }
+        });
+        provider.EnrichedPreviews["101"] = new("Иван Петров", "ivan@yandex.test", "Новая тема", "Короткий текст письма");
+        using var monitor = CreateMonitor([account], provider);
+        var events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        MailNewMessageDetectedEventArgs detected = Assert.Single(events);
+        Assert.Equal("Короткий текст письма", detected.Preview?.Snippet);
+        Assert.Equal(["101"], provider.PreviewRequests);
+    }
+
+    [Fact]
+    public async Task YandexPreviewFailure_StillRaisesEnvelopeOnlyNotification()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new() { ThrowOnPreviewRequest = true };
+        provider.Enqueue(account.Id, Snapshot(1, "100"));
+        provider.Enqueue(account.Id, Snapshot(2, "100", "101") with
+        {
+            NotificationPreviews = new Dictionary<string, MailNotificationPreview>
+            {
+                ["101"] = new("Иван Петров", "ivan@yandex.test", "Новая тема", string.Empty)
+            }
+        });
+        using var monitor = CreateMonitor([account], provider);
+        var events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        MailNewMessageDetectedEventArgs detected = Assert.Single(events);
+        Assert.Equal("Иван Петров", detected.Preview?.SenderDisplayName);
+        Assert.Equal(string.Empty, detected.Preview?.Snippet);
+        Assert.Equal(["101"], provider.PreviewRequests);
+    }
+
+    [Fact]
+    public async Task YandexMultipleNewMessages_DoesNotFetchNotificationPreviewBodies()
+    {
+        MailAccount account = Account();
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "100"));
+        provider.Enqueue(account.Id, Snapshot(3, "100", "101", "102"));
+        using var monitor = CreateMonitor([account], provider);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        Assert.Empty(provider.PreviewRequests);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_PrefersSafeTextAndRemovesHtmlMarkup()
+    {
+        BodyPartText htmlPart = new(ContentType.Parse("text/html; charset=utf-8"), "1")
+        {
+            ContentTransferEncoding = "quoted-printable"
+        };
+
+        string preview = MailKitImapInboxClient.ExtractNotificationPreviewText(
+            htmlPart,
+            System.Text.Encoding.UTF8.GetBytes("<p>Здравствуйте, <b>мир</b>.</p><img src=3D\"https://example.test/image.png\">") );
+
+        Assert.Equal("Здравствуйте, мир.", preview);
+        Assert.DoesNotContain("<", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("image.png", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_DecodesAndBoundsText()
+    {
+        BodyPartText plainPart = new(ContentType.Parse("text/plain; charset=utf-8"), "1")
+        {
+            ContentTransferEncoding = "base64"
+        };
+        string source = new('т', 400);
+
+        string preview = MailKitImapInboxClient.ExtractNotificationPreviewText(
+            plainPart,
+            System.Text.Encoding.ASCII.GetBytes(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(source))));
+
+        Assert.EndsWith("…", preview, StringComparison.Ordinal);
+        Assert.True(preview.Length <= 281);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_DecodesUtf8Base64RussianText()
+    {
+        string preview = DecodePreview(
+            "text/plain; charset=utf-8",
+            "base64",
+            System.Text.Encoding.ASCII.GetBytes(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("Здравствуйте, мир!"))));
+
+        Assert.Equal("Здравствуйте, мир!", preview);
+        Assert.DoesNotContain('\ufffd', preview);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_DecodesUtf8QuotedPrintableRussianText()
+    {
+        string preview = DecodePreview(
+            "text/plain; charset=utf-8",
+            "quoted-printable",
+            System.Text.Encoding.ASCII.GetBytes(ToQuotedPrintable(System.Text.Encoding.UTF8.GetBytes("Здравствуйте, мир!"))));
+
+        Assert.Equal("Здравствуйте, мир!", preview);
+        Assert.DoesNotContain('\ufffd', preview);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_HonorsWindows1251Charset()
+    {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        string preview = DecodePreview(
+            "text/plain; charset=windows-1251",
+            "8bit",
+            System.Text.Encoding.GetEncoding("windows-1251").GetBytes("Здравствуйте, мир!"));
+
+        Assert.Equal("Здравствуйте, мир!", preview);
+        Assert.DoesNotContain('\ufffd', preview);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_PreservesAsciiSevenBitText()
+    {
+        string preview = DecodePreview(
+            "text/plain; charset=us-ascii",
+            "7bit",
+            System.Text.Encoding.ASCII.GetBytes("Plain ASCII message"));
+
+        Assert.Equal("Plain ASCII message", preview);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_DecodesUtf8HtmlAfterTransferDecoding()
+    {
+        string html = "<p>Здравствуйте, <b>мир</b>!</p><img src=\"https://example.test/pixel.png\">";
+        string preview = DecodePreview(
+            "text/html; charset=utf-8",
+            "base64",
+            System.Text.Encoding.ASCII.GetBytes(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(html))));
+
+        Assert.Equal("Здравствуйте, мир!", preview);
+        Assert.DoesNotContain("<", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_IgnoresPartialBase64Quantum()
+    {
+        string encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("Здравствуйте"));
+        string preview = DecodePreview(
+            "text/plain; charset=utf-8",
+            "base64",
+            System.Text.Encoding.ASCII.GetBytes(encoded[..^1]));
+
+        Assert.NotEmpty(preview);
+        Assert.DoesNotContain('\ufffd', preview);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_IgnoresPartialQuotedPrintableEscapeAndUtf8Tail()
+    {
+        string preview = DecodePreview(
+            "text/plain; charset=utf-8",
+            "quoted-printable",
+            System.Text.Encoding.ASCII.GetBytes("=D0=9F=D1=80=D0=B8=D0=B2=D0=B5=D1="));
+
+        Assert.Equal("Приве", preview);
+        Assert.DoesNotContain('\ufffd', preview);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_TrimsIncompleteUtf8Character()
+    {
+        byte[] body = System.Text.Encoding.UTF8.GetBytes("Привет");
+        string preview = DecodePreview("text/plain; charset=utf-8", "8bit", body[..^1]);
+
+        Assert.Equal("Приве", preview);
+        Assert.DoesNotContain('\ufffd', preview);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_UsesSafeFallbackForMissingOrInvalidCharset()
+    {
+        string missingCharset = DecodePreview(
+            "text/plain",
+            "8bit",
+            System.Text.Encoding.UTF8.GetBytes("Здравствуйте"));
+        string invalidCharset = DecodePreview(
+            "text/plain; charset=x-invalid-charset",
+            "8bit",
+            System.Text.Encoding.UTF8.GetBytes("Здравствуйте"));
+
+        Assert.Equal("Здравствуйте", missingCharset);
+        Assert.Equal(string.Empty, invalidCharset);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_RejectsMalformedTransferPayload()
+    {
+        string preview = DecodePreview(
+            "text/plain; charset=utf-8",
+            "base64",
+            System.Text.Encoding.ASCII.GetBytes("not-base64!"));
+
+        Assert.Equal(string.Empty, preview);
+    }
+
+    [Fact]
+    public void RootSinglePartRuntimePath_UsesTextSectionAndDecodesBodyOnlyPayload()
+    {
+        BodyPartText root = TextPart("text/plain; charset=UTF-8", string.Empty);
+        root.ContentTransferEncoding = "base64";
+        string expected = "Это проверка текста всплывающего уведомления Raven.";
+        byte[] bodyOnly = System.Text.Encoding.ASCII.GetBytes(
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(expected)));
+        byte[] formerWholeMessagePayload = System.Text.Encoding.ASCII.GetBytes(
+            "Received: from postback.a.mail.yandex.net\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+            + System.Text.Encoding.ASCII.GetString(bodyOnly));
+
+        Assert.Equal("TEXT", MailKitImapInboxClient.ResolveNotificationPreviewSection(root));
+        Assert.Equal(string.Empty, MailKitImapInboxClient.ExtractNotificationPreviewText(root, formerWholeMessagePayload));
+        Assert.Equal(expected, MailKitImapInboxClient.ExtractNotificationPreviewText(root, bodyOnly));
+    }
+
+    [Fact]
+    public void ProductionPreviewFetch_UsesResolvedStringSectionInsteadOfBodyPartOverload()
+    {
+        string source = File.ReadAllText(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Services", "Mail", "ImapMailReadProvider.cs"));
+        int start = source.IndexOf(
+            "public async Task<MailNotificationPreview?> GetInboxNotificationPreviewAsync",
+            StringComparison.Ordinal);
+        int end = source.IndexOf(
+            "public Task<ImapInboxPageData> GetInboxPageAsync",
+            start,
+            StringComparison.Ordinal);
+        string productionPath = source[start..end];
+
+        Assert.Contains("ResolveNotificationPreviewSection(textPart)", productionPath, StringComparison.Ordinal);
+        Assert.Contains("uid,\n                section,", productionPath.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.DoesNotContain("uid,\n                textPart,", productionPath.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewPartSelection_PrefersPlainTextFromAlternative()
+    {
+        BodyPartText plain = TextPart("text/plain; charset=utf-8", "1.1");
+        BodyPartText html = TextPart("text/html; charset=utf-8", "1.2");
+        BodyPartMultipart alternative = Multipart("multipart/alternative", "1", plain, html);
+
+        Assert.Same(plain, MailKitImapInboxClient.FindNotificationPreviewTextPart(alternative));
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewPartSelection_ExcludesAttachmentsAndAttachedMessages()
+    {
+        BodyPartText body = TextPart("text/plain; charset=utf-8", "1.1");
+        BodyPartText attachedText = TextPart("text/plain; charset=utf-8", "1.2");
+        attachedText.ContentDisposition = new ContentDisposition(ContentDisposition.Attachment);
+        BodyPartMessage attachedMessage = new(ContentType.Parse("message/rfc822"), "1.3")
+        {
+            Body = TextPart("text/plain; charset=utf-8", "1.3.1")
+        };
+        BodyPartMultipart mixed = Multipart("multipart/mixed", "1", body, attachedText, attachedMessage);
+
+        Assert.Same(body, MailKitImapInboxClient.FindNotificationPreviewTextPart(mixed));
+        Assert.Null(MailKitImapInboxClient.FindNotificationPreviewTextPart(attachedMessage));
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewPartSelection_RejectsTechnicalReport()
+    {
+        BodyPartText deliveryStatus = TextPart("text/plain; charset=utf-8", "1.1");
+        BodyPartMultipart report = Multipart("multipart/report; report-type=delivery-status", "1", deliveryStatus);
+
+        Assert.Null(MailKitImapInboxClient.FindNotificationPreviewTextPart(report));
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_RemovesLeadingTransportHeaderBlock()
+    {
+        BodyPartText plainPart = TextPart("text/plain; charset=utf-8", "1");
+
+        string preview = MailKitImapInboxClient.ExtractNotificationPreviewText(
+            plainPart,
+            System.Text.Encoding.UTF8.GetBytes(
+                "Received: from postback.a.mail.yandex.net\r\nAuthentication-Results: example\r\n\r\nЗдравствуйте, это текст письма."));
+
+        Assert.Equal("Здравствуйте, это текст письма.", preview);
+        Assert.DoesNotContain("Received:", preview, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ImapNotificationPreviewText_RejectsIncompleteTransportHeaderPayload()
+    {
+        BodyPartText plainPart = TextPart("text/plain; charset=utf-8", "1");
+
+        string preview = MailKitImapInboxClient.ExtractNotificationPreviewText(
+            plainPart,
+            System.Text.Encoding.UTF8.GetBytes("Received: from postback.a.mail.yandex.net\r\nDKIM-Signature: example"));
+
+        Assert.Equal(string.Empty, preview);
     }
 
     [Fact]
@@ -418,6 +772,50 @@ public sealed class MailBackgroundPollingMonitorTests
     private static MailInboxTechnicalSnapshot Snapshot(int unreadCount, params string[] identities) =>
         new(unreadCount, "imap-inbox:812", identities);
 
+    private static BodyPartText TextPart(string contentType, string partSpecifier) =>
+        new(ContentType.Parse(contentType), partSpecifier)
+        {
+            ContentTransferEncoding = "8bit"
+        };
+
+    private static string DecodePreview(string contentType, string transferEncoding, byte[] body)
+    {
+        BodyPartText part = TextPart(contentType, "1");
+        part.ContentTransferEncoding = transferEncoding;
+        return MailKitImapInboxClient.ExtractNotificationPreviewText(part, body);
+    }
+
+    private static string ToQuotedPrintable(byte[] bytes) =>
+        string.Concat(bytes.Select(value => $"={value:X2}"));
+
+    private static string FindRepositoryFile(params string[] relativePath)
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            string candidate = Path.Combine([directory.FullName, .. relativePath]);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException(Path.Combine(relativePath));
+    }
+
+    private static BodyPartMultipart Multipart(string contentType, string partSpecifier, params BodyPart[] parts)
+    {
+        BodyPartCollection collection = new();
+        foreach (BodyPart part in parts)
+        {
+            collection.Add(part);
+        }
+
+        return new BodyPartMultipart(ContentType.Parse(contentType), partSpecifier, collection);
+    }
+
     private static MailAccount Account(MailProviderType provider = MailProviderType.Yandex) =>
         new()
         {
@@ -440,13 +838,17 @@ public sealed class MailBackgroundPollingMonitorTests
         ]);
     }
 
-    private sealed class SnapshotProvider : IMailReadProvider, IMailInboxTechnicalSnapshotProvider
+    private sealed class SnapshotProvider : IMailReadProvider, IMailInboxTechnicalSnapshotProvider, IMailInboxNotificationPreviewProvider
     {
         private readonly Dictionary<Guid, Queue<Func<MailInboxTechnicalSnapshot>>> _results = [];
         private readonly Dictionary<Guid, int> _pollCounts = [];
 
         public TaskCompletionSource FirstPollCompleted { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Dictionary<string, MailNotificationPreview> EnrichedPreviews { get; } = new(StringComparer.Ordinal);
+        public List<string> PreviewRequests { get; } = [];
+        public bool ThrowOnPreviewRequest { get; init; }
 
         public bool Supports(MailProviderType providerType) => true;
 
@@ -474,6 +876,23 @@ public sealed class MailBackgroundPollingMonitorTests
             {
                 FirstPollCompleted.TrySetResult();
             }
+        }
+
+        public Task<MailNotificationPreview?> GetInboxNotificationPreviewAsync(
+            MailAccount account,
+            string identityScope,
+            string messageIdentity,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            PreviewRequests.Add(messageIdentity);
+            if (ThrowOnPreviewRequest)
+            {
+                throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Preview fetch failed.");
+            }
+
+            EnrichedPreviews.TryGetValue(messageIdentity, out MailNotificationPreview? preview);
+            return Task.FromResult(preview);
         }
 
         public Task<MailPage<MailMessageSummary>> GetInboxPageAsync(

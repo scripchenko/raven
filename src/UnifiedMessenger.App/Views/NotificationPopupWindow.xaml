@@ -51,6 +51,9 @@
                 <DataTrigger Binding="{Binding IsGmail}" Value="True">
                     <Setter Property="Source" Value="/UnifiedMessenger.App;component/Assets/Services/gmail.png" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding IsYandex}" Value="True">
+                    <Setter Property="Source" Value="/UnifiedMessenger.App;component/Assets/Services/yandex_mail.png" />
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 
@@ -172,7 +175,7 @@
                                TextTrimming="CharacterEllipsis"
                                TextWrapping="Wrap" />
                     <TextBlock x:Name="NotificationBody"
-                               MaxHeight="48"
+                               MaxHeight="{Binding PreviewMaxHeight}"
                                FontSize="12.5"
                                Foreground="#FF454545"
                                Text="{Binding Body}"
@@ -207,7 +210,7 @@
                     <Border x:Name="SenderInitialsAvatar"
                             Width="36"
                             Height="36"
-                            Background="#FFEA4335"
+                            Background="{Binding SenderAvatarBackground}"
                             CornerRadius="18"
                             Visibility="{Binding ShowSenderInitials, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <TextBlock HorizontalAlignment="Center"

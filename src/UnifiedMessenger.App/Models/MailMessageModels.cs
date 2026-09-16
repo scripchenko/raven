@@ -76,20 +76,22 @@ public sealed record MailMessageSummary(
 
     public string SenderAvatarBackground
     {
-        get
-        {
-            string identity = string.IsNullOrWhiteSpace(FromAddress)
-                ? SenderDisplay.Trim()
-                : FromAddress.Trim();
-            uint hash = 2166136261;
-            foreach (char symbol in identity)
-            {
-                hash ^= char.ToLowerInvariant(symbol);
-                hash = unchecked(hash * 16777619u);
-            }
+        get => GetSenderAvatarBackground(SenderDisplay, FromAddress);
+    }
 
-            return SenderAvatarBackgroundPalette[hash % (uint)SenderAvatarBackgroundPalette.Length];
+    internal static string GetSenderAvatarBackground(string displayName, string address)
+    {
+        string identity = string.IsNullOrWhiteSpace(address)
+            ? displayName.Trim()
+            : address.Trim();
+        uint hash = 2166136261;
+        foreach (char symbol in identity)
+        {
+            hash ^= char.ToLowerInvariant(symbol);
+            hash = unchecked(hash * 16777619u);
         }
+
+        return SenderAvatarBackgroundPalette[hash % (uint)SenderAvatarBackgroundPalette.Length];
     }
 
     public string DisplayDate
