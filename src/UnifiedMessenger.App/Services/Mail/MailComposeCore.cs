@@ -134,7 +134,11 @@ internal sealed class MailMimeMessageFactory(TimeProvider timeProvider) : IMailM
             throw new MailComposeValidationException("Параметры отправки письма некорректны.");
         }
 
-        MailboxAddress sender = CreateMailbox(account.DisplayName, account.EmailAddress);
+        MailProviderFeaturePolicy providerPolicy = MailProviderFeaturePolicies.Get(account.Provider);
+        string? senderDisplayName = providerPolicy.IncludeAccountDisplayNameInFromHeader
+            ? account.DisplayName
+            : null;
+        MailboxAddress sender = CreateMailbox(senderDisplayName, account.EmailAddress);
         MailboxAddress[] to = request.To.Select(CreateMailbox).ToArray();
         MailboxAddress[] cc = request.Cc.Select(CreateMailbox).ToArray();
         MailboxAddress[] bcc = request.Bcc.Select(CreateMailbox).ToArray();

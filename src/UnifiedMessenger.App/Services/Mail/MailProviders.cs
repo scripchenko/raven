@@ -96,7 +96,7 @@ public sealed class MailRuMailProvider(IMailConnectionValidator validator) : Pas
             | MailProviderCapabilities.MessageListing
             | MailProviderCapabilities.MessageReading
             | MailProviderCapabilities.Sending,
-        "Используйте пароль для внешнего приложения Mail.ru.");
+        "Используйте пароль для внешнего приложения Mail.ru с полным доступом к Почте. Доступ по IMAP/SMTP должен быть включён.");
 
     public override MailConnectionSettings CreateConnectionSettings(
         MailAccountConnectionRequest request,

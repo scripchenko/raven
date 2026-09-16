@@ -7,21 +7,25 @@ using MailFolder = UnifiedMessenger.App.Models.MailFolder;
 
 namespace UnifiedMessenger.Tests;
 
-public sealed class YandexPasswordReplacementTests
+public sealed class MailPasswordReplacementTests
 {
-    [Fact]
-    public async Task SuccessfulReplacementValidatesBeforeReplacingSameCredentialKey()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task SuccessfulReplacementValidatesBeforeReplacingSameCredentialKey(
+        MailProviderType providerType)
     {
         List<string> events = [];
-        RecordingProvider provider = new(events);
-        MailAccount account = Account("one@yandex.test");
+        RecordingProvider provider = new(providerType, events);
+        MailAccount account = Account("one@example.test", providerType);
         RecordingCredentialStore credentials = new(events);
         credentials.Values[account.CredentialKey] = MailCredential.CreatePassword("old-password");
         RecordingSettingsStore settings = new(new AppSettings { MailAccounts = [account] });
         MailAccountProvisioningService service = Service(provider, credentials, settings);
         Guid originalId = account.Id;
+        string originalCredentialKey = account.CredentialKey;
 
-        MailAccountPasswordReplacementResult result = await service.ReplaceYandexPasswordAsync(
+        MailAccountPasswordReplacementResult result = await service.ReplaceAppPasswordAsync(
             account,
             "new-password");
 
@@ -29,20 +33,24 @@ public sealed class YandexPasswordReplacementTests
         Assert.Equal(["validate", "save"], events);
         Assert.Equal("new-password", credentials.Values[account.CredentialKey].Secret);
         Assert.Equal(originalId, account.Id);
+        Assert.Equal(originalCredentialKey, account.CredentialKey);
         Assert.Same(account, Assert.Single(settings.Current.MailAccounts));
         Assert.Equal(0, settings.SaveCount);
     }
 
-    [Fact]
-    public async Task FailedValidationKeepsOldCredentialAndRetryCanSucceed()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task FailedValidationKeepsOldCredentialAndRetryCanSucceed(
+        MailProviderType providerType)
     {
-        RecordingProvider provider = new([])
+        RecordingProvider provider = new(providerType, [])
         {
             Result = MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.AuthenticationFailed,
                 "IMAP отклонил учётные данные.")
         };
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         RecordingCredentialStore credentials = new([]);
         credentials.Values[account.CredentialKey] = MailCredential.CreatePassword("old-password");
         MailAccountProvisioningService service = Service(
@@ -50,7 +58,7 @@ public sealed class YandexPasswordReplacementTests
             credentials,
             new RecordingSettingsStore(new AppSettings { MailAccounts = [account] }));
 
-        MailAccountPasswordReplacementResult failed = await service.ReplaceYandexPasswordAsync(
+        MailAccountPasswordReplacementResult failed = await service.ReplaceAppPasswordAsync(
             account,
             "wrong-password");
 
@@ -60,7 +68,7 @@ public sealed class YandexPasswordReplacementTests
         Assert.Equal(0, credentials.SaveCount);
 
         provider.Result = MailConnectionValidationResult.Success(new MailIdentity(account.EmailAddress, null));
-        MailAccountPasswordReplacementResult retried = await service.ReplaceYandexPasswordAsync(
+        MailAccountPasswordReplacementResult retried = await service.ReplaceAppPasswordAsync(
             account,
             "correct-password");
 
@@ -72,9 +80,9 @@ public sealed class YandexPasswordReplacementTests
     [Fact]
     public async Task ReplacementIsAccountScoped()
     {
-        RecordingProvider provider = new([]);
-        MailAccount first = Account("first@yandex.test");
-        MailAccount second = Account("second@yandex.test");
+        RecordingProvider provider = new(MailProviderType.MailRu, []);
+        MailAccount first = Account("first@mail.test", MailProviderType.MailRu);
+        MailAccount second = Account("second@mail.test", MailProviderType.MailRu);
         RecordingCredentialStore credentials = new([]);
         credentials.Values[first.CredentialKey] = MailCredential.CreatePassword("first-old");
         credentials.Values[second.CredentialKey] = MailCredential.CreatePassword("second-old");
@@ -83,7 +91,7 @@ public sealed class YandexPasswordReplacementTests
             credentials,
             new RecordingSettingsStore(new AppSettings { MailAccounts = [first, second] }));
 
-        await service.ReplaceYandexPasswordAsync(first, "first-new");
+        await service.ReplaceAppPasswordAsync(first, "first-new");
 
         Assert.Equal("first-new", credentials.Values[first.CredentialKey].Secret);
         Assert.Equal("second-old", credentials.Values[second.CredentialKey].Secret);
@@ -93,7 +101,7 @@ public sealed class YandexPasswordReplacementTests
     [Fact]
     public async Task GmailAccountCannotEnterPasswordReplacementFlow()
     {
-        RecordingProvider provider = new([]);
+        RecordingProvider provider = new(MailProviderType.Yandex, []);
         MailAccount gmail = WithProvider(
             Account("user@gmail.test"),
             MailProviderType.Gmail,
@@ -105,7 +113,7 @@ public sealed class YandexPasswordReplacementTests
             credentials,
             new RecordingSettingsStore(new AppSettings { MailAccounts = [gmail] }));
 
-        MailAccountPasswordReplacementResult result = await service.ReplaceYandexPasswordAsync(
+        MailAccountPasswordReplacementResult result = await service.ReplaceAppPasswordAsync(
             gmail,
             "not-a-google-password");
 
@@ -116,7 +124,7 @@ public sealed class YandexPasswordReplacementTests
     }
 
     [Fact]
-    public void PasswordUiStartsEmptyAndSettingsExposeActionOnlyThroughYandexFlag()
+    public void PasswordUiStartsEmptyAndSettingsUseProviderFeaturePolicy()
     {
         XDocument dialog = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "ChangeMailAppPasswordWindow.xaml"));
@@ -133,15 +141,22 @@ public sealed class YandexPasswordReplacementTests
             "CanChangeAppPassword",
             (string?)action.Attribute("Visibility") ?? string.Empty,
             StringComparison.Ordinal);
+        Assert.True(MailProviderFeaturePolicies.Get(MailProviderType.Yandex).SupportsAppPasswordReplacement);
+        Assert.True(MailProviderFeaturePolicies.Get(MailProviderType.MailRu).SupportsAppPasswordReplacement);
+        Assert.False(MailProviderFeaturePolicies.Get(MailProviderType.Gmail).SupportsAppPasswordReplacement);
+        Assert.False(MailProviderFeaturePolicies.Get(MailProviderType.GenericImap).SupportsAppPasswordReplacement);
         Assert.DoesNotContain(typeof(MailAccount).GetProperties(), property =>
             property.Name.Contains("Password", StringComparison.OrdinalIgnoreCase)
             || property.Name.Contains("Secret", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public async Task ActiveYandexAccountRebaselinesAfterPasswordReplacementWithoutChangingIdentity()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ActiveManagedImapAccountRebaselinesAfterPasswordReplacementWithoutChangingIdentity(
+        MailProviderType providerType)
     {
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         RecordingReadProvider provider = new();
         using MailInboxViewModel viewModel = new(new ReadProviderFactory(provider));
         await viewModel.ActivateAsync(account);
@@ -156,6 +171,27 @@ public sealed class YandexPasswordReplacementTests
         Assert.False(viewModel.HasListError);
     }
 
+    [Fact]
+    public async Task ManagedImapPolicyDoesNotLeakYandexPresentationIntoMailRu()
+    {
+        MailProviderFeaturePolicy yandex = MailProviderFeaturePolicies.Get(MailProviderType.Yandex);
+        MailProviderFeaturePolicy mailRu = MailProviderFeaturePolicies.Get(MailProviderType.MailRu);
+        MailProviderFeaturePolicy generic = MailProviderFeaturePolicies.Get(MailProviderType.GenericImap);
+        MailAccount account = Account("one@mail.test", MailProviderType.MailRu);
+        using MailInboxViewModel viewModel = new(new ReadProviderFactory(new RecordingReadProvider()));
+
+        await viewModel.ActivateAsync(account);
+
+        Assert.True(yandex.UsesYandexPresentation);
+        Assert.True(yandex.IsManagedImap);
+        Assert.False(mailRu.UsesYandexPresentation);
+        Assert.True(mailRu.IsManagedImap);
+        Assert.False(generic.UsesYandexPresentation);
+        Assert.False(generic.IsManagedImap);
+        Assert.True(viewModel.IsManagedImapMailbox);
+        Assert.False(viewModel.IsYandexMailbox);
+    }
+
     private static MailAccountProvisioningService Service(
         IMailProvider provider,
         IMailCredentialStore credentials,
@@ -167,10 +203,12 @@ public sealed class YandexPasswordReplacementTests
             settings,
             TimeProvider.System);
 
-    private static MailAccount Account(string email) => new()
+    private static MailAccount Account(
+        string email,
+        MailProviderType provider = MailProviderType.Yandex) => new()
     {
         Id = Guid.NewGuid(),
-        Provider = MailProviderType.Yandex,
+        Provider = provider,
         EmailAddress = email,
         DisplayName = "Работа",
         CredentialKey = Guid.NewGuid().ToString("N"),
@@ -205,12 +243,14 @@ public sealed class YandexPasswordReplacementTests
         throw new FileNotFoundException(Path.Combine(relativePath));
     }
 
-    private sealed class RecordingProvider(List<string> events) : IMailProvider
+    private sealed class RecordingProvider(
+        MailProviderType providerType,
+        List<string> events) : IMailProvider
     {
-        public MailProviderType ProviderType => MailProviderType.Yandex;
+        public MailProviderType ProviderType => providerType;
         public MailProviderDescriptor Descriptor { get; } = new(
-            MailProviderType.Yandex,
-            "Яндекс Почта",
+            providerType,
+            providerType is MailProviderType.MailRu ? "Почта Mail.ru" : "Яндекс Почта",
             MailAuthenticationKind.Password,
             MailProviderCapabilities.ConnectionValidation,
             string.Empty);
@@ -278,7 +318,8 @@ public sealed class YandexPasswordReplacementTests
     {
         public int FolderLoadCount { get; private set; }
         public int PageLoadCount { get; private set; }
-        public bool Supports(MailProviderType providerType) => providerType is MailProviderType.Yandex;
+        public bool Supports(MailProviderType providerType) =>
+            providerType is MailProviderType.Yandex or MailProviderType.MailRu;
 
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
             MailAccount account,

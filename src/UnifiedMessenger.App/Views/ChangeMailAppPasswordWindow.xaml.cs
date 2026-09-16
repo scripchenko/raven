@@ -19,11 +19,21 @@ public partial class ChangeMailAppPasswordWindow : Window
         _provisioningService = provisioningService
             ?? throw new ArgumentNullException(nameof(provisioningService));
         EmailAddress = account.EmailAddress;
+        PasswordGuidance = account.Provider switch
+        {
+            MailProviderType.MailRu =>
+                "Используйте новый пароль для внешнего приложения Mail.ru с полным доступом к Почте. Доступ по IMAP/SMTP должен быть включён.",
+            MailProviderType.Yandex =>
+                "Используйте новый пароль приложения Яндекса. Он будет проверен через IMAP и SMTP до замены сохранённых учётных данных.",
+            _ =>
+                "Новый пароль будет проверен через IMAP и SMTP до замены сохранённых учётных данных."
+        };
         InitializeComponent();
         DataContext = this;
     }
 
     public string EmailAddress { get; }
+    public string PasswordGuidance { get; }
 
     private async void Save_Click(object sender, RoutedEventArgs eventArgs)
     {
@@ -48,7 +58,7 @@ public partial class ChangeMailAppPasswordWindow : Window
         try
         {
             MailAccountPasswordReplacementResult result =
-                await _provisioningService.ReplaceYandexPasswordAsync(
+                await _provisioningService.ReplaceAppPasswordAsync(
                     _account,
                     password,
                     _operationCancellation.Token);

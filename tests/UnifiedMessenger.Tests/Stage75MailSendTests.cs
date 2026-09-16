@@ -404,6 +404,61 @@ public sealed class Stage75MailSendTests
     }
 
     [Fact]
+    public void MailRuMime_UsesAuthenticatedAddressWithoutAccountLabelInFromHeader()
+    {
+        MailAccount account = Account(MailProviderType.MailRu);
+        account.DisplayName = "Пользовательское название аккаунта";
+
+        MailMimeSubmission submission = CreateMimeFactory().Create(account, Request(account));
+        MailboxAddress from = Assert.Single(submission.Message.From.Mailboxes);
+
+        Assert.Equal(account.EmailAddress, from.Address);
+        Assert.Equal(string.Empty, from.Name);
+        Assert.Equal(account.EmailAddress, submission.EnvelopeSender.Address);
+        Assert.Equal(string.Empty, submission.EnvelopeSender.Name);
+        Assert.DoesNotContain(account.DisplayName, submission.Message.From.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(MailProviderType.Gmail)]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.GenericImap)]
+    public void OtherProviderMime_PreservesExistingFromDisplayName(MailProviderType providerType)
+    {
+        MailAccount account = Account(providerType);
+
+        MailMimeSubmission submission = CreateMimeFactory().Create(account, Request(account));
+        MailboxAddress from = Assert.Single(submission.Message.From.Mailboxes);
+
+        Assert.Equal(account.EmailAddress, from.Address);
+        Assert.Equal(account.DisplayName, from.Name);
+        Assert.Equal(account.EmailAddress, submission.EnvelopeSender.Address);
+        Assert.Equal(account.DisplayName, submission.EnvelopeSender.Name);
+    }
+
+    [Fact]
+    public async Task MailRuSuccessfulSmtp_AppendsExactlyOneSentCopyWithoutProviderIdentityLeakage()
+    {
+        RecordingSmtpSubmissionClient smtp = new();
+        RecordingImapSentCopyClient sentCopy = new();
+        SmtpMailSendProvider provider = CreateSmtpProvider(smtp, sentCopy: sentCopy);
+        MailAccount account = Account(MailProviderType.MailRu);
+        account.DisplayName = "Личная подпись интерфейса";
+
+        MailSendResult result = await provider.SendAsync(account, Request(account));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, smtp.SendCount);
+        Assert.Equal(1, sentCopy.AppendCount);
+        Assert.Equal(account.EmailAddress, smtp.Server!.Username);
+        Assert.Equal(account.EmailAddress, smtp.EnvelopeSender!.Address);
+        Assert.Equal(string.Empty, smtp.EnvelopeSender.Name);
+        Assert.Equal(account.EmailAddress, smtp.Message!.From.Mailboxes.Single().Address);
+        Assert.Equal(string.Empty, smtp.Message.From.Mailboxes.Single().Name);
+        Assert.Same(smtp.Message, sentCopy.Message);
+    }
+
+    [Fact]
     public async Task GenericSmtpSuccess_UsesConfiguredImapForSingleSentAppend()
     {
         RecordingSmtpSubmissionClient smtp = new();
@@ -1632,6 +1687,7 @@ public sealed class Stage75MailSendTests
         public MailServerSettings? Server { get; private set; }
         public string? Secret { get; private set; }
         public MimeMessage? Message { get; private set; }
+        public MailboxAddress? EnvelopeSender { get; private set; }
         public IReadOnlyList<MailboxAddress>? EnvelopeRecipients { get; private set; }
         public MailSubmissionException? Failure { get; init; }
 
@@ -1647,6 +1703,7 @@ public sealed class Stage75MailSendTests
             Server = server;
             Secret = secret;
             Message = message;
+            EnvelopeSender = envelopeSender;
             EnvelopeRecipients = envelopeRecipients;
             return Failure is null ? Task.CompletedTask : Task.FromException(Failure);
         }

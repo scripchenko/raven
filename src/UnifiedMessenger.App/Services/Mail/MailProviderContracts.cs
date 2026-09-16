@@ -160,7 +160,7 @@ public interface IMailAccountProvisioningService
     Task<MailAccountProvisioningResult> ConnectGmailAsync(
         CancellationToken cancellationToken = default);
 
-    Task<MailAccountPasswordReplacementResult> ReplaceYandexPasswordAsync(
+    Task<MailAccountPasswordReplacementResult> ReplaceAppPasswordAsync(
         MailAccount account,
         string newPassword,
         CancellationToken cancellationToken = default) =>

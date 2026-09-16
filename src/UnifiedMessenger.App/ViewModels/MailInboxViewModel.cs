@@ -245,6 +245,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 OnPropertyChanged(nameof(IsGmailMailboxAvailable));
                 OnPropertyChanged(nameof(IsMailboxManagementAvailable));
                 OnPropertyChanged(nameof(IsYandexMailbox));
+                OnPropertyChanged(nameof(IsManagedImapMailbox));
                 OnPropertyChanged(nameof(IsSearchAvailable));
                 OnPropertyChanged(nameof(CanUseMailboxActions));
                 OnPropertyChanged(nameof(RequiresGmailReauthentication));
@@ -645,7 +646,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ActiveAccount is { Provider: MailProviderType.Gmail, IsEnabled: true }
         && _gmailMailboxService is not null;
     public bool IsYandexMailbox =>
-        ActiveAccount is { Provider: MailProviderType.Yandex, IsEnabled: true };
+        ActiveAccount is { IsEnabled: true } account
+        && MailProviderFeaturePolicies.Get(account.Provider).UsesYandexPresentation;
+    public bool IsManagedImapMailbox =>
+        ActiveAccount is { IsEnabled: true } account
+        && MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap;
     public bool IsMailboxManagementAvailable => IsGmailMailboxAvailable
         || ActiveAccount is { IsEnabled: true } account && _mailboxService?.Supports(account.Provider) == true;
     public bool CanUseMailboxActions => IsMailboxManagementAvailable && !IsMailboxChanging
@@ -1127,7 +1132,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(account);
-        if (account.Provider is not MailProviderType.Yandex)
+        if (!MailProviderFeaturePolicies.Get(account.Provider).SupportsAppPasswordReplacement)
         {
             return;
         }

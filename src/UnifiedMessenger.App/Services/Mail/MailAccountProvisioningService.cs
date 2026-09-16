@@ -226,18 +226,19 @@ public sealed class MailAccountProvisioningService(
         }
     }
 
-    public async Task<MailAccountPasswordReplacementResult> ReplaceYandexPasswordAsync(
+    public async Task<MailAccountPasswordReplacementResult> ReplaceAppPasswordAsync(
         MailAccount account,
         string newPassword,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(account);
-        if (account.Provider is not MailProviderType.Yandex
+        MailProviderFeaturePolicy policy = MailProviderFeaturePolicies.Get(account.Provider);
+        if (!policy.SupportsAppPasswordReplacement
             || account.AuthenticationKind is not MailAuthenticationKind.Password)
         {
             return MailAccountPasswordReplacementResult.Failure(
                 MailConnectionFailureKind.InvalidConfiguration,
-                "Пароль приложения можно изменить только для аккаунта Яндекс Почты.");
+                "Изменение пароля приложения для этого аккаунта недоступно.");
         }
 
         if (string.IsNullOrWhiteSpace(newPassword))
@@ -247,10 +248,10 @@ public sealed class MailAccountProvisioningService(
                 "Введите новый пароль приложения.");
         }
 
-        IMailProvider provider = providerFactory.Get(MailProviderType.Yandex);
+        IMailProvider provider = providerFactory.Get(account.Provider);
         MailConnectionValidationResult validation = await provider.ValidateAsync(
             new MailAccountConnectionRequest(
-                MailProviderType.Yandex,
+                account.Provider,
                 account.EmailAddress,
                 account.DisplayName),
             newPassword,
@@ -267,7 +268,7 @@ public sealed class MailAccountProvisioningService(
         {
             MailAccount? storedAccount = settingsStore.Current.MailAccounts.FirstOrDefault(candidate =>
                 candidate.Id == account.Id
-                && candidate.Provider is MailProviderType.Yandex
+                && candidate.Provider == account.Provider
                 && candidate.AuthenticationKind is MailAuthenticationKind.Password);
             if (storedAccount is null
                 || !string.Equals(storedAccount.CredentialKey, account.CredentialKey, StringComparison.Ordinal)

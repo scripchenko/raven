@@ -2,6 +2,7 @@ using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Mail;
 
 namespace UnifiedMessenger.App.ViewModels;
 
@@ -36,7 +37,8 @@ public sealed partial class SettingsMailAccountViewModel : ObservableObject, IDi
         _ => "M"
     };
     public bool IsEnabled => Account.IsEnabled;
-    public bool CanChangeAppPassword => Account.Provider is MailProviderType.Yandex;
+    public bool CanChangeAppPassword =>
+        MailProviderFeaturePolicies.Get(Account.Provider).SupportsAppPasswordReplacement;
 
     [RelayCommand]
     private void Open() => _owner.OpenMailAccount(Account);
