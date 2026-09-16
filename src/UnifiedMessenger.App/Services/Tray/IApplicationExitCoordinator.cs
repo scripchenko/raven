@@ -9,6 +9,7 @@ public interface IApplicationExitCoordinator
     bool IsSessionEnding { get; }
     void RequestExit();
     bool TryBeginShutdown();
+    void CancelShutdownAttempt();
     void CompleteShutdown();
     void BeginSessionEnding();
     bool ShouldHideToTray(bool closeToTray, bool applicationShutdownStarted);

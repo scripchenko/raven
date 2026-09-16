@@ -7,6 +7,8 @@ public interface IAppPaths
     string SettingsFilePath { get; }
     string WebViewDataFolder { get; }
     string MailCredentialsFolder => System.IO.Path.Combine(LocalDataFolder, "Credentials", "Mail");
+    string YandexDraftRecoveryFilePath =>
+        System.IO.Path.Combine(LocalDataFolder, "Recovery", "YandexDrafts", "recovery.bin");
     string RemoteImageSenderTrustFolder =>
         System.IO.Path.Combine(LocalDataFolder, "Privacy", "RemoteImageSenderTrust");
     string NotificationSoundsFolder => System.IO.Path.Combine(LocalDataFolder, "Sounds");

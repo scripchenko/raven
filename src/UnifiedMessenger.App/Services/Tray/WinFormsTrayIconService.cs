@@ -123,9 +123,7 @@ public sealed class WinFormsTrayIconService : ITrayIconService
             return;
         }
 
-        EventHandler? handler = ExitRequested;
-        BeginShutdown();
-        handler?.Invoke(this, EventArgs.Empty);
+        ExitRequested?.Invoke(this, EventArgs.Empty);
     }
     private void OnBalloonClicked(object? sender, EventArgs eventArgs) => BalloonClicked?.Invoke(this, EventArgs.Empty);
     private void OnBalloonClosed(object? sender, EventArgs eventArgs) => BalloonClosed?.Invoke(this, EventArgs.Empty);

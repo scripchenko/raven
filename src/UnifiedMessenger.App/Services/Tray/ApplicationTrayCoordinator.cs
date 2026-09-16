@@ -151,7 +151,6 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
 
     private void OnExitRequested(object? sender, EventArgs eventArgs)
     {
-        BeginShutdown();
         _exitCoordinator.RequestExit();
     }
 

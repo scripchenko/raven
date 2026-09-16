@@ -217,6 +217,23 @@ public sealed class YandexDraftChangedEventArgs(Guid accountId) : EventArgs
     public Guid AccountId { get; } = accountId;
 }
 
+public enum ServerDraftFlushStatus
+{
+    NoDirtyDrafts,
+    AllConfirmedSaved,
+    Failed,
+    TimedOutOrCanceled,
+    Ambiguous
+}
+
+public sealed record ServerDraftFlushResult(
+    ServerDraftFlushStatus Status,
+    IReadOnlyList<Guid> AffectedAccountIds)
+{
+    public bool CanShutdown => Status is ServerDraftFlushStatus.NoDirtyDrafts
+        or ServerDraftFlushStatus.AllConfirmedSaved;
+}
+
 public sealed class MailComposeViewModel : ObservableObject, IDisposable
 {
     public static readonly TimeSpan GmailDraftAutosaveDelay = TimeSpan.FromSeconds(2);
@@ -229,6 +246,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     private readonly IGmailDraftService? _gmailDraftService;
     private readonly IYandexDraftService? _yandexDraftService;
     private readonly IMailDraftAutosaveScheduler _draftAutosaveScheduler;
+    private readonly IYandexDraftRecoveryStore? _yandexDraftRecoveryStore;
+    private readonly TimeSpan _finalAutosaveTimeout;
     private readonly Dictionary<Guid, MailComposeDraft> _drafts = [];
     private readonly Dictionary<Guid, GmailComposeDraftState> _gmailDraftStates = [];
     private readonly Dictionary<Guid, YandexComposeDraftState> _yandexDraftStates = [];
@@ -251,7 +270,9 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         IMailAttachmentDialogService? attachmentDialogService = null,
         IGmailDraftService? gmailDraftService = null,
         IMailDraftAutosaveScheduler? draftAutosaveScheduler = null,
-        IYandexDraftService? yandexDraftService = null)
+        IYandexDraftService? yandexDraftService = null,
+        IYandexDraftRecoveryStore? yandexDraftRecoveryStore = null,
+        TimeSpan? finalAutosaveTimeout = null)
     {
         _providerFactory = providerFactory;
         _requestFactory = requestFactory;
@@ -260,6 +281,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         _attachmentDialogService = attachmentDialogService;
         _gmailDraftService = gmailDraftService;
         _yandexDraftService = yandexDraftService;
+        _yandexDraftRecoveryStore = yandexDraftRecoveryStore;
+        _finalAutosaveTimeout = finalAutosaveTimeout ?? FinalAutosaveTimeout;
         _draftAutosaveScheduler = draftAutosaveScheduler ?? new SystemMailDraftAutosaveScheduler();
         NewMessageCommand = new RelayCommand(StartNewMessage, CanStartNewMessage);
         RevealCopyFieldsCommand = new RelayCommand(RevealCopyFields, CanRevealCopyFields);
@@ -646,6 +669,10 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                     yandexCleanupWarning = "Письмо отправлено, но сохранённый черновик не удалось удалить.";
                 }
             }
+            if (account.Provider is MailProviderType.Yandex)
+            {
+                _ = _yandexDraftRecoveryStore?.Remove(account.Id);
+            }
             RemoveDraftSession(account.Id);
             if (ActiveAccount?.Id == account.Id)
             {
@@ -838,6 +865,13 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             && _yandexDraftStates.TryGetValue(yandexAccount.Id, out YandexComposeDraftState? yandexState))
         {
             yandexState.CancelDebounce();
+            if (yandexState.RecoveryRequiresReconciliation)
+            {
+                if (!await ReconcileRecoveredYandexDraftAsync(yandexState, _lifetimeCancellation.Token))
+                {
+                    return;
+                }
+            }
             yandexState.RequiresExplicitRetry = false;
             await SaveLatestYandexDraftAsync(yandexState, force: false, _lifetimeCancellation.Token);
         }
@@ -865,6 +899,17 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             await state.Gate.WaitAsync(_lifetimeCancellation.Token);
             try
             {
+                if (state.RecoveryRequiresReconciliation)
+                {
+                    _ = _yandexDraftRecoveryStore?.Remove(account.Id);
+                    RemoveDraftSession(account.Id);
+                    Draft = null;
+                    FailureKind = null;
+                    ErrorMessage = null;
+                    DraftSaveStatusText = null;
+                    return;
+                }
+
                 if (state.RequiresExplicitRetry)
                 {
                     FailureKind = MailSendFailureKind.Ambiguous;
@@ -879,6 +924,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                     YandexDraftChanged?.Invoke(this, new YandexDraftChangedEventArgs(account.Id));
                 }
 
+                _ = _yandexDraftRecoveryStore?.Remove(account.Id);
                 RemoveDraftSession(account.Id);
                 Draft = null;
                 FailureKind = null;
@@ -968,7 +1014,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _lifetimeCancellation.Token);
-        timeout.CancelAfter(FinalAutosaveTimeout);
+        timeout.CancelAfter(_finalAutosaveTimeout);
         foreach (GmailComposeDraftState state in _gmailDraftStates.Values.ToArray())
         {
             state.CancelDebounce();
@@ -1070,15 +1116,127 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task FlushPendingServerDraftsAsync(CancellationToken cancellationToken = default)
+    private YandexDraftRecoverySnapshot CreateRecoverySnapshot(YandexComposeDraftState state)
     {
-        await FlushPendingGmailDraftsAsync(cancellationToken);
-        ThrowIfDisposed();
+        MailComposeInput input = state.Draft.Snapshot();
+        return new(
+            state.Account.Id,
+            DateTimeOffset.UtcNow,
+            state.Identity,
+            state.LogicalId,
+            input.To,
+            input.Cc,
+            input.Bcc,
+            input.Subject,
+            input.TextBody,
+            input.ReplyContext?.InReplyTo,
+            input.ReplyContext?.References.ToArray() ?? [],
+            input.Attachments.Select(YandexDraftRecoveryAttachment.Capture).ToArray());
+    }
+
+    private async Task<RecoveryIdentityState> CheckRecoveredIdentityAsync(
+        MailAccount account,
+        YandexDraftIdentity identity,
+        string? logicalId,
+        CancellationToken cancellationToken)
+    {
+        if (_yandexDraftService is null || string.IsNullOrWhiteSpace(logicalId))
+        {
+            return RecoveryIdentityState.Incompatible;
+        }
+
+        string messageKey = ImapMailReadProvider.CreateMessageKey(
+            MailFolderKind.Drafts,
+            identity.UidValidity,
+            identity.UniqueId);
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _lifetimeCancellation.Token);
-        timeout.CancelAfter(FinalAutosaveTimeout);
-        foreach (YandexComposeDraftState state in _yandexDraftStates.Values.ToArray())
+        timeout.CancelAfter(_finalAutosaveTimeout);
+        try
+        {
+            YandexDraftLoadResult loaded = await _yandexDraftService.LoadAsync(
+                account,
+                messageKey,
+                timeout.Token);
+            return string.Equals(loaded.Identity.LogicalId, logicalId, StringComparison.Ordinal)
+                && loaded.Identity.UidValidity == identity.UidValidity
+                && loaded.Identity.UniqueId == identity.UniqueId
+                    ? RecoveryIdentityState.Compatible
+                    : RecoveryIdentityState.Incompatible;
+        }
+        catch (YandexDraftException exception) when (
+            exception.FailureKind is MailSendFailureKind.InvalidRequest)
+        {
+            return RecoveryIdentityState.Incompatible;
+        }
+        catch (YandexDraftException)
+        {
+            return RecoveryIdentityState.Unavailable;
+        }
+        catch (OperationCanceledException) when (
+            timeout.IsCancellationRequested
+            && !cancellationToken.IsCancellationRequested
+            && !_lifetimeCancellation.IsCancellationRequested)
+        {
+            return RecoveryIdentityState.Unavailable;
+        }
+    }
+
+    private async Task<bool> ReconcileRecoveredYandexDraftAsync(
+        YandexComposeDraftState state,
+        CancellationToken cancellationToken)
+    {
+        if (!state.RecoveryRequiresReconciliation)
+        {
+            return true;
+        }
+
+        RecoveryIdentityState identityState = state.Identity is YandexDraftIdentity identity
+            ? await CheckRecoveredIdentityAsync(
+                state.Account,
+                identity,
+                state.LogicalId,
+                cancellationToken)
+            : RecoveryIdentityState.Incompatible;
+        if (identityState is RecoveryIdentityState.Unavailable)
+        {
+            FailureKind = MailSendFailureKind.ConnectionFailed;
+            ErrorMessage = "Не удалось проверить восстановленный черновик. Проверьте подключение.";
+            SetDraftSaveStatus(state, "Не удалось сохранить");
+            return false;
+        }
+
+        if (identityState is RecoveryIdentityState.Incompatible)
+        {
+            state.Identity = null;
+            state.LogicalId = null;
+        }
+        state.RecoveryRequiresReconciliation = false;
+        state.RequiresExplicitRetry = false;
+        return true;
+    }
+
+    public async Task<ServerDraftFlushResult> FlushPendingServerDraftsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await FlushPendingGmailDraftsAsync(cancellationToken);
+        ThrowIfDisposed();
+        YandexComposeDraftState[] dirtyStates = _yandexDraftStates.Values
+            .Where(state => state.IsDirty && !state.IsTerminal)
+            .ToArray();
+        if (dirtyStates.Length == 0)
+        {
+            return new(ServerDraftFlushStatus.NoDirtyDrafts, []);
+        }
+
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        timeout.CancelAfter(_finalAutosaveTimeout);
+        List<Guid> failures = [];
+        ServerDraftFlushStatus failureStatus = ServerDraftFlushStatus.Failed;
+        foreach (YandexComposeDraftState state in dirtyStates)
         {
             state.CancelDebounce();
             if (!state.IsDirty || state.IsTerminal)
@@ -1088,13 +1246,127 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
 
             try
             {
-                await SaveLatestYandexDraftAsync(state, force: false, timeout.Token);
+                if (!await SaveLatestYandexDraftAsync(state, force: false, timeout.Token))
+                {
+                    failures.Add(state.Account.Id);
+                    if (state.RequiresExplicitRetry
+                        || FailureKind is MailSendFailureKind.Ambiguous)
+                    {
+                        failureStatus = ServerDraftFlushStatus.Ambiguous;
+                    }
+                }
             }
             catch (OperationCanceledException) when (timeout.IsCancellationRequested)
             {
-                return;
+                failures.Add(state.Account.Id);
+                failureStatus = ServerDraftFlushStatus.TimedOutOrCanceled;
+                break;
             }
         }
+
+        return failures.Count == 0
+            ? new(ServerDraftFlushStatus.AllConfirmedSaved, dirtyStates.Select(state => state.Account.Id).ToArray())
+            : new(failureStatus, failures.Distinct().ToArray());
+    }
+
+    public bool PersistDirtyYandexDraftRecovery()
+    {
+        ThrowIfDisposed();
+        if (_yandexDraftRecoveryStore is null)
+        {
+            return !_yandexDraftStates.Values.Any(state => state.IsDirty && !state.IsTerminal);
+        }
+
+        YandexDraftRecoverySnapshot[] snapshots = _yandexDraftStates.Values
+            .Where(state => state.IsDirty && !state.IsTerminal)
+            .Select(CreateRecoverySnapshot)
+            .ToArray();
+        return snapshots.Length == 0 || _yandexDraftRecoveryStore.Upsert(snapshots);
+    }
+
+    internal async Task RestoreYandexDraftRecoveriesAsync(
+        IEnumerable<MailAccount> accounts,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        if (_yandexDraftRecoveryStore is null || _yandexDraftService is null)
+        {
+            return;
+        }
+
+        MailAccount? activeAccount = ActiveAccount;
+        IReadOnlyDictionary<Guid, MailAccount> yandexAccounts = accounts
+            .Where(account => account.Provider is MailProviderType.Yandex && account.IsEnabled)
+            .ToDictionary(account => account.Id);
+        foreach (YandexDraftRecoverySnapshot snapshot in _yandexDraftRecoveryStore.Load())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!yandexAccounts.TryGetValue(snapshot.AccountId, out MailAccount? account)
+                || _yandexDraftStates.ContainsKey(account.Id))
+            {
+                continue;
+            }
+
+            MailComposeDraft draft;
+            try
+            {
+                draft = new MailComposeDraft(snapshot.RestoreTemplate(), account.Id);
+            }
+            catch (Exception exception) when (exception is InvalidDataException or ArgumentException)
+            {
+                continue;
+            }
+
+            YandexDraftIdentity? identity = snapshot.Identity;
+            string? logicalId = snapshot.LogicalId;
+            bool requiresReconciliation = false;
+            bool detachedFromServer = false;
+            if (identity is not null)
+            {
+                RecoveryIdentityState identityState = await CheckRecoveredIdentityAsync(
+                    account,
+                    identity,
+                    logicalId,
+                    cancellationToken);
+                if (identityState is RecoveryIdentityState.Incompatible)
+                {
+                    identity = null;
+                    logicalId = null;
+                    detachedFromServer = true;
+                }
+                else if (identityState is RecoveryIdentityState.Unavailable)
+                {
+                    requiresReconciliation = true;
+                }
+            }
+
+            InstallDraft(
+                account,
+                draft,
+                identity: null,
+                initiallyDirty: true,
+                yandexIdentity: identity,
+                scheduleAutosave: false);
+            YandexComposeDraftState state = _yandexDraftStates[account.Id];
+            state.LogicalId = logicalId;
+            state.RecoveryRequiresReconciliation = requiresReconciliation;
+            state.RequiresExplicitRetry = requiresReconciliation;
+            if (requiresReconciliation)
+            {
+                SetDraftSaveStatus(state, "Не удалось сохранить");
+            }
+            else if (detachedFromServer)
+            {
+                SetDraftSaveStatus(state, "Восстановлена локальная копия");
+            }
+
+            if (!requiresReconciliation)
+            {
+                ScheduleYandexDraftAutosave(state);
+            }
+        }
+
+        ActivateAccount(activeAccount);
     }
 
     private void InstallDraft(
@@ -1102,7 +1374,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         MailComposeDraft draft,
         GmailDraftIdentity? identity,
         bool initiallyDirty,
-        YandexDraftIdentity? yandexIdentity = null)
+        YandexDraftIdentity? yandexIdentity = null,
+        bool scheduleAutosave = true)
     {
         RemoveDraftSession(account.Id);
         _drafts[account.Id] = draft;
@@ -1131,7 +1404,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
 
             _yandexDraftStates[account.Id] = state;
             draft.Changed += OnDraftChanged;
-            if (initiallyDirty)
+            if (initiallyDirty && scheduleAutosave)
             {
                 ScheduleYandexDraftAutosave(state);
             }
@@ -1344,7 +1617,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         {
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(
                 _lifetimeCancellation.Token);
-            timeout.CancelAfter(FinalAutosaveTimeout);
+            timeout.CancelAfter(_finalAutosaveTimeout);
             bool saved;
             try
             {
@@ -1447,6 +1720,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 if (state.Identity is null && !state.Draft.HasUserContent)
                 {
                     state.MarkSaved(generation);
+                    _ = _yandexDraftRecoveryStore?.Remove(state.Account.Id);
                     SetDraftSaveStatus(state, null);
                     return true;
                 }
@@ -1502,7 +1776,9 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
 
                 state.Identity = result.Identity;
                 state.RequiresExplicitRetry = false;
+                state.RecoveryRequiresReconciliation = false;
                 state.MarkSaved(generation);
+                _ = _yandexDraftRecoveryStore?.Remove(state.Account.Id);
                 YandexDraftChanged?.Invoke(this, new YandexDraftChangedEventArgs(state.Account.Id));
                 FailureKind = null;
                 ErrorMessage = null;
@@ -1536,7 +1812,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         {
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(
                 _lifetimeCancellation.Token);
-            timeout.CancelAfter(FinalAutosaveTimeout);
+            timeout.CancelAfter(_finalAutosaveTimeout);
             bool saved;
             try
             {
@@ -1792,6 +2068,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         public Task PendingTask { get; set; } = Task.CompletedTask;
         public bool IsTerminal { get; private set; }
         public bool RequiresExplicitRetry { get; set; }
+        public bool RecoveryRequiresReconciliation { get; set; }
         public bool IsDirty => Generation > SavedGeneration;
 
         public void MarkDirty() => Generation++;
@@ -1817,6 +2094,13 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             CancelDebounce();
             Lifetime.Cancel();
         }
+    }
+
+    private enum RecoveryIdentityState
+    {
+        Compatible,
+        Incompatible,
+        Unavailable
     }
 
     private sealed class UnavailableSendProviderFactory : IMailSendProviderFactory

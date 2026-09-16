@@ -54,6 +54,20 @@ public sealed class ApplicationExitCoordinator : IApplicationExitCoordinator
         }
     }
 
+    public void CancelShutdownAttempt()
+    {
+        lock (_gate)
+        {
+            if (ShutdownState is not ApplicationShutdownState.ShuttingDown || IsSessionEnding)
+            {
+                return;
+            }
+
+            ShutdownState = ApplicationShutdownState.Running;
+            IsExplicitExitRequested = false;
+        }
+    }
+
     public void BeginSessionEnding()
     {
         lock (_gate)

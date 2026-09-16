@@ -358,7 +358,8 @@ public sealed class Stage4TrayNotificationTests
         Assert.Equal(1, store.SaveCount);
         Assert.Equal(1, window.ActivationCount);
         Assert.True(exit.IsExplicitExitRequested);
-        Assert.True(notifications.WasShutdown);
+        Assert.False(notifications.WasShutdown);
+        Assert.Equal(0, tray.ShutdownCount);
     }
 
     [Fact]

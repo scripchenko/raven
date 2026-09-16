@@ -21,6 +21,8 @@ public sealed class AppPaths : IAppPaths
     public string SettingsFilePath => Path.Combine(RoamingDataFolder, "settings.json");
     public string WebViewDataFolder => Path.Combine(LocalDataFolder, "WebView2");
     public string MailCredentialsFolder => Path.Combine(LocalDataFolder, "Credentials", "Mail");
+    public string YandexDraftRecoveryFilePath =>
+        Path.Combine(LocalDataFolder, "Recovery", "YandexDrafts", "recovery.bin");
     public string RemoteImageSenderTrustFolder =>
         Path.Combine(LocalDataFolder, "Privacy", "RemoteImageSenderTrust");
     public string NotificationSoundsFolder => Path.Combine(LocalDataFolder, "Sounds");

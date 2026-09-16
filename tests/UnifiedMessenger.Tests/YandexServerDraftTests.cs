@@ -1,7 +1,10 @@
 using MailKit;
 using MimeKit;
+using System.Text;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Persistence;
+using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.ViewModels;
 using MailFolder = UnifiedMessenger.App.Models.MailFolder;
 
@@ -534,6 +537,405 @@ public sealed class YandexServerDraftTests
         Assert.True(compose.NewMessageCommand.CanExecute(null));
     }
 
+    [Fact]
+    public async Task ExplicitExitFlush_SuccessConfirmsNewestDirtyYandexDraft()
+    {
+        ManualScheduler scheduler = new();
+        RecordingYandexDraftService drafts = new();
+        using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "latest before exit";
+
+        ServerDraftFlushResult result = await compose.FlushPendingServerDraftsAsync();
+
+        Assert.Equal(ServerDraftFlushStatus.AllConfirmedSaved, result.Status);
+        Assert.True(result.CanShutdown);
+        Assert.Equal("latest before exit", Assert.Single(drafts.Saves).Request.TextBody);
+    }
+
+    [Fact]
+    public async Task ExplicitExitFlush_FailureKeepsComposeIntactAndEditable()
+    {
+        ManualScheduler scheduler = new();
+        RecordingYandexDraftService drafts = new() { FailNext = true };
+        using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "unsaved";
+
+        ServerDraftFlushResult result = await compose.FlushPendingServerDraftsAsync();
+        compose.Draft.TextBody = "still editable";
+
+        Assert.Equal(ServerDraftFlushStatus.Failed, result.Status);
+        Assert.False(result.CanShutdown);
+        Assert.True(compose.IsOpen);
+        Assert.Equal("still editable", compose.Draft.TextBody);
+    }
+
+    [Fact]
+    public async Task ExplicitExitFlush_TimeoutReturnsStructuredTimeoutResult()
+    {
+        ManualScheduler scheduler = new();
+        RecordingYandexDraftService drafts = new() { BlockFirstSave = true };
+        using MailComposeViewModel compose = CreateCompose(
+            drafts,
+            scheduler,
+            finalAutosaveTimeout: TimeSpan.FromMilliseconds(30));
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "dirty";
+
+        ServerDraftFlushResult result = await compose.FlushPendingServerDraftsAsync();
+
+        Assert.Equal(ServerDraftFlushStatus.TimedOutOrCanceled, result.Status);
+        Assert.False(result.CanShutdown);
+        Assert.True(compose.IsOpen);
+    }
+
+    [Fact]
+    public async Task ExplicitExitFlush_CancellationReturnsStructuredResultAndKeepsDraft()
+    {
+        using MailComposeViewModel compose = CreateCompose(
+            new RecordingYandexDraftService(),
+            new ManualScheduler());
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "cancelled but retained";
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+
+        ServerDraftFlushResult result = await compose.FlushPendingServerDraftsAsync(cancellation.Token);
+
+        Assert.Equal(ServerDraftFlushStatus.TimedOutOrCanceled, result.Status);
+        Assert.Equal("cancelled but retained", compose.Draft.TextBody);
+    }
+
+    [Fact]
+    public async Task ExplicitExitFlush_AmbiguousResultCancelsExitWithoutBlindRetry()
+    {
+        ManualScheduler scheduler = new();
+        RecordingYandexDraftService drafts = new() { AmbiguousNext = true };
+        using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "possibly saved";
+
+        ServerDraftFlushResult result = await compose.FlushPendingServerDraftsAsync();
+
+        Assert.Equal(ServerDraftFlushStatus.Ambiguous, result.Status);
+        Assert.False(result.CanShutdown);
+        Assert.Single(drafts.Saves);
+        Assert.True(compose.IsOpen);
+    }
+
+    [Fact]
+    public async Task FailedExit_RetrySucceedsAndFollowingExitCanProceed()
+    {
+        ManualScheduler scheduler = new();
+        RecordingYandexDraftService drafts = new() { FailNext = true };
+        using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "retry me";
+        Assert.False((await compose.FlushPendingServerDraftsAsync()).CanShutdown);
+
+        await compose.RetryDraftSaveCommand.ExecuteAsync(null);
+        ServerDraftFlushResult second = await compose.FlushPendingServerDraftsAsync();
+
+        Assert.Equal(ServerDraftFlushStatus.NoDirtyDrafts, second.Status);
+        Assert.True(second.CanShutdown);
+        Assert.Equal(2, drafts.Saves.Count);
+    }
+
+    [Fact]
+    public async Task InFlightAutosaveRacingWithExit_PersistsNewestGeneration()
+    {
+        ManualScheduler scheduler = new();
+        RecordingYandexDraftService drafts = new() { BlockFirstSave = true };
+        using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "first";
+        scheduler.ReleaseLatest();
+        await drafts.FirstSaveStarted.Task;
+        compose.Draft.TextBody = "newest";
+
+        Task<ServerDraftFlushResult> flush = compose.FlushPendingServerDraftsAsync();
+        drafts.ReleaseFirstSave();
+        ServerDraftFlushResult result = await flush;
+
+        Assert.True(result.CanShutdown);
+        Assert.Equal("newest", drafts.Saves[^1].Request.TextBody);
+        Assert.Equal(2, drafts.Saves.Count);
+    }
+
+    [Fact]
+    public async Task FailedExitGuard_RestoresCoordinatorWindowAndAllowsLaterExit()
+    {
+        RecordingYandexDraftService drafts = new() { FailNext = true };
+        using MailComposeViewModel compose = CreateCompose(drafts, new ManualScheduler());
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "keep open";
+        ApplicationExitCoordinator exit = new();
+        FakeWindowActivation window = new();
+        RecordingFailurePresenter presenter = new();
+        ApplicationDraftShutdownGuard guard = new(compose, exit, window, presenter);
+        exit.RequestExit();
+        Assert.True(exit.TryBeginShutdown());
+
+        Assert.False(await guard.TryPrepareExplicitExitAsync());
+        Assert.Equal(ApplicationShutdownState.Running, exit.ShutdownState);
+        Assert.False(exit.IsExplicitExitRequested);
+        Assert.Equal(1, window.ShowCount);
+        Assert.Equal(ServerDraftFlushStatus.Failed, presenter.Result!.Status);
+        Assert.True(compose.IsOpen);
+
+        exit.RequestExit();
+        Assert.True(exit.TryBeginShutdown());
+        Assert.True(await guard.TryPrepareExplicitExitAsync());
+    }
+
+    [Fact]
+    public void SessionEnding_PersistsDirtyStateWithoutCallingNetwork()
+    {
+        RecordingYandexDraftService drafts = new();
+        MemoryRecoveryStore recovery = new();
+        using MailComposeViewModel compose = CreateCompose(drafts, new ManualScheduler(), recovery: recovery);
+        MailAccount account = Account();
+        OpenNew(compose, account);
+        compose.Draft!.Subject = "protected";
+        ApplicationDraftShutdownGuard guard = new(
+            compose,
+            new ApplicationExitCoordinator(),
+            new FakeWindowActivation(),
+            new RecordingFailurePresenter());
+
+        Assert.True(guard.PersistSessionEndingRecovery());
+        Assert.Empty(drafts.Saves);
+        Assert.Equal("protected", Assert.Single(recovery.Items).Subject);
+    }
+
+    [Fact]
+    public void SessionEnding_RecoveryWriteFailureKeepsApplicationAccessible()
+    {
+        MemoryRecoveryStore recovery = new() { UpsertSucceeds = false };
+        using MailComposeViewModel compose = CreateCompose(
+            new RecordingYandexDraftService(),
+            new ManualScheduler(),
+            recovery: recovery);
+        OpenNew(compose, Account());
+        compose.Draft!.TextBody = "must not be lost";
+        FakeWindowActivation window = new();
+        RecordingFailurePresenter presenter = new();
+        ApplicationDraftShutdownGuard guard = new(
+            compose,
+            new ApplicationExitCoordinator(),
+            window,
+            presenter);
+
+        Assert.False(guard.PersistSessionEndingRecovery());
+        Assert.Equal(1, window.ShowCount);
+        Assert.True(presenter.RecoveryFailureShown);
+        Assert.Equal("must not be lost", compose.Draft.TextBody);
+    }
+
+    [Fact]
+    public async Task ProtectedRecovery_RestoresCorrectAccountFieldsAndAttachments()
+    {
+        MemoryRecoveryStore recovery = new();
+        RecordingYandexDraftService drafts = new();
+        MailAccount account = Account();
+        using (MailComposeViewModel source = CreateCompose(drafts, new ManualScheduler(), recovery: recovery))
+        {
+            OpenNew(source, account);
+            source.Draft!.To = "to@example.test";
+            source.Draft.Cc = "cc@example.test";
+            source.Draft.Bcc = "bcc@example.test";
+            source.Draft.Subject = "recover subject";
+            source.Draft.TextBody = "recover body";
+            source.Draft.AddLocalAttachments([
+                OutgoingMailAttachment.FromMemory(
+                    new MailAttachmentContent("proof.txt", "text/plain", "proof"u8.ToArray()))]);
+            Assert.True(source.PersistDirtyYandexDraftRecovery());
+        }
+
+        using MailComposeViewModel restored = CreateCompose(drafts, new ManualScheduler(), recovery: recovery);
+        await restored.RestoreYandexDraftRecoveriesAsync([account]);
+        restored.ActivateAccount(account);
+
+        Assert.True(restored.IsOpen);
+        Assert.Equal("to@example.test", restored.Draft!.To);
+        Assert.Equal("cc@example.test", restored.Draft.Cc);
+        Assert.Equal("bcc@example.test", restored.Draft.Bcc);
+        Assert.Equal("recover subject", restored.Draft.Subject);
+        Assert.Equal("recover body", restored.Draft.TextBody);
+        Assert.Equal("proof.txt", Assert.Single(restored.Draft.Attachments).FileName);
+    }
+
+    [Fact]
+    public async Task RecoveryWithIncompatibleServerIdentity_DetachesBeforeSaving()
+    {
+        MailAccount account = Account();
+        string logicalId = Guid.NewGuid().ToString("N");
+        MemoryRecoveryStore recovery = new([
+            Snapshot(account, "local newest", new YandexDraftIdentity("Drafts", 9, 44, logicalId), logicalId)]);
+        RecordingYandexDraftService drafts = new()
+        {
+            LoadException = new YandexDraftException(MailSendFailureKind.InvalidRequest, "stale")
+        };
+        ManualScheduler scheduler = new();
+        using MailComposeViewModel compose = CreateCompose(drafts, scheduler, recovery: recovery);
+
+        await compose.RestoreYandexDraftRecoveriesAsync([account]);
+        compose.ActivateAccount(account);
+        await ReleaseAsync(compose, scheduler);
+
+        SaveCall save = Assert.Single(drafts.Saves);
+        Assert.Null(save.Identity);
+        Assert.Null(save.LogicalId);
+        Assert.Empty(drafts.Deletes);
+        Assert.Equal("local newest", save.Request.TextBody);
+    }
+
+    [Fact]
+    public async Task RecoveryWithCompatibleIdentity_UpdatesTheConfirmedLogicalDraft()
+    {
+        MailAccount account = Account();
+        RecordingYandexDraftService drafts = new();
+        drafts.SetLoaded(account, 44, "confirmed server body");
+        YandexDraftIdentity identity = drafts.LoadResult!.Identity;
+        MemoryRecoveryStore recovery = new([
+            Snapshot(account, "newer recovered body", identity, identity.LogicalId)]);
+        ManualScheduler scheduler = new();
+        using MailComposeViewModel compose = CreateCompose(drafts, scheduler, recovery: recovery);
+
+        await compose.RestoreYandexDraftRecoveriesAsync([account]);
+        compose.ActivateAccount(account);
+        await ReleaseAsync(compose, scheduler);
+
+        SaveCall save = Assert.Single(drafts.Saves);
+        Assert.Equal(identity, save.Identity);
+        Assert.Equal(identity.LogicalId, save.LogicalId);
+        Assert.Equal("newer recovered body", save.Request.TextBody);
+    }
+
+    [Fact]
+    public async Task Recovery_IsRemovedOnlyAfterConfirmedSaveOrExplicitDiscard()
+    {
+        MailAccount savedAccount = Account();
+        MailAccount discardedAccount = Account();
+        MemoryRecoveryStore recovery = new([
+            Snapshot(discardedAccount, "discard"),
+            Snapshot(savedAccount, "save")]);
+        RecordingYandexDraftService drafts = new() { FailNext = true };
+        ManualScheduler scheduler = new();
+        using MailComposeViewModel compose = CreateCompose(drafts, scheduler, recovery: recovery);
+        await compose.RestoreYandexDraftRecoveriesAsync([savedAccount, discardedAccount]);
+
+        compose.ActivateAccount(savedAccount);
+        await ReleaseAsync(compose, scheduler);
+        Assert.Contains(recovery.Items, item => item.AccountId == savedAccount.Id);
+        await compose.RetryDraftSaveCommand.ExecuteAsync(null);
+        Assert.DoesNotContain(recovery.Items, item => item.AccountId == savedAccount.Id);
+
+        compose.ActivateAccount(discardedAccount);
+        await compose.DiscardDraftCommand.ExecuteAsync(null);
+        Assert.DoesNotContain(recovery.Items, item => item.AccountId == discardedAccount.Id);
+    }
+
+    [Fact]
+    public async Task Recovery_IsAccountScopedAcrossMultipleYandexAccounts()
+    {
+        MailAccount first = Account();
+        MailAccount second = Account();
+        MemoryRecoveryStore recovery = new([
+            Snapshot(first, "first body"),
+            Snapshot(second, "second body")]);
+        using MailComposeViewModel compose = CreateCompose(
+            new RecordingYandexDraftService(),
+            new ManualScheduler(),
+            recovery: recovery);
+
+        await compose.RestoreYandexDraftRecoveriesAsync([first, second]);
+        compose.ActivateAccount(first);
+        Assert.Equal("first body", compose.Draft!.TextBody);
+        compose.ActivateAccount(second);
+        Assert.Equal("second body", compose.Draft!.TextBody);
+        Assert.Equal(2, compose.DraftCount);
+    }
+
+    [Fact]
+    public void FileRecoveryStore_DoesNotPersistDraftContentsInPlaintext()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "Lantern-Y9-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            TestPaths paths = new(folder);
+            FileYandexDraftRecoveryStore store = new(paths, new XorProtector());
+            MailAccount account = Account();
+            YandexDraftRecoverySnapshot snapshot = Snapshot(account, "secret-body-unique");
+            snapshot = snapshot with { Subject = "secret-subject-unique" };
+
+            Assert.True(store.Upsert([snapshot]));
+            byte[] persisted = File.ReadAllBytes(paths.YandexDraftRecoveryFilePath);
+            string raw = Encoding.UTF8.GetString(persisted);
+
+            Assert.DoesNotContain("secret-body-unique", raw, StringComparison.Ordinal);
+            Assert.DoesNotContain("secret-subject-unique", raw, StringComparison.Ordinal);
+            Assert.Equal("secret-body-unique", Assert.Single(store.Load()).TextBody);
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task StructuredYandexFlush_PreservesExistingGmailDraftFlushBehavior()
+    {
+        RecordingGmailDraftService gmail = new();
+        using MailComposeViewModel compose = new(
+            new SendProviderFactory(new RecordingSendProvider()),
+            new MailComposeRequestFactory(),
+            new MailComposePreparationService(),
+            new AlwaysConfirmService(),
+            gmailDraftService: gmail,
+            draftAutosaveScheduler: new ManualScheduler());
+        MailAccount account = new()
+        {
+            Id = Guid.NewGuid(),
+            Provider = MailProviderType.Gmail,
+            DisplayName = "Gmail",
+            EmailAddress = "owner@gmail.test",
+            CredentialKey = Guid.NewGuid().ToString("N"),
+            AuthenticationKind = MailAuthenticationKind.OAuth,
+            IsEnabled = true
+        };
+        compose.ActivateAccount(account);
+        compose.NewMessageCommand.Execute(null);
+        compose.Draft!.TextBody = "gmail draft";
+
+        ServerDraftFlushResult result = await compose.FlushPendingServerDraftsAsync();
+
+        Assert.Equal(ServerDraftFlushStatus.NoDirtyDrafts, result.Status);
+        Assert.Equal("gmail draft", Assert.Single(gmail.Saves).TextBody);
+    }
+
+    private static YandexDraftRecoverySnapshot Snapshot(
+        MailAccount account,
+        string body,
+        YandexDraftIdentity? identity = null,
+        string? logicalId = null) => new(
+            account.Id,
+            DateTimeOffset.UtcNow,
+            identity,
+            logicalId,
+            "to@example.test",
+            "cc@example.test",
+            "bcc@example.test",
+            "subject",
+            body,
+            null,
+            [],
+            []);
+
     private static string Key(uint uid, uint uidValidity = 9) =>
         ImapMailReadProvider.CreateMessageKey(MailFolderKind.Drafts, uidValidity, uid);
 
@@ -558,7 +960,9 @@ public sealed class YandexServerDraftTests
     private static MailComposeViewModel CreateCompose(
         RecordingYandexDraftService drafts,
         ManualScheduler scheduler,
-        RecordingSendProvider? sender = null) =>
+        RecordingSendProvider? sender = null,
+        IYandexDraftRecoveryStore? recovery = null,
+        TimeSpan? finalAutosaveTimeout = null) =>
         new(
             new SendProviderFactory(sender ?? new RecordingSendProvider()),
             new MailComposeRequestFactory(),
@@ -567,7 +971,9 @@ public sealed class YandexServerDraftTests
             attachmentDialogService: null,
             gmailDraftService: null,
             draftAutosaveScheduler: scheduler,
-            yandexDraftService: drafts);
+            yandexDraftService: drafts,
+            yandexDraftRecoveryStore: recovery,
+            finalAutosaveTimeout: finalAutosaveTimeout);
 
     private static void OpenNew(MailComposeViewModel compose, MailAccount account)
     {
@@ -991,6 +1397,102 @@ public sealed class YandexServerDraftTests
     private sealed class SendProviderFactory(IMailSendProvider provider) : IMailSendProviderFactory
     {
         public IMailSendProvider Get(MailProviderType providerType) => provider;
+    }
+
+    private sealed class MemoryRecoveryStore : IYandexDraftRecoveryStore
+    {
+        private readonly Dictionary<Guid, YandexDraftRecoverySnapshot> _items;
+
+        public MemoryRecoveryStore(IEnumerable<YandexDraftRecoverySnapshot>? items = null)
+        {
+            _items = (items ?? []).ToDictionary(item => item.AccountId);
+        }
+
+        public IReadOnlyList<YandexDraftRecoverySnapshot> Items => _items.Values.ToArray();
+        public bool UpsertSucceeds { get; set; } = true;
+        public IReadOnlyList<YandexDraftRecoverySnapshot> Load() => Items;
+
+        public bool Upsert(IReadOnlyCollection<YandexDraftRecoverySnapshot> snapshots)
+        {
+            if (!UpsertSucceeds)
+            {
+                return false;
+            }
+
+            foreach (YandexDraftRecoverySnapshot snapshot in snapshots)
+            {
+                _items[snapshot.AccountId] = snapshot;
+            }
+            return true;
+        }
+
+        public bool Remove(Guid accountId)
+        {
+            _items.Remove(accountId);
+            return true;
+        }
+    }
+
+    private sealed class RecordingGmailDraftService : IGmailDraftService
+    {
+        public List<MailComposeRequest> Saves { get; } = [];
+        public Task<GmailDraftLoadResult> LoadAsync(MailAccount account, string draftId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<GmailDraftIdentity> SaveAsync(MailAccount account, GmailDraftIdentity? identity, MailComposeRequest request, CancellationToken cancellationToken = default)
+        {
+            Saves.Add(request);
+            return Task.FromResult(identity ?? new GmailDraftIdentity("draft-id", "message-id", null));
+        }
+        public Task<MailSendResult> SendAsync(MailAccount account, GmailDraftIdentity identity, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task DeleteAsync(MailAccount account, GmailDraftIdentity identity, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class FakeWindowActivation : IWindowActivationService
+    {
+        public int ShowCount { get; private set; }
+        public bool IsMainWindowActive => false;
+        public bool IsMainWindowVisible => false;
+        public Guid? SelectedServiceId => null;
+        public void Attach(System.Windows.Window window, Func<Guid?> selectedServiceId, Action<Guid> selectService) { }
+        public void Detach(System.Windows.Window window) { }
+        public void ShowAndActivate(Guid? serviceInstanceId = null) => ShowCount++;
+    }
+
+    private sealed class RecordingFailurePresenter : IDraftShutdownFailurePresenter
+    {
+        public ServerDraftFlushResult? Result { get; private set; }
+        public bool RecoveryFailureShown { get; private set; }
+        public void Show(ServerDraftFlushResult result) => Result = result;
+        public void ShowRecoveryWriteFailure() => RecoveryFailureShown = true;
+    }
+
+    private sealed class TestPaths(string root) : IAppPaths
+    {
+        public string RoamingDataFolder => root;
+        public string LocalDataFolder => root;
+        public string SettingsFilePath => Path.Combine(root, "settings.json");
+        public string WebViewDataFolder => Path.Combine(root, "webview");
+        public string YandexDraftRecoveryFilePath =>
+            Path.Combine(root, "Recovery", "YandexDrafts", "recovery.bin");
+        public string LogsFolder => Path.Combine(root, "logs");
+    }
+
+    private sealed class XorProtector : IMailCredentialProtector
+    {
+        public byte[] Protect(ReadOnlySpan<byte> plaintext) => Transform(plaintext);
+        public byte[] Unprotect(ReadOnlySpan<byte> protectedData) => Transform(protectedData);
+
+        private static byte[] Transform(ReadOnlySpan<byte> input)
+        {
+            byte[] result = input.ToArray();
+            for (int index = 0; index < result.Length; index++)
+            {
+                result[index] ^= 0xA5;
+            }
+            return result;
+        }
     }
 
     private sealed class AlwaysConfirmService : IMailComposeConfirmationService

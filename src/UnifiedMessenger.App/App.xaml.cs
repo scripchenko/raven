@@ -54,6 +54,8 @@ public partial class App : System.Windows.Application
             }
 
             _mainWindowViewModel.Initialize(loadResult.Settings);
+            MailComposeViewModel compose = _serviceProvider.GetRequiredService<MailComposeViewModel>();
+            await compose.RestoreYandexDraftRecoveriesAsync(loadResult.Settings.MailAccounts);
             _webViewSessionManager = _serviceProvider.GetRequiredService<IWebViewSessionManager>();
             _webViewEventCoordinator = _serviceProvider.GetRequiredService<IWebViewEventCoordinator>();
 
@@ -138,6 +140,14 @@ public partial class App : System.Windows.Application
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
+        if (_serviceProvider?.GetService<IApplicationDraftShutdownGuard>() is IApplicationDraftShutdownGuard guard
+            && !guard.PersistSessionEndingRecovery())
+        {
+            e.Cancel = true;
+            base.OnSessionEnding(e);
+            return;
+        }
+
         _exitCoordinator?.BeginSessionEnding();
         _trayCoordinator?.BeginShutdown();
         BeginMailBackgroundShutdown();
@@ -150,6 +160,13 @@ public partial class App : System.Windows.Application
     private async void OnExplicitExitRequested(object? sender, EventArgs eventArgs)
     {
         if (_exitCoordinator is null || !_exitCoordinator.TryBeginShutdown())
+        {
+            return;
+        }
+
+        IApplicationDraftShutdownGuard guard = _serviceProvider!
+            .GetRequiredService<IApplicationDraftShutdownGuard>();
+        if (!await guard.TryPrepareExplicitExitAsync())
         {
             return;
         }
@@ -168,11 +185,6 @@ public partial class App : System.Windows.Application
         {
             _trayCoordinator?.BeginShutdown();
             CloseStartupWindow();
-
-            if (_serviceProvider?.GetService<MailComposeViewModel>() is MailComposeViewModel compose)
-            {
-                await compose.FlushPendingServerDraftsAsync();
-            }
 
             if (MainWindow is MainWindow mainWindow)
             {
@@ -222,6 +234,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<IMailCredentialProtector, DpapiMailCredentialProtector>();
         services.AddSingleton<IMailCredentialStore, FileMailCredentialStore>();
+        services.AddSingleton<IYandexDraftRecoveryStore, FileYandexDraftRecoveryStore>();
         services.AddSingleton<IRemoteImageSenderTrustProtector, DpapiRemoteImageSenderTrustProtector>();
         services.AddSingleton<IRemoteImageSenderTrustStore, FileRemoteImageSenderTrustStore>();
         services.AddSingleton<IMailConnectionValidator, MailKitConnectionValidator>();
@@ -301,6 +314,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ITrayIconService, WinFormsTrayIconService>();
         services.AddSingleton<ITaskbarActivityIndicator, WpfTaskbarActivityIndicator>();
         services.AddSingleton<IApplicationExitCoordinator, ApplicationExitCoordinator>();
+        services.AddSingleton<IDraftShutdownFailurePresenter, WpfDraftShutdownFailurePresenter>();
+        services.AddSingleton<IApplicationDraftShutdownGuard, ApplicationDraftShutdownGuard>();
         services.AddSingleton<IWebViewRuntimeService, WebViewRuntimeService>();
         services.AddSingleton<IExternalBrowserService, ExternalBrowserService>();
         services.AddSingleton<ExternalBrowserLaunchPolicy>();
