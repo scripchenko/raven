@@ -1121,6 +1121,36 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         }
     }
 
+    internal async Task RefreshAfterPasswordReplacementAsync(
+        MailAccount account,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(account);
+        if (account.Provider is not MailProviderType.Yandex)
+        {
+            return;
+        }
+
+        foreach ((FolderStateKey key, FolderState state) in _folderStates)
+        {
+            if (key.AccountId == account.Id)
+            {
+                state.MarkStale();
+            }
+        }
+
+        if (_accountFolderStates.TryGetValue(account.Id, out AccountFolderState? folderState))
+        {
+            folderState.HasLoaded = false;
+        }
+
+        if (ActiveAccount?.Id == account.Id)
+        {
+            await ActivateAsync(account, cancellationToken);
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)

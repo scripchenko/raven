@@ -43,6 +43,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public event EventHandler<SettingsAccountEventArgs>? DeleteAccountRequested;
     public event EventHandler? AddMailAccountRequested;
     public event EventHandler<SettingsMailAccountEventArgs>? RenameMailAccountRequested;
+    public event EventHandler<SettingsMailAccountEventArgs>? ChangeMailAccountPasswordRequested;
     public event EventHandler<SettingsMailAccountEnabledEventArgs>? MailAccountEnabledChangeRequested;
     public event EventHandler<SettingsMailAccountEventArgs>? DeleteMailAccountRequested;
 
@@ -241,6 +242,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
     internal void RequestRenameMail(MailAccount account) =>
         RenameMailAccountRequested?.Invoke(this, new SettingsMailAccountEventArgs(account));
+
+    internal void RequestChangeMailPassword(MailAccount account) =>
+        ChangeMailAccountPasswordRequested?.Invoke(this, new SettingsMailAccountEventArgs(account));
 
     internal void RequestSetMailEnabled(MailAccount account, bool isEnabled) =>
         MailAccountEnabledChangeRequested?.Invoke(

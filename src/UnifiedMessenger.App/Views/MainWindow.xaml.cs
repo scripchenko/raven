@@ -122,6 +122,7 @@ public partial class MainWindow : Window
         _settingsViewModel.DeleteAccountRequested += OnSettingsDeleteAccountRequested;
         _settingsViewModel.AddMailAccountRequested += OnSettingsAddMailAccountRequested;
         _settingsViewModel.RenameMailAccountRequested += OnSettingsRenameMailAccountRequested;
+        _settingsViewModel.ChangeMailAccountPasswordRequested += OnSettingsChangeMailAccountPasswordRequested;
         _settingsViewModel.MailAccountEnabledChangeRequested += OnSettingsMailAccountEnabledChangeRequested;
         _settingsViewModel.DeleteMailAccountRequested += OnSettingsDeleteMailAccountRequested;
         _webViewSessionManager.SessionRecreationRequested += OnSessionRecreationRequested;
@@ -151,6 +152,7 @@ public partial class MainWindow : Window
         _settingsViewModel.DeleteAccountRequested -= OnSettingsDeleteAccountRequested;
         _settingsViewModel.AddMailAccountRequested -= OnSettingsAddMailAccountRequested;
         _settingsViewModel.RenameMailAccountRequested -= OnSettingsRenameMailAccountRequested;
+        _settingsViewModel.ChangeMailAccountPasswordRequested -= OnSettingsChangeMailAccountPasswordRequested;
         _settingsViewModel.MailAccountEnabledChangeRequested -= OnSettingsMailAccountEnabledChangeRequested;
         _settingsViewModel.DeleteMailAccountRequested -= OnSettingsDeleteMailAccountRequested;
         _webViewSessionManager.SessionRecreationRequested -= OnSessionRecreationRequested;
@@ -687,6 +689,42 @@ public partial class MainWindow : Window
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
             ShowOperationError("Не удалось переименовать почтовый аккаунт", exception);
+        }
+    }
+
+    private async void OnSettingsChangeMailAccountPasswordRequested(
+        object? sender,
+        SettingsMailAccountEventArgs eventArgs)
+    {
+        MailAccount account = eventArgs.Account;
+        ChangeMailAppPasswordWindow dialog = new(account, _mailAccountProvisioningService)
+        {
+            Owner = this
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await _mailInboxViewModel.RefreshAfterPasswordReplacementAsync(
+                account,
+                _lifetimeCancellation.Token);
+            WpfMessageBox.Show(
+                this,
+                "Новый пароль приложения проверен и сохранён в защищённом хранилище Windows.",
+                "Пароль приложения обновлён",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            // The application is closing after the credential was already replaced.
+        }
+        catch (Exception exception) when (IsRecoverableOperationException(exception))
+        {
+            ShowOperationError("Пароль сохранён, но почту не удалось обновить", exception);
         }
     }
 

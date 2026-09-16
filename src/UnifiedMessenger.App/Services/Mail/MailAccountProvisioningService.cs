@@ -226,6 +226,84 @@ public sealed class MailAccountProvisioningService(
         }
     }
 
+    public async Task<MailAccountPasswordReplacementResult> ReplaceYandexPasswordAsync(
+        MailAccount account,
+        string newPassword,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+        if (account.Provider is not MailProviderType.Yandex
+            || account.AuthenticationKind is not MailAuthenticationKind.Password)
+        {
+            return MailAccountPasswordReplacementResult.Failure(
+                MailConnectionFailureKind.InvalidConfiguration,
+                "Пароль приложения можно изменить только для аккаунта Яндекс Почты.");
+        }
+
+        if (string.IsNullOrWhiteSpace(newPassword))
+        {
+            return MailAccountPasswordReplacementResult.Failure(
+                MailConnectionFailureKind.InvalidConfiguration,
+                "Введите новый пароль приложения.");
+        }
+
+        IMailProvider provider = providerFactory.Get(MailProviderType.Yandex);
+        MailConnectionValidationResult validation = await provider.ValidateAsync(
+            new MailAccountConnectionRequest(
+                MailProviderType.Yandex,
+                account.EmailAddress,
+                account.DisplayName),
+            newPassword,
+            cancellationToken);
+        if (!validation.IsSuccess)
+        {
+            return MailAccountPasswordReplacementResult.Failure(
+                validation.FailureKind,
+                validation.UserMessage);
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            MailAccount? storedAccount = settingsStore.Current.MailAccounts.FirstOrDefault(candidate =>
+                candidate.Id == account.Id
+                && candidate.Provider is MailProviderType.Yandex
+                && candidate.AuthenticationKind is MailAuthenticationKind.Password);
+            if (storedAccount is null
+                || !string.Equals(storedAccount.CredentialKey, account.CredentialKey, StringComparison.Ordinal)
+                || !string.Equals(storedAccount.EmailAddress, account.EmailAddress, StringComparison.OrdinalIgnoreCase))
+            {
+                return MailAccountPasswordReplacementResult.Failure(
+                    MailConnectionFailureKind.InvalidConfiguration,
+                    "Почтовый аккаунт больше недоступен в настройках Lantern.");
+            }
+
+            try
+            {
+                await credentialStore.SaveAsync(
+                    storedAccount.CredentialKey,
+                    MailCredential.CreatePassword(newPassword),
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is
+                IOException
+                or UnauthorizedAccessException
+                or System.Security.Cryptography.CryptographicException
+                or System.Text.Json.JsonException)
+            {
+                return MailAccountPasswordReplacementResult.Failure(
+                    MailConnectionFailureKind.CredentialStorageFailed,
+                    "Не удалось безопасно сохранить новый пароль приложения в Windows.");
+            }
+
+            return MailAccountPasswordReplacementResult.Success();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task DeleteAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);

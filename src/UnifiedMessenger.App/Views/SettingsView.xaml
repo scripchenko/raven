@@ -500,6 +500,10 @@
                                                 <Button Command="{Binding RenameCommand}"
                                                         Content="Переименовать"
                                                         Style="{StaticResource CompactButtonStyle}" />
+                                                <Button Command="{Binding ChangeAppPasswordCommand}"
+                                                        Content="Изменить пароль приложения"
+                                                        Style="{StaticResource CompactButtonStyle}"
+                                                        Visibility="{Binding CanChangeAppPassword, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                 <Button Command="{Binding DeleteCommand}"
                                                         Content="Удалить…"
                                                         Foreground="#C62828"

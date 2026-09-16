@@ -83,6 +83,20 @@ public sealed record MailAccountProvisioningResult(
         new(false, null, kind, message);
 }
 
+public sealed record MailAccountPasswordReplacementResult(
+    bool IsSuccess,
+    MailConnectionFailureKind FailureKind,
+    string UserMessage)
+{
+    public static MailAccountPasswordReplacementResult Success() =>
+        new(true, MailConnectionFailureKind.None, "Пароль приложения обновлён.");
+
+    public static MailAccountPasswordReplacementResult Failure(
+        MailConnectionFailureKind kind,
+        string message) =>
+        new(false, kind, message);
+}
+
 public sealed record MailProviderDescriptor(
     MailProviderType Provider,
     string DisplayName,
@@ -145,6 +159,14 @@ public interface IMailAccountProvisioningService
 
     Task<MailAccountProvisioningResult> ConnectGmailAsync(
         CancellationToken cancellationToken = default);
+
+    Task<MailAccountPasswordReplacementResult> ReplaceYandexPasswordAsync(
+        MailAccount account,
+        string newPassword,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(MailAccountPasswordReplacementResult.Failure(
+            MailConnectionFailureKind.InvalidConfiguration,
+            "Изменение пароля приложения недоступно."));
 
     Task DeleteAsync(Guid accountId, CancellationToken cancellationToken = default);
 }

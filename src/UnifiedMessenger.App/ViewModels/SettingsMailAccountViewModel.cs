@@ -36,12 +36,16 @@ public sealed partial class SettingsMailAccountViewModel : ObservableObject, IDi
         _ => "M"
     };
     public bool IsEnabled => Account.IsEnabled;
+    public bool CanChangeAppPassword => Account.Provider is MailProviderType.Yandex;
 
     [RelayCommand]
     private void Open() => _owner.OpenMailAccount(Account);
 
     [RelayCommand]
     private void Rename() => _owner.RequestRenameMail(Account);
+
+    [RelayCommand]
+    private void ChangeAppPassword() => _owner.RequestChangeMailPassword(Account);
 
     [RelayCommand]
     private void SetEnabled(bool? value)
