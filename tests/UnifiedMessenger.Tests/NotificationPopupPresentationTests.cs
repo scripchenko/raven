@@ -130,6 +130,46 @@ public sealed class NotificationPopupPresentationTests
         });
     }
 
+    [Fact]
+    public void MailRuPopup_UsesMailRuIconAndSenderInitialsAvatar()
+    {
+        RunSta(() =>
+        {
+            NotificationPopupDisplayModel model = new(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                "Почта Mail.ru • mail@example.test",
+                "Иван Петров",
+                "Тема письма",
+                "Короткий preview",
+                NotificationPopupBrand.MailRu,
+                "ИП");
+            NotificationPopupWindow window = new(model);
+            try
+            {
+                ArrangeCard(window);
+
+                TextBlock sourceLabel = Assert.IsType<TextBlock>(window.FindName("SourceLabel"));
+                Image headerIcon = Assert.IsType<Image>(window.FindName("HeaderSourceIcon"));
+                Image contentIcon = Assert.IsType<Image>(window.FindName("ContentSourceIcon"));
+                Border avatar = Assert.IsType<Border>(window.FindName("SenderInitialsAvatar"));
+                TextBlock preview = Assert.IsType<TextBlock>(window.FindName("NotificationPreview"));
+
+                Assert.Equal("Почта Mail.ru • mail@example.test", sourceLabel.Text);
+                Assert.EndsWith("mailru.png", headerIcon.Source.ToString(), StringComparison.Ordinal);
+                Assert.Equal(Visibility.Collapsed, contentIcon.Visibility);
+                Assert.Equal(Visibility.Visible, avatar.Visibility);
+                Assert.Equal("ИП", Assert.IsType<TextBlock>(avatar.Child).Text);
+                Assert.Equal("Короткий preview", preview.Text);
+                Assert.Equal(Visibility.Visible, preview.Visibility);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     [Theory]
     [InlineData("Telegram")]
     [InlineData("WhatsApp")]

@@ -200,7 +200,7 @@ internal sealed class ImapMailReadProvider(
         string messageIdentity,
         CancellationToken cancellationToken)
     {
-        if (account.Provider is not MailProviderType.Yandex
+        if (!MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap
             || !TryParseInboxNotificationIdentity(identityScope, messageIdentity, out uint uidValidity, out uint uniqueId))
         {
             return null;

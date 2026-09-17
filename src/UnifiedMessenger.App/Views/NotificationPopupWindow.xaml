@@ -54,6 +54,9 @@
                 <DataTrigger Binding="{Binding IsYandex}" Value="True">
                     <Setter Property="Source" Value="/UnifiedMessenger.App;component/Assets/Services/yandex_mail.png" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding IsMailRu}" Value="True">
+                    <Setter Property="Source" Value="/UnifiedMessenger.App;component/Assets/Services/mailru.png" />
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 

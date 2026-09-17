@@ -1874,12 +1874,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         {
             while (freshness.AutoRefreshRequested
                 && freshness.IsStale
-                && ActiveAccount is { Provider: MailProviderType.Gmail or MailProviderType.Yandex, IsEnabled: true } account
+                && ActiveAccount is { IsEnabled: true } account
+                && SupportsTrackedInbox(account.Provider)
                 && account.Id == accountId
                 && SelectedFolder is { Kind: MailFolderKind.Inbox } folder
                 && !IsSearchActive
                 && !IsComposeOpen
-                && !(IsYandexMailbox && IsMailboxChanging))
+                && !(IsManagedImapMailbox && IsMailboxChanging))
             {
                 freshness.AutoRefreshRequested = false;
                 FolderState state = GetState(accountId, folder.Key);
@@ -1902,15 +1903,19 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     }
 
     private bool IsActiveTrackedInbox(Guid accountId) =>
-        ActiveAccount is { Provider: MailProviderType.Gmail or MailProviderType.Yandex, IsEnabled: true } account
+        ActiveAccount is { IsEnabled: true } account
+        && SupportsTrackedInbox(account.Provider)
         && account.Id == accountId
         && SelectedFolder?.Kind is MailFolderKind.Inbox
         && !IsSearchActive
         && !IsComposeOpen;
 
     private static bool IsTrackedInbox(MailAccount account, MailFolder folder) =>
-        account.Provider is MailProviderType.Gmail or MailProviderType.Yandex
+        SupportsTrackedInbox(account.Provider)
         && folder.Kind is MailFolderKind.Inbox;
+
+    private static bool SupportsTrackedInbox(MailProviderType provider) =>
+        provider is MailProviderType.Gmail || MailProviderFeaturePolicies.Get(provider).IsManagedImap;
 
     private InboxFreshnessState GetInboxFreshnessState(Guid accountId)
     {

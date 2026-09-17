@@ -584,11 +584,14 @@ public sealed class YandexMailboxFreshnessTests
         Assert.False(vm.CanNavigateToNextPage);
     }
 
-    [Fact]
-    public async Task ActiveInbox_NewMailSignalRefreshesWithoutManualRefresh()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapActiveInbox_NewMailSignalRefreshesWithoutManualRefresh(
+        MailProviderType providerType)
     {
         Provider provider = new();
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, MailFolderKind.Inbox, 1);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
@@ -599,12 +602,15 @@ public sealed class YandexMailboxFreshnessTests
         Assert.False(vm.IsInboxStale(account.Id));
     }
 
-    [Fact]
-    public async Task InactiveInbox_NewMailSignalRefreshesOnReturn_OnlyForItsAccount()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapInactiveInbox_NewMailSignalRefreshesOnReturn_OnlyForItsAccount(
+        MailProviderType providerType)
     {
         Provider provider = new();
-        MailAccount first = Account();
-        MailAccount second = Account();
+        MailAccount first = Account(providerType);
+        MailAccount second = Account(providerType);
         provider.Seed(first, MailFolderKind.Inbox, 1);
         provider.Seed(second, MailFolderKind.Inbox, 1);
         using MailInboxViewModel vm = Create(provider);

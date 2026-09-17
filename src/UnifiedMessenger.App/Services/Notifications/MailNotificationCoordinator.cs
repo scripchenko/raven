@@ -124,7 +124,7 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         }
 
         bool isSelectedAndActive = IsSelectedAndActive(account);
-        if (account.Provider is MailProviderType.Gmail or MailProviderType.Yandex)
+        if (SupportsFreshInbox(account.Provider))
         {
             _inboxFreshness.OnNewMailDetected(
                 account.Id,
@@ -194,7 +194,8 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
                 account,
                 pending,
                 HasMultipleEnabledGmailAccounts(),
-                HasMultipleEnabledYandexAccounts());
+                HasMultipleEnabledYandexAccounts(),
+                HasMultipleEnabledMailRuAccounts());
             if (_popupService.TryShow(popup))
             {
                 _active.Add(
@@ -213,17 +214,21 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         MailAccount account,
         PendingMailNotification pending,
         bool hasMultipleEnabledGmailAccounts,
-        bool hasMultipleEnabledYandexAccounts = false)
+        bool hasMultipleEnabledYandexAccounts = false,
+        bool hasMultipleEnabledMailRuAccounts = false)
     {
         bool isSingle = pending.NewMessageCount == 1;
         bool isGmail = account.Provider is MailProviderType.Gmail;
         bool isYandex = account.Provider is MailProviderType.Yandex;
+        bool isMailRu = account.Provider is MailProviderType.MailRu;
         string serviceName = isGmail
             ? CreateGmailServiceName(account, hasMultipleEnabledGmailAccounts)
             : isYandex
                 ? CreateYandexServiceName(account, hasMultipleEnabledYandexAccounts)
+                : isMailRu
+                    ? CreateMailRuServiceName(account, hasMultipleEnabledMailRuAccounts)
                 : "Почта";
-        if ((isGmail || isYandex)
+        if ((isGmail || isYandex || isMailRu)
             && isSingle
             && pending.Preview is not null
             && pending.ShowPreview)
@@ -244,7 +249,11 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
                 title,
                 subject,
                 string.IsNullOrWhiteSpace(snippet) ? null : snippet,
-                isGmail ? NotificationPopupBrand.Gmail : NotificationPopupBrand.Yandex,
+                isGmail
+                    ? NotificationPopupBrand.Gmail
+                    : isYandex
+                        ? NotificationPopupBrand.Yandex
+                        : NotificationPopupBrand.MailRu,
                 CreateSenderInitials(senderName, senderAddress),
                 string.IsNullOrWhiteSpace(senderAddress) ? null : senderAddress);
         }
@@ -261,6 +270,8 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
                 ? NotificationPopupBrand.Gmail
                 : isYandex
                     ? NotificationPopupBrand.Yandex
+                    : isMailRu
+                        ? NotificationPopupBrand.MailRu
                 : NotificationPopupBrand.Default);
     }
 
@@ -308,6 +319,10 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         _settingsStore.Current.MailAccounts.Count(account =>
             account.IsEnabled && account.Provider is MailProviderType.Yandex) > 1;
 
+    private bool HasMultipleEnabledMailRuAccounts() =>
+        _settingsStore.Current.MailAccounts.Count(account =>
+            account.IsEnabled && account.Provider is MailProviderType.MailRu) > 1;
+
     private static string CreateYandexServiceName(
         MailAccount account,
         bool hasMultipleEnabledYandexAccounts)
@@ -316,6 +331,16 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         return hasMultipleEnabledYandexAccounts && !string.IsNullOrWhiteSpace(identity)
             ? $"Яндекс Почта • {identity}"
             : "Яндекс Почта";
+    }
+
+    private static string CreateMailRuServiceName(
+        MailAccount account,
+        bool hasMultipleEnabledMailRuAccounts)
+    {
+        string identity = account.DisplayLabel.Trim();
+        return hasMultipleEnabledMailRuAccounts && !string.IsNullOrWhiteSpace(identity)
+            ? $"Почта Mail.ru • {identity}"
+            : "Почта Mail.ru";
     }
 
     private void OnPopupClicked(object? sender, NotificationPopupEventArgs eventArgs)
@@ -330,7 +355,7 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         if (account is not null)
         {
             _activityCoordinator.Clear(account);
-            if (account.Provider is MailProviderType.Gmail or MailProviderType.Yandex)
+            if (SupportsFreshInbox(account.Provider))
             {
                 _inboxFreshness.RequireFreshInbox(account.Id);
             }
@@ -359,6 +384,9 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
 
     private bool IsSelectedAndActive(MailAccount account) =>
         _navigation.IsAccountActivelyViewed(account.Id);
+
+    private static bool SupportsFreshInbox(MailProviderType provider) =>
+        provider is MailProviderType.Gmail || MailProviderFeaturePolicies.Get(provider).IsManagedImap;
 
     private MailAccount? FindEnabledAccount(Guid accountId) =>
         _settingsStore.Current.MailAccounts.FirstOrDefault(

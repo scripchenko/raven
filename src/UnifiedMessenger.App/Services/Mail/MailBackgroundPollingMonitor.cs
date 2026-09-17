@@ -273,7 +273,7 @@ public sealed class MailBackgroundPollingMonitor(
             int unreadCount = Math.Max(0, snapshot.UnreadCount);
             MailNotificationPreview? preview = null;
             NotificationSettings notificationSettings = settingsStore.Current.Notifications;
-            if (account.Provider is MailProviderType.Yandex
+            if (managedImap
                 && newMessageCount == 1
                 && notificationSettings.IsEnabled
                 && !notificationSettings.DoNotDisturb
@@ -289,7 +289,7 @@ public sealed class MailBackgroundPollingMonitor(
                     snapshot.NotificationPreviews.TryGetValue(newIdentity, out preview);
                     if (snapshotProvider is IMailInboxNotificationPreviewProvider previewProvider)
                     {
-                        preview = await TryEnrichYandexPreviewAsync(
+                        preview = await TryEnrichManagedImapPreviewAsync(
                             previewProvider,
                             account,
                             snapshot.IdentityScope,
@@ -311,7 +311,7 @@ public sealed class MailBackgroundPollingMonitor(
         }
     }
 
-    private static async Task<MailNotificationPreview?> TryEnrichYandexPreviewAsync(
+    private static async Task<MailNotificationPreview?> TryEnrichManagedImapPreviewAsync(
         IMailInboxNotificationPreviewProvider previewProvider,
         MailAccount account,
         string identityScope,

@@ -137,6 +137,56 @@ public sealed class MailNotificationCoordinatorTests
     }
 
     [Fact]
+    public void SingleMailRuAccount_UsesSenderSubjectSnippetAndMailRuBranding()
+    {
+        using Fixture fixture = new(includeSecondAccount: false, provider: MailProviderType.MailRu);
+        fixture.Handle(fixture.First, 1,
+            new MailNotificationPreview("Иван Петров", "ivan@mail.test", "Важное письмо", "Короткий preview"));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Почта Mail.ru", popup.ServiceName);
+        Assert.Equal("Иван Петров", popup.Title);
+        Assert.Equal("Важное письмо", popup.Body);
+        Assert.Equal("Короткий preview", popup.PreviewText);
+        Assert.Equal(NotificationPopupBrand.MailRu, popup.Brand);
+        Assert.Equal(30d, popup.PreviewMaxHeight);
+        Assert.True(popup.IsMailRu);
+        Assert.Equal("ИП", popup.SenderAvatarInitials);
+        Assert.True(popup.ShowSenderInitials);
+        Assert.Equal([ServiceType.Gmail], fixture.Sound.ServiceTypes);
+    }
+
+    [Fact]
+    public void MultipleMailRuAccounts_IncludeAccountIdentity()
+    {
+        using Fixture fixture = new(provider: MailProviderType.MailRu);
+        fixture.Handle(fixture.First, 1,
+            new MailNotificationPreview("Sender", "sender@mail.test", "Subject", string.Empty));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Почта Mail.ru • first@example.test", popup.ServiceName);
+        Assert.Equal(NotificationPopupBrand.MailRu, popup.Brand);
+    }
+
+    [Fact]
+    public void MailRuPreviewDisabled_KeepsBrandButHidesMessageMetadata()
+    {
+        using Fixture fixture = new(includeSecondAccount: false, provider: MailProviderType.MailRu);
+        fixture.Settings.Current.Notifications.ShowNotificationPreview = false;
+
+        fixture.Handle(fixture.First, 1,
+            new MailNotificationPreview("Sender", "sender@mail.test", "Subject", "Snippet"));
+
+        NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
+        Assert.Equal("Почта Mail.ru", popup.ServiceName);
+        Assert.Equal("Новое письмо", popup.Title);
+        Assert.Equal("Получено новое письмо", popup.Body);
+        Assert.Null(popup.PreviewText);
+        Assert.Null(popup.SenderAvatarInitials);
+        Assert.Equal(NotificationPopupBrand.MailRu, popup.Brand);
+    }
+
+    [Fact]
     public void MissingSenderName_UsesAddressAndGmailIconFallback()
     {
         using Fixture fixture = new(includeSecondAccount: false);
@@ -195,10 +245,13 @@ public sealed class MailNotificationCoordinatorTests
         Assert.Equal(NotificationPopupBrand.Gmail, popup.Brand);
     }
 
-    [Fact]
-    public void NewMailInInactiveAccount_PlaysOneSharedLanternSound()
+    [Theory]
+    [InlineData(MailProviderType.Gmail)]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public void NewMailInInactiveAccount_PlaysOneSharedLanternSound(MailProviderType provider)
     {
-        using Fixture fixture = new();
+        using Fixture fixture = new(provider: provider);
 
         fixture.Handle(fixture.First, 1);
 
@@ -395,10 +448,13 @@ public sealed class MailNotificationCoordinatorTests
         Assert.True(fixture.First.HasNewMailActivity);
     }
 
-    [Fact]
-    public void DoNotDisturb_SuppressesPopupAndSoundButKeepsActivity()
+    [Theory]
+    [InlineData(MailProviderType.Gmail)]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public void DoNotDisturb_SuppressesPopupAndSoundButKeepsActivity(MailProviderType provider)
     {
-        using Fixture fixture = new();
+        using Fixture fixture = new(provider: provider);
         fixture.Settings.Current.Notifications.DoNotDisturb = true;
 
         fixture.Handle(fixture.First, 1);
@@ -438,6 +494,7 @@ public sealed class MailNotificationCoordinatorTests
     [Theory]
     [InlineData(MailProviderType.Gmail)]
     [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
     public void PopupClick_ClearsActivityAndOpensCorrectAccountInbox(MailProviderType provider)
     {
         using Fixture fixture = new();
@@ -457,6 +514,7 @@ public sealed class MailNotificationCoordinatorTests
     [Theory]
     [InlineData(MailProviderType.Gmail)]
     [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
     public void InactiveDetection_ReusesSignalForInboxFreshnessWithoutChangingPresentation(MailProviderType provider)
     {
         using Fixture fixture = new();
