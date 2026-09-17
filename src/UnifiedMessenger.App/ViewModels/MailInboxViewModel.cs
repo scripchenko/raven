@@ -128,7 +128,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Compose.PropertyChanged += OnComposePropertyChanged;
         Compose.Sent += OnMailSent;
         Compose.GmailDraftChanged += OnGmailDraftChanged;
-        Compose.YandexDraftChanged += OnYandexDraftChanged;
+        Compose.ManagedImapDraftChanged += OnManagedImapDraftChanged;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, CanRefresh);
         PreviousPageCommand = new AsyncRelayCommand(PreviousPageAsync, CanGoToPreviousPage);
         NextPageCommand = new AsyncRelayCommand(NextPageAsync, CanGoToNextPage);
@@ -1171,7 +1171,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Compose.PropertyChanged -= OnComposePropertyChanged;
         Compose.Sent -= OnMailSent;
         Compose.GmailDraftChanged -= OnGmailDraftChanged;
-        Compose.YandexDraftChanged -= OnYandexDraftChanged;
+        Compose.ManagedImapDraftChanged -= OnManagedImapDraftChanged;
         Compose.Dispose();
         _folderStates.Clear();
         _accountFolderStates.Clear();
@@ -2751,7 +2751,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             RaisePresentationStateChanged();
 
             if (!Compose.IsOpen
-                && ActiveAccount is { Provider: MailProviderType.Gmail or MailProviderType.Yandex } mailAccount
+                && ActiveAccount is MailAccount mailAccount
+                && (mailAccount.Provider is MailProviderType.Gmail || IsManagedImap(mailAccount))
                 && SelectedFolder is { } folder
                 && (folder.Kind is MailFolderKind.Drafts
                     || mailAccount.Provider is MailProviderType.Gmail && folder.Kind is MailFolderKind.AllMail)
@@ -4009,10 +4010,11 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             return;
         }
 
-        if (ActiveAccount is { Provider: MailProviderType.Yandex } yandexAccount
+        if (ActiveAccount is MailAccount managedImapAccount
+            && MailProviderFeaturePolicies.Get(managedImapAccount.Provider).IsManagedImap
             && SelectedFolder.Kind is MailFolderKind.Drafts)
         {
-            CurrentMessageLoadTask = OpenYandexDraftAsync(yandexAccount, summary.MessageKey);
+            CurrentMessageLoadTask = OpenManagedImapDraftAsync(managedImapAccount, summary.MessageKey);
             return;
         }
 
@@ -4110,7 +4112,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         MarkFolderStale(eventArgs.AccountId, MailFolderKind.AllMail);
     }
 
-    private void OnYandexDraftChanged(object? sender, YandexDraftChangedEventArgs eventArgs)
+    private void OnManagedImapDraftChanged(object? sender, ManagedImapDraftChangedEventArgs eventArgs)
     {
         MarkFolderStale(eventArgs.AccountId, MailFolderKind.Drafts);
     }
@@ -4768,9 +4770,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         }
     }
 
-    private async Task OpenYandexDraftAsync(MailAccount account, string messageKey)
+    private async Task OpenManagedImapDraftAsync(MailAccount account, string messageKey)
     {
-        bool opened = await Compose.OpenYandexDraftAsync(account, messageKey);
+        bool opened = await Compose.OpenManagedImapDraftAsync(account, messageKey);
         if (!opened && ActiveAccount?.Id == account.Id)
         {
             MessageFailureKind = MailReadFailureKind.MessageUnavailable;

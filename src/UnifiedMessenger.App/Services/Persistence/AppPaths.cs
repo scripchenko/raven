@@ -23,6 +23,9 @@ public sealed class AppPaths : IAppPaths
     public string MailCredentialsFolder => Path.Combine(LocalDataFolder, "Credentials", "Mail");
     public string YandexDraftRecoveryFilePath =>
         Path.Combine(LocalDataFolder, "Recovery", "YandexDrafts", "recovery.bin");
+    // Stable compatibility path: the managed-IMAP recovery store intentionally
+    // continues to read the original Yandex v1.0 recovery file.
+    public string ManagedImapDraftRecoveryFilePath => YandexDraftRecoveryFilePath;
     public string RemoteImageSenderTrustFolder =>
         Path.Combine(LocalDataFolder, "Privacy", "RemoteImageSenderTrust");
     public string NotificationSoundsFolder => Path.Combine(LocalDataFolder, "Sounds");

@@ -9,6 +9,8 @@ public interface IAppPaths
     string MailCredentialsFolder => System.IO.Path.Combine(LocalDataFolder, "Credentials", "Mail");
     string YandexDraftRecoveryFilePath =>
         System.IO.Path.Combine(LocalDataFolder, "Recovery", "YandexDrafts", "recovery.bin");
+    // Compatibility alias for the generalized managed-IMAP draft recovery store.
+    string ManagedImapDraftRecoveryFilePath => YandexDraftRecoveryFilePath;
     string RemoteImageSenderTrustFolder =>
         System.IO.Path.Combine(LocalDataFolder, "Privacy", "RemoteImageSenderTrust");
     string NotificationSoundsFolder => System.IO.Path.Combine(LocalDataFolder, "Sounds");

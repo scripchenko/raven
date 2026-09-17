@@ -54,7 +54,7 @@ public sealed class ApplicationDraftShutdownGuard(
         bool persisted;
         try
         {
-            persisted = compose.PersistDirtyYandexDraftRecovery();
+            persisted = compose.PersistDirtyManagedImapDraftRecovery();
         }
         catch (Exception)
         {

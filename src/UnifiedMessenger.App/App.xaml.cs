@@ -55,7 +55,7 @@ public partial class App : System.Windows.Application
 
             _mainWindowViewModel.Initialize(loadResult.Settings);
             MailComposeViewModel compose = _serviceProvider.GetRequiredService<MailComposeViewModel>();
-            await compose.RestoreYandexDraftRecoveriesAsync(loadResult.Settings.MailAccounts);
+            await compose.RestoreManagedImapDraftRecoveriesAsync(loadResult.Settings.MailAccounts);
             _webViewSessionManager = _serviceProvider.GetRequiredService<IWebViewSessionManager>();
             _webViewEventCoordinator = _serviceProvider.GetRequiredService<IWebViewEventCoordinator>();
 
@@ -234,7 +234,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<IMailCredentialProtector, DpapiMailCredentialProtector>();
         services.AddSingleton<IMailCredentialStore, FileMailCredentialStore>();
-        services.AddSingleton<IYandexDraftRecoveryStore, FileYandexDraftRecoveryStore>();
+        services.AddSingleton<IManagedImapDraftRecoveryStore, FileManagedImapDraftRecoveryStore>();
         services.AddSingleton<IRemoteImageSenderTrustProtector, DpapiRemoteImageSenderTrustProtector>();
         services.AddSingleton<IRemoteImageSenderTrustStore, FileRemoteImageSenderTrustStore>();
         services.AddSingleton<IMailConnectionValidator, MailKitConnectionValidator>();
@@ -294,8 +294,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IMailDraftAutosaveScheduler, SystemMailDraftAutosaveScheduler>();
         services.AddSingleton<IGmailDraftApiClient, GmailDraftApiClient>();
         services.AddSingleton<IGmailDraftService, GmailDraftService>();
-        services.AddSingleton<IYandexDraftSessionFactory, MailKitYandexDraftSessionFactory>();
-        services.AddSingleton<IYandexDraftService, YandexDraftService>();
+        services.AddSingleton<IManagedImapDraftSessionFactory, MailKitManagedImapDraftSessionFactory>();
+        services.AddSingleton<IManagedImapDraftService, ManagedImapDraftService>();
         services.AddSingleton<IGmailApiSendClient, GmailApiSendClient>();
         services.AddSingleton<ISmtpClientSessionFactory, MailKitSmtpClientSessionFactory>();
         services.AddSingleton<ISmtpSubmissionClient, MailKitSmtpSubmissionClient>();

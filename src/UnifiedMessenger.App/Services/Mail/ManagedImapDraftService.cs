@@ -8,17 +8,17 @@ using UnifiedMessenger.App.Models;
 
 namespace UnifiedMessenger.App.Services.Mail;
 
-public sealed record YandexDraftIdentity(
+public sealed record ManagedImapDraftIdentity(
     string FolderLocator,
     uint UidValidity,
     uint UniqueId,
     string LogicalId);
 
-public sealed record YandexDraftLoadResult(
-    YandexDraftIdentity Identity,
+public sealed record ManagedImapDraftLoadResult(
+    ManagedImapDraftIdentity Identity,
     MailComposeTemplate Template);
 
-public sealed class YandexDraftException(
+public sealed class ManagedImapDraftException(
     MailSendFailureKind failureKind,
     string userMessage,
     Exception? innerException = null) : Exception(userMessage, innerException)
@@ -27,60 +27,60 @@ public sealed class YandexDraftException(
     public string UserMessage { get; } = userMessage;
 }
 
-public enum YandexDraftSaveStatus
+public enum ManagedImapDraftSaveStatus
 {
     Saved,
     Failed,
     Ambiguous
 }
 
-public sealed record YandexDraftSaveResult(
-    YandexDraftSaveStatus Status,
-    YandexDraftIdentity? Identity,
+public sealed record ManagedImapDraftSaveResult(
+    ManagedImapDraftSaveStatus Status,
+    ManagedImapDraftIdentity? Identity,
     string LogicalId,
     MailSendFailureKind? FailureKind = null,
     string? UserMessage = null)
 {
-    public bool IsSaved => Status is YandexDraftSaveStatus.Saved;
+    public bool IsSaved => Status is ManagedImapDraftSaveStatus.Saved;
 }
 
-public interface IYandexDraftService
+public interface IManagedImapDraftService
 {
-    Task<YandexDraftLoadResult> LoadAsync(
+    Task<ManagedImapDraftLoadResult> LoadAsync(
         MailAccount account,
         string messageKey,
         CancellationToken cancellationToken = default);
 
-    Task<YandexDraftSaveResult> SaveAsync(
+    Task<ManagedImapDraftSaveResult> SaveAsync(
         MailAccount account,
-        YandexDraftIdentity? identity,
+        ManagedImapDraftIdentity? identity,
         string? logicalId,
         MailComposeRequest request,
         CancellationToken cancellationToken = default);
 
     Task DeleteAsync(
         MailAccount account,
-        YandexDraftIdentity identity,
+        ManagedImapDraftIdentity identity,
         CancellationToken cancellationToken = default);
 }
 
-internal sealed record YandexDraftFolderState(
+internal sealed record ManagedImapDraftFolderState(
     string FolderLocator,
     uint UidValidity,
     bool SupportsReplace,
     bool SupportsUidPlus,
     bool CanDelete);
 
-internal interface IYandexDraftSessionFactory
+internal interface IManagedImapDraftSessionFactory
 {
-    IYandexDraftSession Create();
+    IManagedImapDraftSession Create();
 }
 
-internal interface IYandexDraftSession : IDisposable
+internal interface IManagedImapDraftSession : IDisposable
 {
     bool IsConnected { get; }
     Task ConnectAsync(MailServerSettings server, string secret, CancellationToken cancellationToken);
-    Task<YandexDraftFolderState> OpenDraftsAsync(CancellationToken cancellationToken);
+    Task<ManagedImapDraftFolderState> OpenDraftsAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<uint>> FindByLogicalIdAsync(string logicalId, CancellationToken cancellationToken);
     Task<bool> ExistsAsync(uint uid, CancellationToken cancellationToken);
     Task<UniqueId?> AppendAsync(MimeMessage message, CancellationToken cancellationToken);
@@ -90,29 +90,29 @@ internal interface IYandexDraftSession : IDisposable
     Task DisconnectAsync(CancellationToken cancellationToken);
 }
 
-internal sealed class YandexDraftService(
+internal sealed class ManagedImapDraftService(
     IMailCredentialStore credentialStore,
     IMailProviderFactory providerFactory,
-    IYandexDraftSessionFactory sessionFactory,
+    IManagedImapDraftSessionFactory sessionFactory,
     IMailOutgoingAttachmentMaterializer attachmentMaterializer,
-    IMailMimeMessageFactory mimeMessageFactory) : IYandexDraftService
+    IMailMimeMessageFactory mimeMessageFactory) : IManagedImapDraftService
 {
     internal const string LogicalIdHeader = "X-Lantern-Draft-Id";
     private const string RichDraftWarning =
         "Этот черновик содержит HTML-форматирование, которое Lantern не может сохранить без потерь.";
 
-    public async Task<YandexDraftLoadResult> LoadAsync(
+    public async Task<ManagedImapDraftLoadResult> LoadAsync(
         MailAccount account,
         string messageKey,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(account);
         ArgumentException.ThrowIfNullOrWhiteSpace(messageKey);
-        if (account.Provider is not MailProviderType.Yandex || !account.IsEnabled)
+        if (!MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap || !account.IsEnabled)
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 MailSendFailureKind.InvalidRequest,
-                "Почтовый аккаунт Яндекс недоступен.");
+                "Почтовый аккаунт недоступен.");
         }
 
         (uint expectedValidity, uint uid) identity;
@@ -122,27 +122,27 @@ internal sealed class YandexDraftService(
         }
         catch (Exception exception) when (exception is ArgumentException or FormatException or MailReadException)
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 MailSendFailureKind.InvalidRequest,
-                "Идентификатор черновика Яндекс Почты некорректен.",
+                "Идентификатор черновика некорректен.",
                 exception);
         }
 
         (MailServerSettings server, string secret) = await ResolveConnectionAsync(account, cancellationToken);
-        using IYandexDraftSession session = sessionFactory.Create();
+        using IManagedImapDraftSession session = sessionFactory.Create();
         try
         {
             await session.ConnectAsync(server, secret, cancellationToken);
-            YandexDraftFolderState folder = await session.OpenDraftsAsync(cancellationToken);
+            ManagedImapDraftFolderState folder = await session.OpenDraftsAsync(cancellationToken);
             if (folder.UidValidity != identity.expectedValidity)
             {
-                throw new YandexDraftException(
+                throw new ManagedImapDraftException(
                     MailSendFailureKind.InvalidRequest,
                     "Список черновиков изменился. Обновите папку и повторите попытку.");
             }
             if (!await session.ExistsAsync(identity.uid, cancellationToken))
             {
-                throw new YandexDraftException(
+                throw new ManagedImapDraftException(
                     MailSendFailureKind.InvalidRequest,
                     "Черновик больше недоступен.");
             }
@@ -163,7 +163,7 @@ internal sealed class YandexDraftService(
                 RestrictionMessage = isReadOnly ? RichDraftWarning : null
             };
             return new(
-                new YandexDraftIdentity(
+                new ManagedImapDraftIdentity(
                     folder.FolderLocator,
                     folder.UidValidity,
                     identity.uid,
@@ -174,13 +174,13 @@ internal sealed class YandexDraftService(
         {
             throw;
         }
-        catch (YandexDraftException)
+        catch (ManagedImapDraftException)
         {
             throw;
         }
         catch (MailAttachmentException exception)
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 exception.FailureKind is MailAttachmentFailureKind.MessageTooLarge
                     ? MailSendFailureKind.MessageTooLarge
                     : MailSendFailureKind.AttachmentUnavailable,
@@ -189,21 +189,21 @@ internal sealed class YandexDraftService(
         }
         catch (MailKit.Security.AuthenticationException exception)
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 MailSendFailureKind.AuthenticationFailed,
-                "Не удалось войти в Яндекс Почту. Проверьте пароль приложения.",
+                "Не удалось войти в почтовый аккаунт. Проверьте пароль приложения.",
                 exception);
         }
         catch (Exception exception) when (exception is FolderNotFoundException or NotSupportedException)
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 MailSendFailureKind.CapabilityUnavailable,
                 "Сервер не предоставил системную папку «Черновики».",
                 exception);
         }
         catch (Exception exception) when (IsTransportFailure(exception) || exception is CommandException)
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 MailSendFailureKind.ConnectionFailed,
                 "Не удалось открыть черновик. Проверьте подключение.",
                 exception);
@@ -214,9 +214,9 @@ internal sealed class YandexDraftService(
         }
     }
 
-    public async Task<YandexDraftSaveResult> SaveAsync(
+    public async Task<ManagedImapDraftSaveResult> SaveAsync(
         MailAccount account,
-        YandexDraftIdentity? identity,
+        ManagedImapDraftIdentity? identity,
         string? logicalId,
         MailComposeRequest request,
         CancellationToken cancellationToken = default)
@@ -229,19 +229,19 @@ internal sealed class YandexDraftService(
         if (!Guid.TryParseExact(token, "N", out _)
             || identity is not null && !string.Equals(identity.LogicalId, token, StringComparison.Ordinal))
         {
-            return Failed(token, MailSendFailureKind.InvalidRequest, "Идентификатор черновика Яндекс Почты некорректен.");
+            return Failed(token, MailSendFailureKind.InvalidRequest, "Идентификатор черновика некорректен.");
         }
-        if (account.Provider is not MailProviderType.Yandex
+        if (!MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap
             || !account.IsEnabled
             || request.AccountId != account.Id)
         {
-            return Failed(token, MailSendFailureKind.InvalidRequest, "Параметры черновика Яндекс Почты некорректны.");
+            return Failed(token, MailSendFailureKind.InvalidRequest, "Параметры черновика некорректны.");
         }
 
         MailCredential? credential = await credentialStore.LoadAsync(account.CredentialKey, cancellationToken);
         if (credential is not { Kind: MailCredentialKind.Password } || !credential.IsValid())
         {
-            return Failed(token, MailSendFailureKind.AuthenticationFailed, "Не удалось войти в Яндекс Почту. Проверьте пароль приложения.");
+            return Failed(token, MailSendFailureKind.AuthenticationFailed, "Не удалось войти в почтовый аккаунт. Проверьте пароль приложения.");
         }
 
         if (providerFactory.Get(account.Provider) is not PasswordMailProvider provider)
@@ -280,14 +280,14 @@ internal sealed class YandexDraftService(
             return Failed(token, MailSendFailureKind.InvalidRequest, exception.UserMessage);
         }
 
-        using IYandexDraftSession session = sessionFactory.Create();
+        using IManagedImapDraftSession session = sessionFactory.Create();
         bool mutationAttempted = false;
-        YandexDraftIdentity? latestConfirmedIdentity = identity;
+        ManagedImapDraftIdentity? latestConfirmedIdentity = identity;
         try
         {
             await session.ConnectAsync(settings.Imap, credential.Secret, cancellationToken);
-            YandexDraftFolderState folder = await session.OpenDraftsAsync(cancellationToken);
-            YandexDraftIdentity? current = identity is not null
+            ManagedImapDraftFolderState folder = await session.OpenDraftsAsync(cancellationToken);
+            ManagedImapDraftIdentity? current = identity is not null
                 && string.Equals(identity.FolderLocator, folder.FolderLocator, StringComparison.Ordinal)
                 && identity.UidValidity == folder.UidValidity
                     ? identity
@@ -374,7 +374,7 @@ internal sealed class YandexDraftService(
         }
         catch (MailKit.Security.AuthenticationException)
         {
-            return Failed(token, MailSendFailureKind.AuthenticationFailed, "Не удалось войти в Яндекс Почту. Проверьте пароль приложения.");
+            return Failed(token, MailSendFailureKind.AuthenticationFailed, "Не удалось войти в почтовый аккаунт. Проверьте пароль приложения.");
         }
         catch (Exception exception) when (exception is FolderNotFoundException or NotSupportedException)
         {
@@ -400,37 +400,37 @@ internal sealed class YandexDraftService(
 
     public async Task DeleteAsync(
         MailAccount account,
-        YandexDraftIdentity identity,
+        ManagedImapDraftIdentity identity,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(account);
         ArgumentNullException.ThrowIfNull(identity);
-        if (account.Provider is not MailProviderType.Yandex || !account.IsEnabled)
+        if (!MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap || !account.IsEnabled)
         {
-            throw new InvalidOperationException("Yandex draft account is unavailable.");
+            throw new InvalidOperationException("Managed IMAP draft account is unavailable.");
         }
 
         MailCredential? credential = await credentialStore.LoadAsync(account.CredentialKey, cancellationToken);
         if (credential is not { Kind: MailCredentialKind.Password } || !credential.IsValid()
             || providerFactory.Get(account.Provider) is not PasswordMailProvider provider)
         {
-            throw new InvalidOperationException("Yandex draft credentials are unavailable.");
+            throw new InvalidOperationException("Managed IMAP draft credentials are unavailable.");
         }
 
         MailConnectionSettings settings = provider.CreateConnectionSettings(
             new(account.Provider, account.EmailAddress, account.DisplayName, account.GenericConnectionSettings),
-            account.EmailAddress.Trim()) ?? throw new InvalidOperationException("Yandex IMAP is unavailable.");
-        using IYandexDraftSession session = sessionFactory.Create();
+            account.EmailAddress.Trim()) ?? throw new InvalidOperationException("Managed IMAP is unavailable.");
+        using IManagedImapDraftSession session = sessionFactory.Create();
         try
         {
             await session.ConnectAsync(settings.Imap, credential.Secret, cancellationToken);
-            YandexDraftFolderState folder = await session.OpenDraftsAsync(cancellationToken);
+            ManagedImapDraftFolderState folder = await session.OpenDraftsAsync(cancellationToken);
             if (!folder.SupportsUidPlus
                 || !folder.CanDelete
                 || folder.UidValidity != identity.UidValidity
                 || !string.Equals(folder.FolderLocator, identity.FolderLocator, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("Yandex draft identity is stale or exact deletion is unavailable.");
+                throw new InvalidOperationException("Managed IMAP draft identity is stale or exact deletion is unavailable.");
             }
 
             if (await session.ExistsAsync(identity.UniqueId, cancellationToken))
@@ -459,29 +459,29 @@ internal sealed class YandexDraftService(
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 MailSendFailureKind.CredentialMissing,
-                "Не удалось прочитать защищённые данные Яндекс Почты.",
+                "Не удалось прочитать защищённые данные почтового аккаунта.",
                 exception);
         }
 
         if (credential is not { Kind: MailCredentialKind.Password } || !credential.IsValid())
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 MailSendFailureKind.AuthenticationFailed,
-                "Не удалось войти в Яндекс Почту. Проверьте пароль приложения.");
+                "Не удалось войти в почтовый аккаунт. Проверьте пароль приложения.");
         }
 
         if (providerFactory.Get(account.Provider) is not PasswordMailProvider provider)
         {
-            throw new YandexDraftException(
+            throw new ManagedImapDraftException(
                 MailSendFailureKind.CapabilityUnavailable,
                 "Черновики для этого аккаунта недоступны.");
         }
 
         MailConnectionSettings settings = provider.CreateConnectionSettings(
             new(account.Provider, account.EmailAddress, account.DisplayName, account.GenericConnectionSettings),
-            account.EmailAddress.Trim()) ?? throw new YandexDraftException(
+            account.EmailAddress.Trim()) ?? throw new ManagedImapDraftException(
                 MailSendFailureKind.CapabilityUnavailable,
                 "Черновики для этого аккаунта недоступны.");
         return (settings.Imap, credential.Secret);
@@ -527,21 +527,21 @@ internal sealed class YandexDraftService(
             ? value.Id
             : null;
 
-    private static YandexDraftSaveResult Saved(YandexDraftFolderState folder, uint uid, string token) =>
+    private static ManagedImapDraftSaveResult Saved(ManagedImapDraftFolderState folder, uint uid, string token) =>
         new(
-            YandexDraftSaveStatus.Saved,
-            new YandexDraftIdentity(folder.FolderLocator, folder.UidValidity, uid, token),
+            ManagedImapDraftSaveStatus.Saved,
+            new ManagedImapDraftIdentity(folder.FolderLocator, folder.UidValidity, uid, token),
             token);
 
-    private static YandexDraftSaveResult Failed(
+    private static ManagedImapDraftSaveResult Failed(
         string token,
         MailSendFailureKind failureKind,
         string userMessage) =>
-        new(YandexDraftSaveStatus.Failed, null, token, failureKind, userMessage);
+        new(ManagedImapDraftSaveStatus.Failed, null, token, failureKind, userMessage);
 
-    private static YandexDraftSaveResult Ambiguous(YandexDraftIdentity? identity, string token) =>
+    private static ManagedImapDraftSaveResult Ambiguous(ManagedImapDraftIdentity? identity, string token) =>
         new(
-            YandexDraftSaveStatus.Ambiguous,
+            ManagedImapDraftSaveStatus.Ambiguous,
             identity,
             token,
             MailSendFailureKind.Ambiguous,
@@ -556,7 +556,7 @@ internal sealed class YandexDraftService(
             or ServiceNotConnectedException
             or ServiceNotAuthenticatedException;
 
-    private static async Task DisconnectQuietlyAsync(IYandexDraftSession session)
+    private static async Task DisconnectQuietlyAsync(IManagedImapDraftSession session)
     {
         if (!session.IsConnected)
         {
@@ -573,12 +573,12 @@ internal sealed class YandexDraftService(
     }
 }
 
-internal sealed class MailKitYandexDraftSessionFactory : IYandexDraftSessionFactory
+internal sealed class MailKitManagedImapDraftSessionFactory : IManagedImapDraftSessionFactory
 {
-    public IYandexDraftSession Create() => new MailKitYandexDraftSession();
+    public IManagedImapDraftSession Create() => new MailKitManagedImapDraftSession();
 }
 
-internal sealed class MailKitYandexDraftSession : IYandexDraftSession
+internal sealed class MailKitManagedImapDraftSession : IManagedImapDraftSession
 {
     private readonly ImapClient _client = new();
     private IMailFolder? _drafts;
@@ -603,7 +603,7 @@ internal sealed class MailKitYandexDraftSession : IYandexDraftSession
         await _client.AuthenticateAsync(server.Username, secret, cancellationToken);
     }
 
-    public async Task<YandexDraftFolderState> OpenDraftsAsync(CancellationToken cancellationToken)
+    public async Task<ManagedImapDraftFolderState> OpenDraftsAsync(CancellationToken cancellationToken)
     {
         _drafts = _client.GetFolder(SpecialFolder.Drafts);
         if (_drafts is not { Exists: true }
@@ -623,13 +623,36 @@ internal sealed class MailKitYandexDraftSession : IYandexDraftSession
 
     public async Task<IReadOnlyList<uint>> FindByLogicalIdAsync(
         string logicalId,
-        CancellationToken cancellationToken) =>
-        (await _drafts!.SearchAsync(
-            SearchQuery.HeaderContains(YandexDraftService.LogicalIdHeader, logicalId),
-            cancellationToken))
-            .Select(uid => uid.Id)
+        CancellationToken cancellationToken)
+    {
+        // Mail.ru advertises XLIST/UIDPLUS but rejects SEARCH HEADER for
+        // arbitrary X-* fields. Search only the Drafts mailbox, then fetch the
+        // single reconciliation header without downloading message bodies.
+        IList<UniqueId> candidates = await _drafts!.SearchAsync(
+            SearchQuery.All,
+            cancellationToken);
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        FetchRequest request = new(
+            MessageSummaryItems.UniqueId | MessageSummaryItems.Headers,
+            [ManagedImapDraftService.LogicalIdHeader]);
+        IList<IMessageSummary> summaries = await _drafts.FetchAsync(
+            candidates,
+            request,
+            cancellationToken);
+        return summaries
+            .Where(summary => summary.UniqueId.IsValid
+                && string.Equals(
+                    summary.Headers?[ManagedImapDraftService.LogicalIdHeader],
+                    logicalId,
+                    StringComparison.Ordinal))
+            .Select(summary => summary.UniqueId.Id)
             .Distinct()
             .ToArray();
+    }
 
     public async Task<bool> ExistsAsync(uint uid, CancellationToken cancellationToken) =>
         (await _drafts!.FetchAsync([new UniqueId(uid)], MessageSummaryItems.UniqueId, cancellationToken))

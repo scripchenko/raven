@@ -10,22 +10,25 @@ using MailFolder = UnifiedMessenger.App.Models.MailFolder;
 
 namespace UnifiedMessenger.Tests;
 
-public sealed class YandexServerDraftTests
+public sealed class ManagedImapServerDraftTests
 {
-    [Fact]
-    public async Task CreateThenUpdate_AppendsNewBeforeExactOldUidDeletion()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task CreateThenUpdate_AppendsNewBeforeExactOldUidDeletion(
+        MailProviderType providerType)
     {
         DraftSession session = new();
-        YandexDraftService service = CreateService(session);
-        MailAccount account = Account();
+        ManagedImapDraftService service = CreateService(session, providerType);
+        MailAccount account = Account(providerType);
         MailComposeRequest firstRequest = Request(account, "first") with
         {
             Attachments = [OutgoingMailAttachment.FromMemory(
                 new MailAttachmentContent("proof.txt", "text/plain", "proof"u8.ToArray()))]
         };
 
-        YandexDraftSaveResult first = await service.SaveAsync(account, null, null, firstRequest);
-        YandexDraftSaveResult second = await service.SaveAsync(
+        ManagedImapDraftSaveResult first = await service.SaveAsync(account, null, null, firstRequest);
+        ManagedImapDraftSaveResult second = await service.SaveAsync(
             account,
             first.Identity,
             first.LogicalId,
@@ -37,7 +40,7 @@ public sealed class YandexServerDraftTests
         Assert.Equal(102u, second.Identity!.UniqueId);
         Assert.Equal(["append:101", "append:102", "delete:101"], session.Writes);
         Assert.All(session.Messages, message =>
-            Assert.Equal(first.LogicalId, message.Headers[YandexDraftService.LogicalIdHeader]));
+            Assert.Equal(first.LogicalId, message.Headers[ManagedImapDraftService.LogicalIdHeader]));
         Assert.Equal("to@example.test", Assert.Single(session.Messages[0].To.Mailboxes).Address);
         Assert.Equal("cc@example.test", Assert.Single(session.Messages[0].Cc.Mailboxes).Address);
         Assert.Equal("bcc@example.test", Assert.Single(session.Messages[0].Bcc.Mailboxes).Address);
@@ -49,11 +52,11 @@ public sealed class YandexServerDraftTests
     public async Task ServerReplace_IsPreferredAndKeepsUidScopedIdentity()
     {
         DraftSession session = new() { SupportsReplace = true };
-        YandexDraftService service = CreateService(session);
+        ManagedImapDraftService service = CreateService(session);
         MailAccount account = Account();
-        YandexDraftSaveResult first = await service.SaveAsync(account, null, null, Request(account, "first"));
+        ManagedImapDraftSaveResult first = await service.SaveAsync(account, null, null, Request(account, "first"));
 
-        YandexDraftSaveResult second = await service.SaveAsync(
+        ManagedImapDraftSaveResult second = await service.SaveAsync(
             account,
             first.Identity,
             first.LogicalId,
@@ -69,10 +72,10 @@ public sealed class YandexServerDraftTests
     public async Task MissingAppendUid_IsReconciledByOpaqueLogicalHeader()
     {
         DraftSession session = new() { ReturnAppendUid = false };
-        YandexDraftService service = CreateService(session);
+        ManagedImapDraftService service = CreateService(session);
         MailAccount account = Account();
 
-        YandexDraftSaveResult result = await service.SaveAsync(
+        ManagedImapDraftSaveResult result = await service.SaveAsync(
             account,
             null,
             null,
@@ -87,19 +90,19 @@ public sealed class YandexServerDraftTests
     public async Task ExistingDraftWithoutReplaceOrUidPlus_IsNotMutated()
     {
         DraftSession session = new() { SupportsUidPlus = false };
-        YandexDraftService service = CreateService(session);
+        ManagedImapDraftService service = CreateService(session);
         MailAccount account = Account();
         const string token = "11111111111111111111111111111111";
         session.Seed(44, token);
-        YandexDraftIdentity identity = new("Drafts", 9, 44, token);
+        ManagedImapDraftIdentity identity = new("Drafts", 9, 44, token);
 
-        YandexDraftSaveResult result = await service.SaveAsync(
+        ManagedImapDraftSaveResult result = await service.SaveAsync(
             account,
             identity,
             token,
             Request(account, "new body"));
 
-        Assert.Equal(YandexDraftSaveStatus.Failed, result.Status);
+        Assert.Equal(ManagedImapDraftSaveStatus.Failed, result.Status);
         Assert.Equal(MailSendFailureKind.CapabilityUnavailable, result.FailureKind);
         Assert.Empty(session.Writes);
         Assert.Contains(44u, session.KnownUids);
@@ -109,19 +112,19 @@ public sealed class YandexServerDraftTests
     public async Task AmbiguousAppend_DoesNotDeleteOnlyConfirmedOldDraft()
     {
         DraftSession session = new() { ThrowAfterAppend = true };
-        YandexDraftService service = CreateService(session);
+        ManagedImapDraftService service = CreateService(session);
         MailAccount account = Account();
         const string token = "22222222222222222222222222222222";
         session.Seed(44, token);
-        YandexDraftIdentity identity = new("Drafts", 9, 44, token);
+        ManagedImapDraftIdentity identity = new("Drafts", 9, 44, token);
 
-        YandexDraftSaveResult result = await service.SaveAsync(
+        ManagedImapDraftSaveResult result = await service.SaveAsync(
             account,
             identity,
             token,
             Request(account, "new body"));
 
-        Assert.Equal(YandexDraftSaveStatus.Ambiguous, result.Status);
+        Assert.Equal(ManagedImapDraftSaveStatus.Ambiguous, result.Status);
         Assert.Equal(identity, result.Identity);
         Assert.Equal(["append:101"], session.Writes);
         Assert.Contains(44u, session.KnownUids);
@@ -131,11 +134,11 @@ public sealed class YandexServerDraftTests
     public async Task UidValidityChange_DropsStaleIdentityWithoutDeletingItsUid()
     {
         DraftSession session = new() { UidValidity = 10 };
-        YandexDraftService service = CreateService(session);
+        ManagedImapDraftService service = CreateService(session);
         MailAccount account = Account();
-        YandexDraftIdentity stale = new("Drafts", 9, 44, "33333333333333333333333333333333");
+        ManagedImapDraftIdentity stale = new("Drafts", 9, 44, "33333333333333333333333333333333");
 
-        YandexDraftSaveResult result = await service.SaveAsync(
+        ManagedImapDraftSaveResult result = await service.SaveAsync(
             account,
             stale,
             stale.LogicalId,
@@ -146,8 +149,11 @@ public sealed class YandexServerDraftTests
         Assert.DoesNotContain("delete:44", session.Writes);
     }
 
-    [Fact]
-    public async Task LoadExistingDraft_RestoresEnvelopeBodyAttachmentsAndUidIdentity()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task LoadExistingDraft_RestoresEnvelopeBodyAttachmentsAndUidIdentity(
+        MailProviderType providerType)
     {
         DraftSession session = new();
         const string token = "44444444444444444444444444444444";
@@ -162,15 +168,15 @@ public sealed class YandexServerDraftTests
         message.To.Add(MailboxAddress.Parse("Recipient <to@example.test>"));
         message.Cc.Add(MailboxAddress.Parse("cc@example.test"));
         message.Bcc.Add(MailboxAddress.Parse("bcc@example.test"));
-        message.Headers[YandexDraftService.LogicalIdHeader] = token;
+        message.Headers[ManagedImapDraftService.LogicalIdHeader] = token;
         session.SeedMessage(44, message);
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
 
-        YandexDraftLoadResult loaded = await CreateService(session).LoadAsync(
+        ManagedImapDraftLoadResult loaded = await CreateService(session, providerType).LoadAsync(
             account,
             ImapMailReadProvider.CreateMessageKey(MailFolderKind.Drafts, 9, 44));
 
-        Assert.Equal(new YandexDraftIdentity("Drafts", 9, 44, token), loaded.Identity);
+        Assert.Equal(new ManagedImapDraftIdentity("Drafts", 9, 44, token), loaded.Identity);
         Assert.Contains("to@example.test", loaded.Template.To, StringComparison.Ordinal);
         Assert.Contains("cc@example.test", loaded.Template.Cc, StringComparison.Ordinal);
         Assert.Contains("bcc@example.test", loaded.Template.Bcc, StringComparison.Ordinal);
@@ -193,7 +199,7 @@ public sealed class YandexServerDraftTests
         message.From.Add(MailboxAddress.Parse("owner@yandex.test"));
         session.SeedMessage(45, message);
 
-        YandexDraftLoadResult loaded = await CreateService(session).LoadAsync(
+        ManagedImapDraftLoadResult loaded = await CreateService(session).LoadAsync(
             Account(),
             ImapMailReadProvider.CreateMessageKey(MailFolderKind.Drafts, 9, 45));
 
@@ -214,10 +220,10 @@ public sealed class YandexServerDraftTests
         message.From.Add(MailboxAddress.Parse("owner@yandex.test"));
         session.SeedMessage(46, message);
         MailAccount account = Account();
-        YandexDraftService service = CreateService(session);
-        YandexDraftLoadResult loaded = await service.LoadAsync(account, Key(46));
+        ManagedImapDraftService service = CreateService(session);
+        ManagedImapDraftLoadResult loaded = await service.LoadAsync(account, Key(46));
 
-        YandexDraftSaveResult saved = await service.SaveAsync(
+        ManagedImapDraftSaveResult saved = await service.SaveAsync(
             account,
             loaded.Identity,
             loaded.Identity.LogicalId,
@@ -237,22 +243,25 @@ public sealed class YandexServerDraftTests
         session.Seed(70, token);
         session.Seed(71, Guid.NewGuid().ToString("N"));
         MailAccount account = Account();
-        YandexDraftService service = CreateService(session);
+        ManagedImapDraftService service = CreateService(session);
 
-        await service.DeleteAsync(account, new YandexDraftIdentity("Drafts", 9, 70, token));
+        await service.DeleteAsync(account, new ManagedImapDraftIdentity("Drafts", 9, 70, token));
 
         Assert.Equal(["delete:70"], session.Writes);
         Assert.DoesNotContain(70u, session.KnownUids);
         Assert.Contains(71u, session.KnownUids);
     }
 
-    [Fact]
-    public async Task ComposeAutosave_CoalescesAndUpdatesSameLogicalDraft()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ComposeAutosave_CoalescesAndUpdatesSameLogicalDraft(
+        MailProviderType providerType)
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
-        OpenNew(compose, Account());
+        OpenNew(compose, Account(providerType));
 
         compose.Draft!.TextBody = "a";
         compose.Draft.TextBody = "ab";
@@ -269,13 +278,16 @@ public sealed class YandexServerDraftTests
         Assert.Equal("Сохранено", compose.DraftSaveStatusText);
     }
 
-    [Fact]
-    public async Task AutosaveFailure_PreservesTextAndAllowsExplicitRetry()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task AutosaveFailure_PreservesTextAndSuccessfulRetryClearsErrorAndAllowsClose(
+        MailProviderType providerType)
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { FailNext = true };
+        RecordingManagedImapDraftService drafts = new() { FailNext = true };
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
-        OpenNew(compose, Account());
+        OpenNew(compose, Account(providerType));
         compose.Draft!.TextBody = "must remain";
 
         await ReleaseAsync(compose, scheduler);
@@ -286,13 +298,20 @@ public sealed class YandexServerDraftTests
         await compose.RetryDraftSaveCommand.ExecuteAsync(null);
         Assert.Equal("Сохранено", compose.DraftSaveStatusText);
         Assert.Equal(2, drafts.Saves.Count);
+        Assert.Null(compose.FailureKind);
+        Assert.Null(compose.ErrorMessage);
+        Assert.False(compose.RetryDraftSaveCommand.CanExecute(null));
+
+        await compose.CancelCommand.ExecuteAsync(null);
+
+        Assert.False(compose.IsOpen);
     }
 
     [Fact]
     public async Task EditDuringSave_SerializesWritesAndNewestGenerationWins()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { BlockFirstSave = true };
+        RecordingManagedImapDraftService drafts = new() { BlockFirstSave = true };
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "generation one";
@@ -314,7 +333,7 @@ public sealed class YandexServerDraftTests
     public async Task AmbiguousSave_StopsAutomaticWritesAndCannotBlindlyDiscard()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { AmbiguousNext = true };
+        RecordingManagedImapDraftService drafts = new() { AmbiguousNext = true };
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "possibly saved";
@@ -336,7 +355,7 @@ public sealed class YandexServerDraftTests
     public async Task CloseKeepsServerDraft_AndSendDeletesOnlyAfterSuccessfulSmtp()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         RecordingSendProvider sender = new();
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler, sender);
         MailAccount account = Account();
@@ -362,7 +381,7 @@ public sealed class YandexServerDraftTests
     public async Task SeparateAccounts_NeverShareDraftIdentity()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         MailAccount first = Account();
         MailAccount second = Account();
@@ -378,16 +397,19 @@ public sealed class YandexServerDraftTests
         Assert.NotEqual(drafts.Saves[0].Result.LogicalId, drafts.Saves[1].Result.LogicalId);
     }
 
-    [Fact]
-    public async Task SavedDraft_InvalidatesDraftFolderAndRefreshesItAfterComposeCloses()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task SavedDraft_InvalidatesDraftFolderAndRefreshesItAfterComposeCloses(
+        MailProviderType providerType)
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         using MailInboxViewModel inbox = new(
             new DraftFolderProviderFactory(new DraftFolderReadProvider(drafts)),
             compose);
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         await inbox.ActivateAsync(account);
         inbox.SelectedFolder = inbox.Folders.Single(folder => folder.Kind is MailFolderKind.Drafts);
         await inbox.CurrentFolderLoadTask;
@@ -407,17 +429,20 @@ public sealed class YandexServerDraftTests
         Assert.Equal("server draft", inbox.Messages[0].Subject);
     }
 
-    [Fact]
-    public async Task OpenExistingDraft_PopulatesComposeAndTracksReplacementUid()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task OpenExistingDraft_PopulatesComposeAndTracksReplacementUid(
+        MailProviderType providerType)
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { ReplaceUidOnSave = true };
-        MailAccount account = Account();
+        RecordingManagedImapDraftService drafts = new() { ReplaceUidOnSave = true };
+        MailAccount account = Account(providerType);
         drafts.SetLoaded(account, 44, "original body", withAttachment: true);
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         compose.ActivateAccount(account);
 
-        Assert.True(await compose.OpenYandexDraftAsync(account, Key(44)));
+        Assert.True(await compose.OpenManagedImapDraftAsync(account, Key(44)));
         Assert.True(compose.IsOpen);
         Assert.Equal("to@example.test", compose.Draft!.To);
         Assert.Equal("cc@example.test", compose.Draft.Cc);
@@ -433,21 +458,24 @@ public sealed class YandexServerDraftTests
         Assert.Equal(44u, save.Identity!.UniqueId);
         Assert.Equal(101u, save.Result.Identity!.UniqueId);
         await compose.CancelCommand.ExecuteAsync(null);
-        Assert.True(await compose.OpenYandexDraftAsync(account, Key(101)));
+        Assert.True(await compose.OpenManagedImapDraftAsync(account, Key(101)));
         Assert.Equal("latest body", compose.Draft!.TextBody);
     }
 
-    [Fact]
-    public async Task OpenDraftSendSuccess_DeletesLatestUid_SendFailureKeepsDraftEditable()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task OpenDraftSendSuccess_DeletesLatestUid_SendFailureKeepsDraftEditable(
+        MailProviderType providerType)
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { ReplaceUidOnSave = true };
+        RecordingManagedImapDraftService drafts = new() { ReplaceUidOnSave = true };
         RecordingSendProvider sender = new();
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         drafts.SetLoaded(account, 44, "body");
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler, sender);
         compose.ActivateAccount(account);
-        Assert.True(await compose.OpenYandexDraftAsync(account, Key(44)));
+        Assert.True(await compose.OpenManagedImapDraftAsync(account, Key(44)));
         compose.Draft!.TextBody = "updated";
         await ReleaseAsync(compose, scheduler);
 
@@ -466,24 +494,24 @@ public sealed class YandexServerDraftTests
     [Fact]
     public async Task DiscardExistingDraft_DeletesOnlyExactLoadedUid()
     {
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         MailAccount account = Account();
         drafts.SetLoaded(account, 77, "discard me");
         using MailComposeViewModel compose = CreateCompose(drafts, new ManualScheduler());
         compose.ActivateAccount(account);
-        Assert.True(await compose.OpenYandexDraftAsync(account, Key(77)));
+        Assert.True(await compose.OpenManagedImapDraftAsync(account, Key(77)));
 
         await compose.DiscardDraftCommand.ExecuteAsync(null);
 
-        YandexDraftIdentity deleted = Assert.Single(drafts.Deletes);
+        ManagedImapDraftIdentity deleted = Assert.Single(drafts.Deletes);
         Assert.Equal(77u, deleted.UniqueId);
         Assert.False(compose.IsOpen);
     }
 
     [Fact]
-    public async Task YandexDraftRowOpensCompose_NormalInboxRowStillOpensDetail()
+    public async Task ManagedImapDraftRowOpensCompose_NormalInboxRowStillOpensDetail()
     {
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         MailAccount account = Account();
         drafts.SetLoaded(account, 44, "draft body");
         using MailComposeViewModel compose = CreateCompose(drafts, new ManualScheduler());
@@ -516,20 +544,20 @@ public sealed class YandexServerDraftTests
     [Fact]
     public async Task ExistingDraftLoad_IsAccountScopedAndFailureLeavesUiUsable()
     {
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         MailAccount first = Account();
         MailAccount second = Account();
         drafts.SetLoaded(first, 44, "first");
         using MailComposeViewModel compose = CreateCompose(drafts, new ManualScheduler());
         compose.ActivateAccount(first);
-        Assert.True(await compose.OpenYandexDraftAsync(first, Key(44)));
+        Assert.True(await compose.OpenManagedImapDraftAsync(first, Key(44)));
         await compose.CancelCommand.ExecuteAsync(null);
 
-        drafts.LoadException = new YandexDraftException(
+        drafts.LoadException = new ManagedImapDraftException(
             MailSendFailureKind.ConnectionFailed,
             "load failed");
         compose.ActivateAccount(second);
-        Assert.False(await compose.OpenYandexDraftAsync(second, Key(44)));
+        Assert.False(await compose.OpenManagedImapDraftAsync(second, Key(44)));
 
         Assert.False(compose.IsOpen);
         Assert.Equal("load failed", compose.ErrorMessage);
@@ -538,10 +566,10 @@ public sealed class YandexServerDraftTests
     }
 
     [Fact]
-    public async Task ExplicitExitFlush_SuccessConfirmsNewestDirtyYandexDraft()
+    public async Task ExplicitExitFlush_SuccessConfirmsNewestDirtyManagedImapDraft()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "latest before exit";
@@ -557,7 +585,7 @@ public sealed class YandexServerDraftTests
     public async Task ExplicitExitFlush_FailureKeepsComposeIntactAndEditable()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { FailNext = true };
+        RecordingManagedImapDraftService drafts = new() { FailNext = true };
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "unsaved";
@@ -575,7 +603,7 @@ public sealed class YandexServerDraftTests
     public async Task ExplicitExitFlush_TimeoutReturnsStructuredTimeoutResult()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { BlockFirstSave = true };
+        RecordingManagedImapDraftService drafts = new() { BlockFirstSave = true };
         using MailComposeViewModel compose = CreateCompose(
             drafts,
             scheduler,
@@ -594,7 +622,7 @@ public sealed class YandexServerDraftTests
     public async Task ExplicitExitFlush_CancellationReturnsStructuredResultAndKeepsDraft()
     {
         using MailComposeViewModel compose = CreateCompose(
-            new RecordingYandexDraftService(),
+            new RecordingManagedImapDraftService(),
             new ManualScheduler());
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "cancelled but retained";
@@ -611,7 +639,7 @@ public sealed class YandexServerDraftTests
     public async Task ExplicitExitFlush_AmbiguousResultCancelsExitWithoutBlindRetry()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { AmbiguousNext = true };
+        RecordingManagedImapDraftService drafts = new() { AmbiguousNext = true };
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "possibly saved";
@@ -628,7 +656,7 @@ public sealed class YandexServerDraftTests
     public async Task FailedExit_RetrySucceedsAndFollowingExitCanProceed()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { FailNext = true };
+        RecordingManagedImapDraftService drafts = new() { FailNext = true };
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "retry me";
@@ -646,7 +674,7 @@ public sealed class YandexServerDraftTests
     public async Task InFlightAutosaveRacingWithExit_PersistsNewestGeneration()
     {
         ManualScheduler scheduler = new();
-        RecordingYandexDraftService drafts = new() { BlockFirstSave = true };
+        RecordingManagedImapDraftService drafts = new() { BlockFirstSave = true };
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler);
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "first";
@@ -666,7 +694,7 @@ public sealed class YandexServerDraftTests
     [Fact]
     public async Task FailedExitGuard_RestoresCoordinatorWindowAndAllowsLaterExit()
     {
-        RecordingYandexDraftService drafts = new() { FailNext = true };
+        RecordingManagedImapDraftService drafts = new() { FailNext = true };
         using MailComposeViewModel compose = CreateCompose(drafts, new ManualScheduler());
         OpenNew(compose, Account());
         compose.Draft!.TextBody = "keep open";
@@ -692,7 +720,7 @@ public sealed class YandexServerDraftTests
     [Fact]
     public void SessionEnding_PersistsDirtyStateWithoutCallingNetwork()
     {
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         MemoryRecoveryStore recovery = new();
         using MailComposeViewModel compose = CreateCompose(drafts, new ManualScheduler(), recovery: recovery);
         MailAccount account = Account();
@@ -714,7 +742,7 @@ public sealed class YandexServerDraftTests
     {
         MemoryRecoveryStore recovery = new() { UpsertSucceeds = false };
         using MailComposeViewModel compose = CreateCompose(
-            new RecordingYandexDraftService(),
+            new RecordingManagedImapDraftService(),
             new ManualScheduler(),
             recovery: recovery);
         OpenNew(compose, Account());
@@ -733,12 +761,15 @@ public sealed class YandexServerDraftTests
         Assert.Equal("must not be lost", compose.Draft.TextBody);
     }
 
-    [Fact]
-    public async Task ProtectedRecovery_RestoresCorrectAccountFieldsAndAttachments()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ProtectedRecovery_RestoresCorrectAccountFieldsAndAttachments(
+        MailProviderType providerType)
     {
         MemoryRecoveryStore recovery = new();
-        RecordingYandexDraftService drafts = new();
-        MailAccount account = Account();
+        RecordingManagedImapDraftService drafts = new();
+        MailAccount account = Account(providerType);
         using (MailComposeViewModel source = CreateCompose(drafts, new ManualScheduler(), recovery: recovery))
         {
             OpenNew(source, account);
@@ -750,11 +781,11 @@ public sealed class YandexServerDraftTests
             source.Draft.AddLocalAttachments([
                 OutgoingMailAttachment.FromMemory(
                     new MailAttachmentContent("proof.txt", "text/plain", "proof"u8.ToArray()))]);
-            Assert.True(source.PersistDirtyYandexDraftRecovery());
+            Assert.True(source.PersistDirtyManagedImapDraftRecovery());
         }
 
         using MailComposeViewModel restored = CreateCompose(drafts, new ManualScheduler(), recovery: recovery);
-        await restored.RestoreYandexDraftRecoveriesAsync([account]);
+        await restored.RestoreManagedImapDraftRecoveriesAsync([account]);
         restored.ActivateAccount(account);
 
         Assert.True(restored.IsOpen);
@@ -772,15 +803,15 @@ public sealed class YandexServerDraftTests
         MailAccount account = Account();
         string logicalId = Guid.NewGuid().ToString("N");
         MemoryRecoveryStore recovery = new([
-            Snapshot(account, "local newest", new YandexDraftIdentity("Drafts", 9, 44, logicalId), logicalId)]);
-        RecordingYandexDraftService drafts = new()
+            Snapshot(account, "local newest", new ManagedImapDraftIdentity("Drafts", 9, 44, logicalId), logicalId)]);
+        RecordingManagedImapDraftService drafts = new()
         {
-            LoadException = new YandexDraftException(MailSendFailureKind.InvalidRequest, "stale")
+            LoadException = new ManagedImapDraftException(MailSendFailureKind.InvalidRequest, "stale")
         };
         ManualScheduler scheduler = new();
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler, recovery: recovery);
 
-        await compose.RestoreYandexDraftRecoveriesAsync([account]);
+        await compose.RestoreManagedImapDraftRecoveriesAsync([account]);
         compose.ActivateAccount(account);
         await ReleaseAsync(compose, scheduler);
 
@@ -795,15 +826,15 @@ public sealed class YandexServerDraftTests
     public async Task RecoveryWithCompatibleIdentity_UpdatesTheConfirmedLogicalDraft()
     {
         MailAccount account = Account();
-        RecordingYandexDraftService drafts = new();
+        RecordingManagedImapDraftService drafts = new();
         drafts.SetLoaded(account, 44, "confirmed server body");
-        YandexDraftIdentity identity = drafts.LoadResult!.Identity;
+        ManagedImapDraftIdentity identity = drafts.LoadResult!.Identity;
         MemoryRecoveryStore recovery = new([
             Snapshot(account, "newer recovered body", identity, identity.LogicalId)]);
         ManualScheduler scheduler = new();
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler, recovery: recovery);
 
-        await compose.RestoreYandexDraftRecoveriesAsync([account]);
+        await compose.RestoreManagedImapDraftRecoveriesAsync([account]);
         compose.ActivateAccount(account);
         await ReleaseAsync(compose, scheduler);
 
@@ -821,10 +852,10 @@ public sealed class YandexServerDraftTests
         MemoryRecoveryStore recovery = new([
             Snapshot(discardedAccount, "discard"),
             Snapshot(savedAccount, "save")]);
-        RecordingYandexDraftService drafts = new() { FailNext = true };
+        RecordingManagedImapDraftService drafts = new() { FailNext = true };
         ManualScheduler scheduler = new();
         using MailComposeViewModel compose = CreateCompose(drafts, scheduler, recovery: recovery);
-        await compose.RestoreYandexDraftRecoveriesAsync([savedAccount, discardedAccount]);
+        await compose.RestoreManagedImapDraftRecoveriesAsync([savedAccount, discardedAccount]);
 
         compose.ActivateAccount(savedAccount);
         await ReleaseAsync(compose, scheduler);
@@ -846,11 +877,11 @@ public sealed class YandexServerDraftTests
             Snapshot(first, "first body"),
             Snapshot(second, "second body")]);
         using MailComposeViewModel compose = CreateCompose(
-            new RecordingYandexDraftService(),
+            new RecordingManagedImapDraftService(),
             new ManualScheduler(),
             recovery: recovery);
 
-        await compose.RestoreYandexDraftRecoveriesAsync([first, second]);
+        await compose.RestoreManagedImapDraftRecoveriesAsync([first, second]);
         compose.ActivateAccount(first);
         Assert.Equal("first body", compose.Draft!.TextBody);
         compose.ActivateAccount(second);
@@ -865,13 +896,13 @@ public sealed class YandexServerDraftTests
         try
         {
             TestPaths paths = new(folder);
-            FileYandexDraftRecoveryStore store = new(paths, new XorProtector());
+            FileManagedImapDraftRecoveryStore store = new(paths, new XorProtector());
             MailAccount account = Account();
-            YandexDraftRecoverySnapshot snapshot = Snapshot(account, "secret-body-unique");
+            ManagedImapDraftRecoverySnapshot snapshot = Snapshot(account, "secret-body-unique");
             snapshot = snapshot with { Subject = "secret-subject-unique" };
 
             Assert.True(store.Upsert([snapshot]));
-            byte[] persisted = File.ReadAllBytes(paths.YandexDraftRecoveryFilePath);
+            byte[] persisted = File.ReadAllBytes(paths.ManagedImapDraftRecoveryFilePath);
             string raw = Encoding.UTF8.GetString(persisted);
 
             Assert.DoesNotContain("secret-body-unique", raw, StringComparison.Ordinal);
@@ -918,10 +949,10 @@ public sealed class YandexServerDraftTests
         Assert.Equal("gmail draft", Assert.Single(gmail.Saves).TextBody);
     }
 
-    private static YandexDraftRecoverySnapshot Snapshot(
+    private static ManagedImapDraftRecoverySnapshot Snapshot(
         MailAccount account,
         string body,
-        YandexDraftIdentity? identity = null,
+        ManagedImapDraftIdentity? identity = null,
         string? logicalId = null) => new(
             account.Id,
             DateTimeOffset.UtcNow,
@@ -939,10 +970,15 @@ public sealed class YandexServerDraftTests
     private static string Key(uint uid, uint uidValidity = 9) =>
         ImapMailReadProvider.CreateMessageKey(MailFolderKind.Drafts, uidValidity, uid);
 
-    private static YandexDraftService CreateService(DraftSession session) =>
+    private static ManagedImapDraftService CreateService(
+        DraftSession session,
+        MailProviderType providerType = MailProviderType.Yandex) =>
         new(
             new PasswordCredentialStore(),
-            new MailProviderFactory([new YandexMailProvider(new Validator())]),
+            new MailProviderFactory([
+                new YandexMailProvider(new Validator()),
+                new MailRuMailProvider(new Validator())
+            ]),
             new DraftSessionFactory(session),
             new MemoryMaterializer(),
             new MailMimeMessageFactory(TimeProvider.System));
@@ -958,10 +994,10 @@ public sealed class YandexServerDraftTests
                 body));
 
     private static MailComposeViewModel CreateCompose(
-        RecordingYandexDraftService drafts,
+        RecordingManagedImapDraftService drafts,
         ManualScheduler scheduler,
         RecordingSendProvider? sender = null,
-        IYandexDraftRecoveryStore? recovery = null,
+        IManagedImapDraftRecoveryStore? recovery = null,
         TimeSpan? finalAutosaveTimeout = null) =>
         new(
             new SendProviderFactory(sender ?? new RecordingSendProvider()),
@@ -971,8 +1007,8 @@ public sealed class YandexServerDraftTests
             attachmentDialogService: null,
             gmailDraftService: null,
             draftAutosaveScheduler: scheduler,
-            yandexDraftService: drafts,
-            yandexDraftRecoveryStore: recovery,
+            managedImapDraftService: drafts,
+            managedImapDraftRecoveryStore: recovery,
             finalAutosaveTimeout: finalAutosaveTimeout);
 
     private static void OpenNew(MailComposeViewModel compose, MailAccount account)
@@ -987,23 +1023,23 @@ public sealed class YandexServerDraftTests
         await compose.CurrentDraftAutosaveTask;
     }
 
-    private static MailAccount Account() => new()
+    private static MailAccount Account(MailProviderType providerType = MailProviderType.Yandex) => new()
     {
         Id = Guid.NewGuid(),
-        Provider = MailProviderType.Yandex,
-        DisplayName = "Yandex",
-        EmailAddress = $"{Guid.NewGuid():N}@yandex.test",
+        Provider = providerType,
+        DisplayName = providerType.ToString(),
+        EmailAddress = $"{Guid.NewGuid():N}@{(providerType is MailProviderType.MailRu ? "mail.ru" : "yandex.test")}",
         CredentialKey = Guid.NewGuid().ToString("N"),
         AuthenticationKind = MailAuthenticationKind.Password,
         IsEnabled = true
     };
 
-    private sealed class DraftSessionFactory(DraftSession session) : IYandexDraftSessionFactory
+    private sealed class DraftSessionFactory(DraftSession session) : IManagedImapDraftSessionFactory
     {
-        public IYandexDraftSession Create() => session;
+        public IManagedImapDraftSession Create() => session;
     }
 
-    private sealed class DraftSession : IYandexDraftSession
+    private sealed class DraftSession : IManagedImapDraftSession
     {
         private readonly Dictionary<uint, string> _tokens = [];
         private readonly Dictionary<uint, MimeMessage> _storedMessages = [];
@@ -1027,7 +1063,7 @@ public sealed class YandexServerDraftTests
 
         public void SeedMessage(uint uid, MimeMessage message)
         {
-            string token = message.Headers[YandexDraftService.LogicalIdHeader] ?? string.Empty;
+            string token = message.Headers[ManagedImapDraftService.LogicalIdHeader] ?? string.Empty;
             _tokens[uid] = token;
             _storedMessages[uid] = message;
             _nextUid = Math.Max(_nextUid, uid);
@@ -1039,8 +1075,8 @@ public sealed class YandexServerDraftTests
             return Task.CompletedTask;
         }
 
-        public Task<YandexDraftFolderState> OpenDraftsAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(new YandexDraftFolderState("Drafts", UidValidity, SupportsReplace, SupportsUidPlus, CanDelete));
+        public Task<ManagedImapDraftFolderState> OpenDraftsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new ManagedImapDraftFolderState("Drafts", UidValidity, SupportsReplace, SupportsUidPlus, CanDelete));
 
         public Task<IReadOnlyList<uint>> FindByLogicalIdAsync(string logicalId, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<uint>>(_tokens
@@ -1055,7 +1091,7 @@ public sealed class YandexServerDraftTests
         public Task<UniqueId?> AppendAsync(MimeMessage message, CancellationToken cancellationToken)
         {
             uint uid = ++_nextUid;
-            string token = message.Headers[YandexDraftService.LogicalIdHeader]!;
+            string token = message.Headers[ManagedImapDraftService.LogicalIdHeader]!;
             _tokens[uid] = token;
             _storedMessages[uid] = message;
             Messages.Add(message);
@@ -1073,7 +1109,7 @@ public sealed class YandexServerDraftTests
             uint replacement = ++_nextUid;
             _tokens.Remove(uid);
             _storedMessages.Remove(uid);
-            _tokens[replacement] = message.Headers[YandexDraftService.LogicalIdHeader]!;
+            _tokens[replacement] = message.Headers[ManagedImapDraftService.LogicalIdHeader]!;
             _storedMessages[replacement] = message;
             Messages.Add(message);
             Writes.Add($"replace:{uid}:{replacement}");
@@ -1153,12 +1189,12 @@ public sealed class YandexServerDraftTests
 
     private sealed record SaveCall(
         Guid AccountId,
-        YandexDraftIdentity? Identity,
+        ManagedImapDraftIdentity? Identity,
         string? LogicalId,
         MailComposeRequest Request,
-        YandexDraftSaveResult Result);
+        ManagedImapDraftSaveResult Result);
 
-    private sealed class RecordingYandexDraftService : IYandexDraftService
+    private sealed class RecordingManagedImapDraftService : IManagedImapDraftService
     {
         private uint _uid = 100;
         private readonly TaskCompletionSource _firstSaveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1168,12 +1204,12 @@ public sealed class YandexServerDraftTests
         public bool BlockFirstSave { get; set; }
         public TaskCompletionSource FirstSaveStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<SaveCall> Saves { get; } = [];
-        public List<YandexDraftIdentity> Deletes { get; } = [];
+        public List<ManagedImapDraftIdentity> Deletes { get; } = [];
         public List<Guid> LoadAccounts { get; } = [];
-        public YandexDraftLoadResult? LoadResult { get; private set; }
-        public YandexDraftException? LoadException { get; set; }
+        public ManagedImapDraftLoadResult? LoadResult { get; private set; }
+        public ManagedImapDraftException? LoadException { get; set; }
 
-        public Task<YandexDraftLoadResult> LoadAsync(
+        public Task<ManagedImapDraftLoadResult> LoadAsync(
             MailAccount account,
             string messageKey,
             CancellationToken cancellationToken = default)
@@ -1181,7 +1217,7 @@ public sealed class YandexServerDraftTests
             LoadAccounts.Add(account.Id);
             if (LoadException is not null)
             {
-                return Task.FromException<YandexDraftLoadResult>(LoadException);
+                return Task.FromException<ManagedImapDraftLoadResult>(LoadException);
             }
             return Task.FromResult(LoadResult ?? throw new InvalidOperationException("No draft was configured."));
         }
@@ -1190,7 +1226,7 @@ public sealed class YandexServerDraftTests
         {
             string token = Guid.NewGuid().ToString("N");
             LoadResult = new(
-                new YandexDraftIdentity("Drafts", 9, uid, token),
+                new ManagedImapDraftIdentity("Drafts", 9, uid, token),
                 new MailComposeTemplate(
                     "to@example.test",
                     "cc@example.test",
@@ -1205,9 +1241,9 @@ public sealed class YandexServerDraftTests
                 });
         }
 
-        public async Task<YandexDraftSaveResult> SaveAsync(
+        public async Task<ManagedImapDraftSaveResult> SaveAsync(
             MailAccount account,
-            YandexDraftIdentity? identity,
+            ManagedImapDraftIdentity? identity,
             string? logicalId,
             MailComposeRequest request,
             CancellationToken cancellationToken = default)
@@ -1216,8 +1252,8 @@ public sealed class YandexServerDraftTests
             if (AmbiguousNext)
             {
                 AmbiguousNext = false;
-                YandexDraftSaveResult ambiguous = new(
-                    YandexDraftSaveStatus.Ambiguous,
+                ManagedImapDraftSaveResult ambiguous = new(
+                    ManagedImapDraftSaveStatus.Ambiguous,
                     identity,
                     token,
                     MailSendFailureKind.Ambiguous,
@@ -1228,8 +1264,8 @@ public sealed class YandexServerDraftTests
             if (FailNext)
             {
                 FailNext = false;
-                YandexDraftSaveResult failed = new(
-                    YandexDraftSaveStatus.Failed,
+                ManagedImapDraftSaveResult failed = new(
+                    ManagedImapDraftSaveStatus.Failed,
                     identity,
                     token,
                     MailSendFailureKind.ConnectionFailed,
@@ -1238,10 +1274,10 @@ public sealed class YandexServerDraftTests
                 return failed;
             }
 
-            YandexDraftIdentity savedIdentity = identity is null || ReplaceUidOnSave
-                ? new YandexDraftIdentity("Drafts", 9, ++_uid, token)
+            ManagedImapDraftIdentity savedIdentity = identity is null || ReplaceUidOnSave
+                ? new ManagedImapDraftIdentity("Drafts", 9, ++_uid, token)
                 : identity;
-            YandexDraftSaveResult result = new(YandexDraftSaveStatus.Saved, savedIdentity, token);
+            ManagedImapDraftSaveResult result = new(ManagedImapDraftSaveStatus.Saved, savedIdentity, token);
             Saves.Add(new(account.Id, identity, logicalId, request, result));
             LoadResult = new(
                 savedIdentity,
@@ -1267,7 +1303,7 @@ public sealed class YandexServerDraftTests
 
         public Task DeleteAsync(
             MailAccount account,
-            YandexDraftIdentity identity,
+            ManagedImapDraftIdentity identity,
             CancellationToken cancellationToken = default)
         {
             Deletes.Add(identity);
@@ -1279,7 +1315,8 @@ public sealed class YandexServerDraftTests
     {
         public int CallCount { get; private set; }
         public MailSendResult Result { get; set; } = MailSendResult.Success("sent");
-        public bool Supports(MailProviderType providerType) => providerType is MailProviderType.Yandex;
+        public bool Supports(MailProviderType providerType) =>
+            MailProviderFeaturePolicies.Get(providerType).IsManagedImap;
         public Task<MailSendResult> SendAsync(
             MailAccount account,
             MailComposeRequest request,
@@ -1309,7 +1346,8 @@ public sealed class YandexServerDraftTests
             "draft body",
             false);
 
-        public bool Supports(MailProviderType providerType) => providerType is MailProviderType.Yandex;
+        public bool Supports(MailProviderType providerType) =>
+            MailProviderFeaturePolicies.Get(providerType).IsManagedImap;
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(MailAccount value, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<MailFolder>>([
                 MailFolderCatalog.Inbox(),
@@ -1336,9 +1374,10 @@ public sealed class YandexServerDraftTests
                 false));
     }
 
-    private sealed class DraftFolderReadProvider(RecordingYandexDraftService drafts) : IMailReadProvider
+    private sealed class DraftFolderReadProvider(RecordingManagedImapDraftService drafts) : IMailReadProvider
     {
-        public bool Supports(MailProviderType providerType) => providerType is MailProviderType.Yandex;
+        public bool Supports(MailProviderType providerType) =>
+            MailProviderFeaturePolicies.Get(providerType).IsManagedImap;
 
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
             MailAccount account,
@@ -1399,27 +1438,27 @@ public sealed class YandexServerDraftTests
         public IMailSendProvider Get(MailProviderType providerType) => provider;
     }
 
-    private sealed class MemoryRecoveryStore : IYandexDraftRecoveryStore
+    private sealed class MemoryRecoveryStore : IManagedImapDraftRecoveryStore
     {
-        private readonly Dictionary<Guid, YandexDraftRecoverySnapshot> _items;
+        private readonly Dictionary<Guid, ManagedImapDraftRecoverySnapshot> _items;
 
-        public MemoryRecoveryStore(IEnumerable<YandexDraftRecoverySnapshot>? items = null)
+        public MemoryRecoveryStore(IEnumerable<ManagedImapDraftRecoverySnapshot>? items = null)
         {
             _items = (items ?? []).ToDictionary(item => item.AccountId);
         }
 
-        public IReadOnlyList<YandexDraftRecoverySnapshot> Items => _items.Values.ToArray();
+        public IReadOnlyList<ManagedImapDraftRecoverySnapshot> Items => _items.Values.ToArray();
         public bool UpsertSucceeds { get; set; } = true;
-        public IReadOnlyList<YandexDraftRecoverySnapshot> Load() => Items;
+        public IReadOnlyList<ManagedImapDraftRecoverySnapshot> Load() => Items;
 
-        public bool Upsert(IReadOnlyCollection<YandexDraftRecoverySnapshot> snapshots)
+        public bool Upsert(IReadOnlyCollection<ManagedImapDraftRecoverySnapshot> snapshots)
         {
             if (!UpsertSucceeds)
             {
                 return false;
             }
 
-            foreach (YandexDraftRecoverySnapshot snapshot in snapshots)
+            foreach (ManagedImapDraftRecoverySnapshot snapshot in snapshots)
             {
                 _items[snapshot.AccountId] = snapshot;
             }
@@ -1474,8 +1513,8 @@ public sealed class YandexServerDraftTests
         public string LocalDataFolder => root;
         public string SettingsFilePath => Path.Combine(root, "settings.json");
         public string WebViewDataFolder => Path.Combine(root, "webview");
-        public string YandexDraftRecoveryFilePath =>
-            Path.Combine(root, "Recovery", "YandexDrafts", "recovery.bin");
+        public string ManagedImapDraftRecoveryFilePath =>
+            Path.Combine(root, "Recovery", "ManagedImapDrafts", "recovery.bin");
         public string LogsFolder => Path.Combine(root, "logs");
     }
 

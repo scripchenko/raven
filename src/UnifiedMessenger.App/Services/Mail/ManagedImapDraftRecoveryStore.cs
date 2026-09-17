@@ -5,19 +5,19 @@ using UnifiedMessenger.App.Services.Persistence;
 
 namespace UnifiedMessenger.App.Services.Mail;
 
-public enum YandexDraftRecoveryAttachmentKind
+public enum ManagedImapDraftRecoveryAttachmentKind
 {
     LocalFile,
     SourceMessage,
     Memory
 }
 
-public sealed record YandexDraftRecoveryAttachment(
+public sealed record ManagedImapDraftRecoveryAttachment(
     string AttachmentId,
     string FileName,
     string ContentType,
     long Size,
-    YandexDraftRecoveryAttachmentKind Kind,
+    ManagedImapDraftRecoveryAttachmentKind Kind,
     string? LocalPath = null,
     long? OriginalSize = null,
     DateTime? OriginalLastWriteTimeUtc = null,
@@ -26,7 +26,7 @@ public sealed record YandexDraftRecoveryAttachment(
     string? SourceAttachmentKey = null,
     byte[]? Bytes = null)
 {
-    internal static YandexDraftRecoveryAttachment Capture(OutgoingMailAttachment attachment) =>
+    internal static ManagedImapDraftRecoveryAttachment Capture(OutgoingMailAttachment attachment) =>
         attachment.Source switch
         {
             LocalFileMailAttachmentSource local => new(
@@ -34,7 +34,7 @@ public sealed record YandexDraftRecoveryAttachment(
                 attachment.FileName,
                 attachment.ContentType,
                 attachment.Size,
-                YandexDraftRecoveryAttachmentKind.LocalFile,
+                ManagedImapDraftRecoveryAttachmentKind.LocalFile,
                 LocalPath: local.Path,
                 OriginalSize: local.OriginalSize,
                 OriginalLastWriteTimeUtc: local.OriginalLastWriteTimeUtc),
@@ -43,7 +43,7 @@ public sealed record YandexDraftRecoveryAttachment(
                 attachment.FileName,
                 attachment.ContentType,
                 attachment.Size,
-                YandexDraftRecoveryAttachmentKind.SourceMessage,
+                ManagedImapDraftRecoveryAttachmentKind.SourceMessage,
                 SourceAccountId: source.AccountId,
                 SourceMessageKey: source.MessageKey,
                 SourceAttachmentKey: source.AttachmentKey),
@@ -52,7 +52,7 @@ public sealed record YandexDraftRecoveryAttachment(
                 attachment.FileName,
                 attachment.ContentType,
                 attachment.Size,
-                YandexDraftRecoveryAttachmentKind.Memory,
+                ManagedImapDraftRecoveryAttachmentKind.Memory,
                 Bytes: memory.Bytes.ToArray()),
             _ => throw new InvalidOperationException("Unsupported draft attachment source.")
         };
@@ -61,12 +61,12 @@ public sealed record YandexDraftRecoveryAttachment(
     {
         MailAttachmentSource source = Kind switch
         {
-            YandexDraftRecoveryAttachmentKind.LocalFile
+            ManagedImapDraftRecoveryAttachmentKind.LocalFile
                 when !string.IsNullOrWhiteSpace(LocalPath)
                     && OriginalSize is long originalSize
                     && OriginalLastWriteTimeUtc is DateTime originalWriteTime =>
                 new LocalFileMailAttachmentSource(LocalPath, originalSize, originalWriteTime),
-            YandexDraftRecoveryAttachmentKind.SourceMessage
+            ManagedImapDraftRecoveryAttachmentKind.SourceMessage
                 when SourceAccountId == accountId
                     && !string.IsNullOrWhiteSpace(SourceMessageKey)
                     && !string.IsNullOrWhiteSpace(SourceAttachmentKey) =>
@@ -74,7 +74,7 @@ public sealed record YandexDraftRecoveryAttachment(
                     accountId,
                     SourceMessageKey,
                     SourceAttachmentKey),
-            YandexDraftRecoveryAttachmentKind.Memory when Bytes is not null =>
+            ManagedImapDraftRecoveryAttachmentKind.Memory when Bytes is not null =>
                 new MemoryMailAttachmentSource(Bytes.ToArray()),
             _ => throw new InvalidDataException("Invalid recovered draft attachment.")
         };
@@ -89,10 +89,10 @@ public sealed record YandexDraftRecoveryAttachment(
     }
 }
 
-public sealed record YandexDraftRecoverySnapshot(
+public sealed record ManagedImapDraftRecoverySnapshot(
     Guid AccountId,
     DateTimeOffset CapturedAtUtc,
-    YandexDraftIdentity? Identity,
+    ManagedImapDraftIdentity? Identity,
     string? LogicalId,
     string To,
     string Cc,
@@ -101,7 +101,7 @@ public sealed record YandexDraftRecoverySnapshot(
     string TextBody,
     string? InReplyTo,
     IReadOnlyList<string> References,
-    IReadOnlyList<YandexDraftRecoveryAttachment> Attachments)
+    IReadOnlyList<ManagedImapDraftRecoveryAttachment> Attachments)
 {
     internal MailComposeTemplate RestoreTemplate() => new(
         To,
@@ -117,14 +117,14 @@ public sealed record YandexDraftRecoverySnapshot(
     };
 }
 
-public interface IYandexDraftRecoveryStore
+public interface IManagedImapDraftRecoveryStore
 {
-    IReadOnlyList<YandexDraftRecoverySnapshot> Load();
-    bool Upsert(IReadOnlyCollection<YandexDraftRecoverySnapshot> snapshots);
+    IReadOnlyList<ManagedImapDraftRecoverySnapshot> Load();
+    bool Upsert(IReadOnlyCollection<ManagedImapDraftRecoverySnapshot> snapshots);
     bool Remove(Guid accountId);
 }
 
-internal sealed class FileYandexDraftRecoveryStore : IYandexDraftRecoveryStore
+internal sealed class FileManagedImapDraftRecoveryStore : IManagedImapDraftRecoveryStore
 {
     private const int SchemaVersion = 1;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -132,13 +132,13 @@ internal sealed class FileYandexDraftRecoveryStore : IYandexDraftRecoveryStore
     private readonly string _path;
     private readonly IMailCredentialProtector _protector;
 
-    public FileYandexDraftRecoveryStore(IAppPaths paths, IMailCredentialProtector protector)
+    public FileManagedImapDraftRecoveryStore(IAppPaths paths, IMailCredentialProtector protector)
     {
-        _path = Path.GetFullPath(paths.YandexDraftRecoveryFilePath);
+        _path = Path.GetFullPath(paths.ManagedImapDraftRecoveryFilePath);
         _protector = protector;
     }
 
-    public IReadOnlyList<YandexDraftRecoverySnapshot> Load()
+    public IReadOnlyList<ManagedImapDraftRecoverySnapshot> Load()
     {
         lock (_gate)
         {
@@ -146,15 +146,15 @@ internal sealed class FileYandexDraftRecoveryStore : IYandexDraftRecoveryStore
         }
     }
 
-    public bool Upsert(IReadOnlyCollection<YandexDraftRecoverySnapshot> snapshots)
+    public bool Upsert(IReadOnlyCollection<ManagedImapDraftRecoverySnapshot> snapshots)
     {
         lock (_gate)
         {
             try
             {
-                Dictionary<Guid, YandexDraftRecoverySnapshot> merged = LoadCore()
+                Dictionary<Guid, ManagedImapDraftRecoverySnapshot> merged = LoadCore()
                     .ToDictionary(item => item.AccountId);
-                foreach (YandexDraftRecoverySnapshot snapshot in snapshots)
+                foreach (ManagedImapDraftRecoverySnapshot snapshot in snapshots)
                 {
                     merged[snapshot.AccountId] = snapshot;
                 }
@@ -177,7 +177,7 @@ internal sealed class FileYandexDraftRecoveryStore : IYandexDraftRecoveryStore
         {
             try
             {
-                YandexDraftRecoverySnapshot[] remaining = LoadCore()
+                ManagedImapDraftRecoverySnapshot[] remaining = LoadCore()
                     .Where(item => item.AccountId != accountId)
                     .ToArray();
                 return SaveCore(remaining);
@@ -193,7 +193,7 @@ internal sealed class FileYandexDraftRecoveryStore : IYandexDraftRecoveryStore
         }
     }
 
-    private IReadOnlyList<YandexDraftRecoverySnapshot> LoadCore()
+    private IReadOnlyList<ManagedImapDraftRecoverySnapshot> LoadCore()
     {
         if (!File.Exists(_path))
         {
@@ -220,7 +220,7 @@ internal sealed class FileYandexDraftRecoveryStore : IYandexDraftRecoveryStore
         }
     }
 
-    private bool SaveCore(IReadOnlyCollection<YandexDraftRecoverySnapshot> snapshots)
+    private bool SaveCore(IReadOnlyCollection<ManagedImapDraftRecoverySnapshot> snapshots)
     {
         if (snapshots.Count == 0)
         {
@@ -265,5 +265,5 @@ internal sealed class FileYandexDraftRecoveryStore : IYandexDraftRecoveryStore
 
     private sealed record RecoveryEnvelope(
         int SchemaVersion,
-        IReadOnlyList<YandexDraftRecoverySnapshot> Drafts);
+        IReadOnlyList<ManagedImapDraftRecoverySnapshot> Drafts);
 }
