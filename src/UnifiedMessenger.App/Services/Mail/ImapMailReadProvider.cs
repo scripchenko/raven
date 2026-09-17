@@ -238,7 +238,8 @@ internal sealed class ImapMailReadProvider(
             credential.Secret,
             cancellationToken);
         return folders
-            .Where(folder => folder.Kind is not MailFolderKind.Archive || account.Provider is MailProviderType.Yandex)
+            .Where(folder => folder.Kind is not MailFolderKind.Archive
+                || MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap)
             .GroupBy(folder => folder.Kind)
             .Select(group => group.First())
             .OrderBy(folder => folder.Kind)
@@ -257,7 +258,7 @@ internal sealed class ImapMailReadProvider(
         MailServerSettings server = ResolveImapSettings(account, pageSize);
         ValidateFolder(folder);
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
-        ImapInboxPageData page = account.Provider is MailProviderType.Yandex
+        ImapInboxPageData page = MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap
             ? await inboxClient.GetUidSafeFolderPageAsync(
                 server,
                 credential.Secret,
@@ -303,7 +304,8 @@ internal sealed class ImapMailReadProvider(
     {
         MailServerSettings server = ResolveImapSettings(account, pageSize);
         ValidateFolder(folder);
-        if (account.Provider is not MailProviderType.Yandex || string.IsNullOrWhiteSpace(query))
+        if (!MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap
+            || string.IsNullOrWhiteSpace(query))
         {
             throw new MailReadException(
                 MailReadFailureKind.InvalidSearchQuery,
@@ -628,10 +630,6 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw;
         }
-        catch (MailKit.Security.AuthenticationException)
-        {
-            throw new MailReadException(MailReadFailureKind.AuthenticationFailed, "Не удалось войти в почту. Проверьте пароль приложения.");
-        }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
             throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось получить число непрочитанных писем.");
@@ -699,12 +697,6 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         catch (MailReadException)
         {
             throw;
-        }
-        catch (MailKit.Security.AuthenticationException)
-        {
-            throw new MailReadException(
-                MailReadFailureKind.AuthenticationFailed,
-                "Не удалось войти в почту. Проверьте пароль приложения.");
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
@@ -779,12 +771,6 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw;
         }
-        catch (MailKit.Security.AuthenticationException)
-        {
-            throw new MailReadException(
-                MailReadFailureKind.AuthenticationFailed,
-                "Не удалось войти в почту. Проверьте пароль приложения.");
-        }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
             throw new MailReadException(
@@ -853,10 +839,6 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw;
         }
-        catch (MailKit.Security.AuthenticationException)
-        {
-            throw new MailReadException(MailReadFailureKind.AuthenticationFailed, "Не удалось войти в почту. Проверьте пароль приложения.");
-        }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
             throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось загрузить папки почты.");
@@ -923,10 +905,6 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw;
         }
-        catch (MailKit.Security.AuthenticationException)
-        {
-            throw new MailReadException(MailReadFailureKind.AuthenticationFailed, "Не удалось войти в почту. Проверьте пароль приложения.");
-        }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
             throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось загрузить почту. Проверьте подключение к сети.");
@@ -967,10 +945,6 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
-        }
-        catch (MailKit.Security.AuthenticationException)
-        {
-            throw new MailReadException(MailReadFailureKind.AuthenticationFailed, "Не удалось войти в почту. Проверьте пароль приложения.");
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
@@ -1022,10 +996,6 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         catch (MailReadException)
         {
             throw;
-        }
-        catch (MailKit.Security.AuthenticationException)
-        {
-            throw new MailReadException(MailReadFailureKind.AuthenticationFailed, "Не удалось войти в почту. Проверьте пароль приложения.");
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
@@ -1218,10 +1188,6 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         catch (MailReadException)
         {
             throw;
-        }
-        catch (MailKit.Security.AuthenticationException)
-        {
-            throw new MailReadException(MailReadFailureKind.AuthenticationFailed, "Не удалось войти в почту. Проверьте пароль приложения.");
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
@@ -1862,7 +1828,16 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
                 _ => throw new MailReadException(MailReadFailureKind.InvalidConfiguration, "Параметры защищённого подключения IMAP заданы некорректно.")
             },
             cancellationToken);
-        await client.AuthenticateAsync(server.Username, secret, cancellationToken);
+        try
+        {
+            await client.AuthenticateAsync(server.Username, secret, cancellationToken);
+        }
+        catch (MailKit.Security.AuthenticationException)
+        {
+            throw new MailReadException(
+                MailReadFailureKind.AuthenticationFailed,
+                "Не удалось войти в почту. Проверьте пароль приложения.");
+        }
     }
 
     private static bool IsExpectedConnectionException(Exception exception) =>
@@ -1870,6 +1845,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             or TimeoutException
             or System.Net.Sockets.SocketException
             or System.Security.Authentication.AuthenticationException
+            or MailKit.Security.AuthenticationException
             or MailKit.ProtocolException
             or MailKit.CommandException
             or FolderNotFoundException

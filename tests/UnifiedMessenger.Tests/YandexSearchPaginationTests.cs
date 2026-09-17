@@ -59,8 +59,11 @@ public sealed class YandexSearchPaginationTests
         Assert.DoesNotContain((uint)99, second.Select(uid => uid.Id));
     }
 
-    [Fact]
-    public async Task Provider_SearchUsesCurrentFolderAndUidSafeServerContract()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapProvider_SearchUsesCurrentFolderAndUidSafeServerContract(
+        MailProviderType providerType)
     {
         RecordingImapClient client = new()
         {
@@ -70,7 +73,7 @@ public sealed class YandexSearchPaginationTests
                 64)
         };
         ImapMailReadProvider provider = CreateProvider(client);
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         MailFolder spam = MailFolderCatalog.Create(MailFolderKind.Spam, "Spam");
 
         MailPage<MailMessageSummary> page = await provider.SearchAsync(
@@ -88,10 +91,59 @@ public sealed class YandexSearchPaginationTests
         Assert.Equal(ImapMailReadProvider.CreateMessageKey(MailFolderKind.Spam, 9, 42), Assert.Single(page.Items).MessageKey);
     }
 
-    [Fact]
-    public async Task Search_ClearAndPaginationRemainFolderScoped()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapFolderPage_UsesUidSafeContractInsteadOfLegacyIndex(
+        MailProviderType providerType)
     {
-        MailAccount account = Account("one@yandex.test");
+        RecordingImapClient client = new()
+        {
+            Result = new ImapInboxPageData([], "imap-uid:1:scope:7:90:40:90", 90)
+        };
+        ImapMailReadProvider provider = CreateProvider(client);
+        MailAccount account = Account("one@example.test", providerType);
+
+        MailPage<MailMessageSummary> page = await provider.GetPageAsync(
+            account,
+            MailFolderCatalog.Create(MailFolderKind.Inbox, "INBOX"),
+            null,
+            50);
+
+        Assert.Equal(1, client.UidSafePageCallCount);
+        Assert.Equal(0, client.LegacyPageCallCount);
+        Assert.StartsWith("imap-uid:", page.ContinuationToken, StringComparison.Ordinal);
+        Assert.DoesNotContain("imap-index", page.ContinuationToken, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenericImapFolderPage_PreservesLegacyContract()
+    {
+        RecordingImapClient client = new()
+        {
+            Result = new ImapInboxPageData([], "imap-index:40")
+        };
+        ImapMailReadProvider provider = CreateProvider(client);
+        MailAccount account = Account("one@example.test", MailProviderType.GenericImap);
+
+        MailPage<MailMessageSummary> page = await provider.GetPageAsync(
+            account,
+            MailFolderCatalog.Create(MailFolderKind.Inbox, "INBOX"),
+            null,
+            50);
+
+        Assert.Equal(0, client.UidSafePageCallCount);
+        Assert.Equal(1, client.LegacyPageCallCount);
+        Assert.Equal("imap-index:40", page.ContinuationToken);
+    }
+
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapSearch_ClearAndPaginationRemainFolderScoped(
+        MailProviderType providerType)
+    {
+        MailAccount account = Account("one@example.test", providerType);
         YandexSearchProvider provider = new();
         provider.SetPage(account.Id, MailFolderKind.Inbox, null, Page("normal-1", "normal-next", 120));
         provider.SetPage(account.Id, MailFolderKind.Inbox, "normal-next", Page("normal-2", null, 120));
@@ -118,10 +170,13 @@ public sealed class YandexSearchPaginationTests
         Assert.Equal("normal-2", Assert.Single(viewModel.Messages).Subject);
     }
 
-    [Fact]
-    public async Task FolderPaginationRetainsExactSnapshotTotalThroughLastPage()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapFolderPaginationRetainsExactSnapshotTotalThroughLastPage(
+        MailProviderType providerType)
     {
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         YandexSearchProvider provider = new();
         provider.SetPage(account.Id, MailFolderKind.Inbox, null, PageBatch("first", 50, "page-2", 107));
         provider.SetPage(account.Id, MailFolderKind.Inbox, "page-2", PageBatch("second", 50, "page-3", null));
@@ -141,10 +196,13 @@ public sealed class YandexSearchPaginationTests
         Assert.Equal("51–100 из 107", viewModel.PageRangeText);
     }
 
-    [Fact]
-    public async Task SearchPaginationRetainsExactTotalAndNewScopeReplacesIt()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapSearchPaginationRetainsExactTotalAndNewScopeReplacesIt(
+        MailProviderType providerType)
     {
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         YandexSearchProvider provider = new();
         provider.SetPage(account.Id, MailFolderKind.Inbox, null, Page("normal", null, 1));
         provider.SearchHandler = (_, _, query, token, _) => Task.FromResult((query, token) switch
@@ -167,10 +225,13 @@ public sealed class YandexSearchPaginationTests
         Assert.Equal("1–4 из 4", viewModel.PageRangeText);
     }
 
-    [Fact]
-    public async Task LatestYandexQueryWinsAndCancellationClearsBusyState()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task LatestManagedImapQueryWinsAndCancellationClearsBusyState(
+        MailProviderType providerType)
     {
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         TaskCompletionSource<MailPage<MailMessageSummary>> alpha = PendingPage();
         TaskCompletionSource<MailPage<MailMessageSummary>> beta = PendingPage();
         YandexSearchProvider provider = new()
@@ -195,10 +256,13 @@ public sealed class YandexSearchPaginationTests
         Assert.False(viewModel.IsListLoading);
     }
 
-    [Fact]
-    public async Task YandexRefreshRebaselinesSearchAndFolderPagination()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapRefreshRebaselinesSearchAndFolderPagination(
+        MailProviderType providerType)
     {
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         YandexSearchProvider provider = new();
         provider.SetPage(account.Id, MailFolderKind.Inbox, null, Page("normal-1", "normal-next", 100));
         provider.SetPage(account.Id, MailFolderKind.Inbox, "normal-next", Page("normal-2", null, 100));
@@ -220,11 +284,14 @@ public sealed class YandexSearchPaginationTests
         Assert.Equal("search-first", Assert.Single(viewModel.Messages).Subject);
     }
 
-    [Fact]
-    public async Task FolderAndAccountSwitchResetYandexSearchCursorAndState()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task FolderAndAccountSwitchResetManagedImapSearchCursorAndState(
+        MailProviderType providerType)
     {
-        MailAccount first = Account("first@yandex.test");
-        MailAccount second = Account("second@yandex.test");
+        MailAccount first = Account("first@example.test", providerType);
+        MailAccount second = Account("second@example.test", providerType);
         YandexSearchProvider provider = new();
         provider.SetPage(first.Id, MailFolderKind.Inbox, null, Page("first-inbox", null, 1));
         provider.SetPage(first.Id, MailFolderKind.Spam, null, Page("first-spam", null, 1));
@@ -249,10 +316,13 @@ public sealed class YandexSearchPaginationTests
         Assert.Null(provider.PageCalls.Last().Token);
     }
 
-    [Fact]
-    public async Task ClearingPendingYandexSearchCancelsItAndRestoresInteractiveFolder()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ClearingPendingManagedImapSearchCancelsItAndRestoresInteractiveFolder(
+        MailProviderType providerType)
     {
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         TaskCompletionSource<MailPage<MailMessageSummary>> pending = PendingPage();
         YandexSearchProvider provider = new()
         {
@@ -308,14 +378,35 @@ public sealed class YandexSearchPaginationTests
         IMailMailboxManagementService? mailbox = null) =>
         new(new ProviderFactory(provider, mailbox));
 
-    private static MailAccount Account(string address) => new()
+    private static MailAccount Account(
+        string address,
+        MailProviderType providerType = MailProviderType.Yandex) => new()
     {
         Id = Guid.NewGuid(),
-        Provider = MailProviderType.Yandex,
+        Provider = providerType,
         EmailAddress = address,
         CredentialKey = Guid.NewGuid().ToString("N"),
         AuthenticationKind = MailAuthenticationKind.Password,
-        IsEnabled = true
+        IsEnabled = true,
+        GenericConnectionSettings = providerType is MailProviderType.GenericImap
+            ? new MailConnectionSettings
+            {
+                Imap = new MailServerSettings
+                {
+                    Host = "imap.example.test",
+                    Port = 993,
+                    SecureSocketMode = MailSecureSocketMode.SslOnConnect,
+                    Username = address
+                },
+                Smtp = new MailServerSettings
+                {
+                    Host = "smtp.example.test",
+                    Port = 465,
+                    SecureSocketMode = MailSecureSocketMode.SslOnConnect,
+                    Username = address
+                }
+            }
+            : null
     };
 
     private static MailPage<MailMessageSummary> Page(string subject, string? token, long total) =>
@@ -369,6 +460,8 @@ public sealed class YandexSearchPaginationTests
         public string? Query { get; private set; }
         public string? Cursor { get; private set; }
         public int PageSize { get; private set; }
+        public int UidSafePageCallCount { get; private set; }
+        public int LegacyPageCallCount { get; private set; }
 
         public Task<ImapInboxPageData> GetUidSafeFolderPageAsync(
             MailServerSettings server,
@@ -379,8 +472,24 @@ public sealed class YandexSearchPaginationTests
             int pageSize,
             CancellationToken cancellationToken = default)
         {
+            UidSafePageCallCount++;
             Folder = folder;
             Query = query;
+            Cursor = cursor;
+            PageSize = pageSize;
+            return Task.FromResult(Result);
+        }
+
+        public Task<ImapInboxPageData> GetFolderPageAsync(
+            MailServerSettings server,
+            string secret,
+            ImapFolderDescriptor folder,
+            string? cursor,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+        {
+            LegacyPageCallCount++;
+            Folder = folder;
             Cursor = cursor;
             PageSize = pageSize;
             return Task.FromResult(Result);
@@ -404,7 +513,8 @@ public sealed class YandexSearchPaginationTests
         public void SetPage(Guid accountId, MailFolderKind folder, string? token, MailPage<MailMessageSummary> page) =>
             _pages[(accountId, folder, token)] = page;
 
-        public bool Supports(MailProviderType providerType) => providerType is MailProviderType.Yandex;
+        public bool Supports(MailProviderType providerType) =>
+            providerType is MailProviderType.Yandex or MailProviderType.MailRu;
 
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(MailAccount account, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<MailFolder>>

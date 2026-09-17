@@ -48,7 +48,8 @@ public sealed class LanternMailUiTests
 
             Assert.Equal(providerType is MailProviderType.Yandex, viewModel.IsYandexMailbox);
             Assert.Equal(
-                providerType is MailProviderType.Gmail or MailProviderType.Yandex,
+                providerType is MailProviderType.Gmail
+                    || MailProviderFeaturePolicies.Get(providerType).IsManagedImap,
                 viewModel.IsSearchAvailable);
         }
     }
@@ -242,9 +243,12 @@ public sealed class LanternMailUiTests
             compose.Descendants(presentation + "TextBlock"),
             element => (string?)element.Attribute("Text") == "Тема:");
         XElement subjectInput = Named(view, presentation, xaml, "TextBox", "ComposeSubjectTextBox");
+        XElement bodyInput = Named(view, presentation, xaml, "TextBox", "ComposeBodyTextBox");
         Assert.Equal("1", (string?)subjectInput.Attribute("Grid.Column"));
         Assert.Equal("2", (string?)subjectInput.Attribute("Grid.ColumnSpan"));
         Assert.Equal("0", (string?)subjectLabel.Attribute("Grid.Column"));
+        Assert.Equal("3", (string?)bodyInput.Attribute("Grid.ColumnSpan"));
+        Assert.Null(bodyInput.Attribute("Width"));
     }
 
     [Fact]

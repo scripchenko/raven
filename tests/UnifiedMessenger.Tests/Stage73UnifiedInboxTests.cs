@@ -390,8 +390,10 @@ public sealed class Stage73UnifiedInboxTests
         Assert.False(viewModel.HasListError);
     }
 
-    [Fact]
-    public async Task ErrorState_IsSanitizedAndRetryLoadsInbox()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task AuthenticationFailure_IsSanitizedAndRetryLoadsInbox(MailProviderType providerType)
     {
         QueueReadProvider provider = new();
         provider.EnqueueFailure(new MailReadException(
@@ -400,13 +402,38 @@ public sealed class Stage73UnifiedInboxTests
         provider.EnqueuePage(Page([Summary("after-retry")], null));
         using MailInboxViewModel viewModel = CreateViewModel(provider);
 
-        await viewModel.ActivateAsync(CreateAccount(MailProviderType.Yandex));
+        await viewModel.ActivateAsync(CreateAccount(providerType));
         Assert.True(viewModel.HasBlockingListError);
         Assert.Equal("Не удалось войти в почту", viewModel.ErrorTitle);
 
         await viewModel.RetryCommand.ExecuteAsync(null);
         Assert.False(viewModel.HasListError);
         Assert.Equal("after-retry", Assert.Single(viewModel.Messages).MessageKey);
+    }
+
+    [Fact]
+    public async Task MailRuPostAuthenticationReadFailure_RemainsConnectionFailureAndRetryStartsFreshLoad()
+    {
+        QueueReadProvider provider = new();
+        provider.EnqueueFailure(new MailReadException(
+            MailReadFailureKind.ConnectionFailed,
+            "Не удалось загрузить почту. Проверьте подключение к сети."));
+        provider.EnqueuePage(Page([Summary("after-transient-retry")], null));
+        using MailInboxViewModel viewModel = CreateViewModel(provider);
+
+        await viewModel.ActivateAsync(CreateAccount(MailProviderType.MailRu));
+
+        Assert.Equal(MailReadFailureKind.ConnectionFailed, viewModel.FailureKind);
+        Assert.Equal("Не удалось загрузить почту", viewModel.ErrorTitle);
+        Assert.DoesNotContain("парол", viewModel.ListErrorDescription, StringComparison.OrdinalIgnoreCase);
+        Assert.False(viewModel.IsListLoading);
+
+        await viewModel.RetryCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.HasListError);
+        Assert.False(viewModel.IsListLoading);
+        Assert.Equal("after-transient-retry", Assert.Single(viewModel.Messages).MessageKey);
+        Assert.Equal([null, null], provider.ReceivedPageTokens);
     }
 
     [Fact]

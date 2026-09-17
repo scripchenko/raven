@@ -162,6 +162,34 @@ public sealed class Stage74MailFoldersReadStateTests
         Assert.Equal("server-junk", folders.Single(folder => folder.Kind is MailFolderKind.Spam).ProviderLocator);
     }
 
+    [Fact]
+    public async Task MailRuFolders_UseDiscoveredXlistRolesWithoutInventingArchive()
+    {
+        FakeImapClient client = new()
+        {
+            Folders =
+            [
+                new(MailFolderKind.Inbox, "INBOX"),
+                new(MailFolderKind.Sent, "Отправленные"),
+                new(MailFolderKind.Drafts, "Черновики"),
+                new(MailFolderKind.Spam, "Спам"),
+                new(MailFolderKind.Trash, "Корзина")
+            ]
+        };
+
+        IReadOnlyList<MailFolder> folders = await CreateImapProvider(client, MailProviderType.MailRu)
+            .GetFoldersAsync(ImapAccount(MailProviderType.MailRu));
+
+        Assert.Equal(
+            [MailFolderKind.Inbox, MailFolderKind.Sent, MailFolderKind.Drafts, MailFolderKind.Spam, MailFolderKind.Trash],
+            folders.Select(folder => folder.Kind));
+        Assert.Equal("Отправленные", folders.Single(folder => folder.Kind is MailFolderKind.Sent).ProviderLocator);
+        Assert.Equal("Черновики", folders.Single(folder => folder.Kind is MailFolderKind.Drafts).ProviderLocator);
+        Assert.Equal("Спам", folders.Single(folder => folder.Kind is MailFolderKind.Spam).ProviderLocator);
+        Assert.Equal("Корзина", folders.Single(folder => folder.Kind is MailFolderKind.Trash).ProviderLocator);
+        Assert.DoesNotContain(folders, folder => folder.Kind is MailFolderKind.Archive);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -441,10 +469,17 @@ public sealed class Stage74MailFoldersReadStateTests
             client,
             new FakeContentExtractor());
 
-    private static ImapMailReadProvider CreateImapProvider(FakeImapClient client) =>
+    private static ImapMailReadProvider CreateImapProvider(
+        FakeImapClient client,
+        MailProviderType providerType = MailProviderType.Yandex) =>
         new(
             new RecordingCredentialStore(MailCredential.CreatePassword("app-password")),
-            new TestMailProviderFactory(new YandexMailProvider(new NoOpConnectionValidator())),
+            new TestMailProviderFactory(providerType switch
+            {
+                MailProviderType.Yandex => new YandexMailProvider(new NoOpConnectionValidator()),
+                MailProviderType.MailRu => new MailRuMailProvider(new NoOpConnectionValidator()),
+                _ => throw new ArgumentOutOfRangeException(nameof(providerType))
+            }),
             client,
             new FakeContentExtractor());
 
@@ -458,11 +493,11 @@ public sealed class Stage74MailFoldersReadStateTests
         IsEnabled = true
     };
 
-    private static MailAccount ImapAccount() => new()
+    private static MailAccount ImapAccount(MailProviderType providerType = MailProviderType.Yandex) => new()
     {
         Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-        Provider = MailProviderType.Yandex,
-        EmailAddress = "mail@yandex.test",
+        Provider = providerType,
+        EmailAddress = providerType is MailProviderType.MailRu ? "mail@mail.test" : "mail@yandex.test",
         CredentialKey = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         AuthenticationKind = MailAuthenticationKind.Password,
         IsEnabled = true

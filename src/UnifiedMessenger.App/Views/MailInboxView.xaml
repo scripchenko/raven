@@ -1935,6 +1935,7 @@
                                      ToolTip="Тема" />
                             <TextBox x:Name="ComposeBodyTextBox"
                                      Grid.Row="1"
+                                     Grid.ColumnSpan="3"
                                      MinHeight="230"
                                      Margin="0,12,0,0"
                                      Padding="12"
@@ -1946,7 +1947,9 @@
                                      Text="{Binding Compose.Draft.TextBody, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                      TextWrapping="Wrap"
                                      VerticalScrollBarVisibility="Auto" />
-                            <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                            <StackPanel Grid.Row="2"
+                                        Grid.ColumnSpan="3"
+                                        Margin="0,12,0,0">
                                 <Button HorizontalAlignment="Left"
                                         Command="{Binding Compose.AttachFilesCommand}"
                                         Content="Прикрепить файл"

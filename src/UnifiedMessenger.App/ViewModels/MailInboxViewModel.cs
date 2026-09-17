@@ -661,7 +661,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && catalog.HasLoaded
         && catalog.Folders.Any(folder => folder.IsAvailable && folder.CanAcceptArchive);
     public bool IsSearchAvailable =>
-        ActiveAccount is { Provider: MailProviderType.Gmail or MailProviderType.Yandex, IsEnabled: true }
+        ActiveAccount is { IsEnabled: true } account
+        && SupportsServerSearch(account)
         && !IsComposeOpen;
     public bool IsSearchActive =>
         ActiveAccount is MailAccount account
@@ -1295,7 +1296,8 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             return;
         }
 
-        if (ActiveAccount is not { Provider: MailProviderType.Gmail or MailProviderType.Yandex, IsEnabled: true } account
+        if (ActiveAccount is not { IsEnabled: true } account
+            || !SupportsServerSearch(account)
             || SelectedFolder is null
             || _providerFactory.Get(account.Provider) is not IMailSearchProvider)
         {
@@ -1482,7 +1484,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             state.ApplyPage(
                 request,
                 page.ContinuationToken,
-                account.Provider is MailProviderType.Yandex
+                IsManagedImap(account)
                     ? page.TotalCount ?? state.TotalCount
                     : null);
             state.HasLoaded = true;
@@ -1536,7 +1538,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             await LoadSearchPageAsync(
                 account,
                 searchState,
-                account.Provider is MailProviderType.Yandex
+                IsManagedImap(account)
                     ? PageRequest.First
                     : searchState.CurrentPageRequest,
                 _viewVersion,
@@ -1563,7 +1565,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         ContinuationToken = null;
         ListErrorMessage = null;
         FailureKind = null;
-        if (account.Provider is MailProviderType.Yandex)
+        if (IsManagedImap(account))
         {
             state.PrepareRefresh();
             await LoadPageAsync(account, folder, state, PageRequest.First, _viewVersion, GetActivationToken());
@@ -2030,7 +2032,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             state.ApplyPage(
                 request,
                 page.ContinuationToken,
-                account.Provider is MailProviderType.Yandex && request.PageIndex > 0
+                IsManagedImap(account) && request.PageIndex > 0
                     ? page.TotalCount ?? state.TotalCount
                     : page.TotalCount);
             state.HasLoaded = true;
@@ -4137,9 +4139,16 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && !(IsYandexMailbox && IsMailboxChanging);
     private bool CanRetry() => IsActive && HasListError && !RequiresGmailReauthentication && !IsListLoading;
     private bool CanSearch() =>
-        ActiveAccount is { Provider: MailProviderType.Gmail or MailProviderType.Yandex, IsEnabled: true }
+        ActiveAccount is { IsEnabled: true } account
+        && SupportsServerSearch(account)
         && !IsComposeOpen
         && (IsSearchActive || !string.IsNullOrWhiteSpace(SearchText));
+
+    private static bool SupportsServerSearch(MailAccount account) =>
+        account.Provider is MailProviderType.Gmail || IsManagedImap(account);
+
+    private static bool IsManagedImap(MailAccount account) =>
+        MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap;
     private bool CanClearSearchCommand() => CanClearSearch;
     private bool CanReauthenticateGmail() =>
         IsActive
