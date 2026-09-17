@@ -126,6 +126,41 @@ public sealed class YandexMailboxFreshnessTests
         Assert.False(vm.HasMailboxActionError);
     }
 
+    [Fact]
+    public async Task MailRuUsesSharedMailboxActionsWithoutYandexReadToggleStarOrArchivePresentation()
+    {
+        Provider provider = new();
+        MailAccount account = Account(MailProviderType.MailRu);
+        provider.WithoutArchive.Add(account.Id);
+        provider.Seed(account, MailFolderKind.Inbox, 1);
+        using MailInboxViewModel vm = Create(provider);
+
+        await vm.ActivateAsync(account);
+        MailMessageSummary message = Assert.Single(vm.Messages);
+        vm.SelectAllLoadedCommand.Execute(null);
+
+        Assert.True(vm.IsManagedImapMailbox);
+        Assert.False(vm.IsYandexMailbox);
+        Assert.False(vm.ShowArchiveAction);
+        Assert.False(vm.ArchiveSelectedCommand.CanExecute(null));
+        Assert.False(vm.ToggleStarCommand.CanExecute(message));
+        Assert.False(vm.ToggleSelectedStarCommand.CanExecute(null));
+        Assert.False(vm.ShowYandexSelectedReadStateAction);
+        Assert.True(vm.MarkSelectedReadCommand.CanExecute(null));
+        Assert.True(vm.MarkSelectedUnreadCommand.CanExecute(null));
+        Assert.True(vm.ReportSelectedSpamCommand.CanExecute(null));
+        Assert.True(vm.DeleteSelectedCommand.CanExecute(null));
+
+        vm.OpenMessageCommand.Execute(message);
+        await vm.CurrentMessageLoadTask;
+
+        Assert.True(vm.ShowStandardReadStateAction);
+        Assert.False(vm.ShowYandexDetailReadStateAction);
+        Assert.True(vm.SetReadStateCommand.CanExecute(null));
+        Assert.False(vm.ArchiveDetailCommand.CanExecute(null));
+        Assert.False(vm.ToggleStarCommand.CanExecute(vm.SelectedMessageSummary));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -182,17 +217,25 @@ public sealed class YandexMailboxFreshnessTests
     }
 
     [Theory]
-    [InlineData(MailFolderKind.Inbox, MailMailboxAction.Archive, MailFolderKind.Archive)]
-    [InlineData(MailFolderKind.Inbox, MailMailboxAction.Trash, MailFolderKind.Trash)]
-    [InlineData(MailFolderKind.Inbox, MailMailboxAction.Spam, MailFolderKind.Spam)]
-    [InlineData(MailFolderKind.Spam, MailMailboxAction.NotSpam, MailFolderKind.Inbox)]
-    [InlineData(MailFolderKind.Spam, MailMailboxAction.Trash, MailFolderKind.Trash)]
-    [InlineData(MailFolderKind.Trash, MailMailboxAction.Restore, MailFolderKind.Inbox)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Inbox, MailMailboxAction.Archive, MailFolderKind.Archive)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Inbox, MailMailboxAction.Trash, MailFolderKind.Trash)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Inbox, MailMailboxAction.Spam, MailFolderKind.Spam)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Spam, MailMailboxAction.NotSpam, MailFolderKind.Inbox)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Spam, MailMailboxAction.Trash, MailFolderKind.Trash)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Trash, MailMailboxAction.Restore, MailFolderKind.Inbox)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Inbox, MailMailboxAction.Trash, MailFolderKind.Trash)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Inbox, MailMailboxAction.Spam, MailFolderKind.Spam)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Spam, MailMailboxAction.NotSpam, MailFolderKind.Inbox)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Spam, MailMailboxAction.Trash, MailFolderKind.Trash)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Trash, MailMailboxAction.Restore, MailFolderKind.Inbox)]
     public async Task BatchMove_RemovesSourceAndRefreshesCachedDestination(
-        MailFolderKind source, MailMailboxAction action, MailFolderKind destination)
+        MailProviderType providerType,
+        MailFolderKind source,
+        MailMailboxAction action,
+        MailFolderKind destination)
     {
         Provider provider = new();
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, source, 2);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
@@ -252,7 +295,7 @@ public sealed class YandexMailboxFreshnessTests
         Provider provider = new() { HideMovedMessagesFromReads = true };
         MailAccount account = Account();
         provider.Seed(account, MailFolderKind.Inbox, 100);
-        provider.Seed(account, MailFolderKind.Spam, 2);
+        provider.Seed(account, MailFolderKind.Spam, 2, receivedAt: DateTimeOffset.UnixEpoch.AddYears(-1));
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
         await Open(vm, MailFolderKind.Spam);
@@ -261,8 +304,14 @@ public sealed class YandexMailboxFreshnessTests
 
         await Open(vm, MailFolderKind.Inbox);
         string[] firstPageKeys = vm.Messages.Select(message => message.MessageKey).ToArray();
-        Assert.Equal(52, firstPageKeys.Length);
-        Assert.Equal(52, firstPageKeys.Distinct().Count());
+        Assert.Equal(50, firstPageKeys.Length);
+        Assert.Equal(50, firstPageKeys.Distinct().Count());
+        Assert.DoesNotContain(
+            ImapMailReadProvider.CreateMessageKey(MailFolderKind.Inbox, 9, 200),
+            firstPageKeys);
+        Assert.DoesNotContain(
+            ImapMailReadProvider.CreateMessageKey(MailFolderKind.Inbox, 9, 201),
+            firstPageKeys);
         Assert.True(vm.NextPageCommand.CanExecute(null));
 
         await vm.NextPageCommand.ExecuteAsync(null);
@@ -290,11 +339,14 @@ public sealed class YandexMailboxFreshnessTests
         Assert.StartsWith($"imap:{(int)MailFolderKind.Inbox}:10:", message.MessageKey);
     }
 
-    [Fact]
-    public async Task BatchNotSpam_PartialResultMovesConfirmedItemAndLeavesFailedItemSelectable()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task BatchNotSpam_PartialResultMovesConfirmedItemAndLeavesFailedItemSelectable(
+        MailProviderType providerType)
     {
         Provider provider = new() { PartialFailure = true };
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, MailFolderKind.Spam, 2);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
@@ -313,11 +365,14 @@ public sealed class YandexMailboxFreshnessTests
         Assert.Equal(1, provider.MutationCalls);
     }
 
-    [Fact]
-    public async Task BatchNotSpam_AmbiguousMappedResultReconcilesBothFoldersWithoutRetry()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task BatchNotSpam_AmbiguousMappedResultReconcilesBothFoldersWithoutRetry(
+        MailProviderType providerType)
     {
         Provider provider = new() { AmbiguousMove = true };
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, MailFolderKind.Spam, 2);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
@@ -360,11 +415,14 @@ public sealed class YandexMailboxFreshnessTests
         Assert.True(vm.RefreshCommand.CanExecute(null));
     }
 
-    [Fact]
-    public async Task FolderSwitchDuringPostMutationRefresh_ClearsBusyOwnerAndRestoresCommands()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task FolderSwitchDuringPostMutationRefresh_ClearsBusyOwnerAndRestoresCommands(
+        MailProviderType providerType)
     {
         Provider provider = new();
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, MailFolderKind.Inbox, 1);
         provider.Seed(account, MailFolderKind.Sent, 1);
         provider.Seed(account, MailFolderKind.Spam, 2);
@@ -393,11 +451,43 @@ public sealed class YandexMailboxFreshnessTests
     }
 
     [Fact]
-    public async Task ConfirmedNotSpamDestinationRows_AreIsolatedPerAccount()
+    public async Task MailRuMutationRaisesBusyCommandStateAndAlwaysRestoresRefresh()
+    {
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Provider provider = new() { MutationRelease = release };
+        MailAccount account = Account(MailProviderType.MailRu);
+        provider.Seed(account, MailFolderKind.Inbox, 1);
+        using MailInboxViewModel vm = Create(provider);
+        await vm.ActivateAsync(account);
+        vm.SelectAllLoadedCommand.Execute(null);
+        int refreshStateChanges = 0;
+        vm.RefreshCommand.CanExecuteChanged += (_, _) => refreshStateChanges++;
+
+        Task mutation = vm.DeleteSelectedCommand.ExecuteAsync(null);
+        await provider.MutationStarted.Task;
+
+        Assert.True(vm.IsMailboxChanging);
+        Assert.False(vm.RefreshCommand.CanExecute(null));
+        Assert.False(vm.SelectAllLoadedCommand.CanExecute(null));
+
+        release.SetResult();
+        await mutation;
+
+        Assert.False(vm.IsMailboxChanging);
+        Assert.False(vm.IsListLoading);
+        Assert.True(vm.RefreshCommand.CanExecute(null));
+        Assert.True(refreshStateChanges >= 2);
+    }
+
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ConfirmedNotSpamDestinationRows_AreIsolatedPerAccount(
+        MailProviderType providerType)
     {
         Provider provider = new() { HideMovedMessagesFromReads = true };
-        MailAccount first = Account();
-        MailAccount second = Account();
+        MailAccount first = Account(providerType);
+        MailAccount second = Account(providerType);
         provider.Seed(first, MailFolderKind.Spam, 1);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(first);
@@ -416,16 +506,23 @@ public sealed class YandexMailboxFreshnessTests
     }
 
     [Theory]
-    [InlineData(MailFolderKind.Inbox, MailMailboxAction.Trash, MailFolderKind.Trash)]
-    [InlineData(MailFolderKind.Inbox, MailMailboxAction.Archive, MailFolderKind.Archive)]
-    [InlineData(MailFolderKind.Inbox, MailMailboxAction.Spam, MailFolderKind.Spam)]
-    [InlineData(MailFolderKind.Spam, MailMailboxAction.NotSpam, MailFolderKind.Inbox)]
-    [InlineData(MailFolderKind.Trash, MailMailboxAction.Restore, MailFolderKind.Inbox)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Inbox, MailMailboxAction.Trash, MailFolderKind.Trash)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Inbox, MailMailboxAction.Archive, MailFolderKind.Archive)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Inbox, MailMailboxAction.Spam, MailFolderKind.Spam)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Spam, MailMailboxAction.NotSpam, MailFolderKind.Inbox)]
+    [InlineData(MailProviderType.Yandex, MailFolderKind.Trash, MailMailboxAction.Restore, MailFolderKind.Inbox)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Inbox, MailMailboxAction.Trash, MailFolderKind.Trash)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Inbox, MailMailboxAction.Spam, MailFolderKind.Spam)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Spam, MailMailboxAction.NotSpam, MailFolderKind.Inbox)]
+    [InlineData(MailProviderType.MailRu, MailFolderKind.Trash, MailMailboxAction.Restore, MailFolderKind.Inbox)]
     public async Task DetailMove_ReturnsToListWithoutResurrectingMovedMessage(
-        MailFolderKind source, MailMailboxAction action, MailFolderKind destination)
+        MailProviderType providerType,
+        MailFolderKind source,
+        MailMailboxAction action,
+        MailFolderKind destination)
     {
         Provider provider = new();
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, source, 1);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
@@ -444,11 +541,14 @@ public sealed class YandexMailboxFreshnessTests
         Assert.Single(vm.Messages);
     }
 
-    [Fact]
-    public async Task BatchReadState_RoundTripWithoutChangingFolderOrLosingSelection()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task BatchReadState_RoundTripWithoutChangingFolderOrLosingSelection(
+        MailProviderType providerType)
     {
         Provider provider = new();
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, MailFolderKind.Inbox, 2);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
@@ -463,11 +563,14 @@ public sealed class YandexMailboxFreshnessTests
         Assert.False(vm.OpenLabelsForSelectionCommand.CanExecute(null));
     }
 
-    [Fact]
-    public async Task MoveOnSecondPage_ResetsStalePaginationAndKeepsRemainingMailReachable()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task MoveOnSecondPage_ResetsStalePaginationAndKeepsRemainingMailReachable(
+        MailProviderType providerType)
     {
         Provider provider = new();
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, MailFolderKind.Inbox, 51);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
@@ -517,11 +620,14 @@ public sealed class YandexMailboxFreshnessTests
         Assert.False(vm.IsInboxStale(first.Id));
     }
 
-    [Fact]
-    public async Task PartialFailure_RefreshesBothFoldersAndReportsFailure()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task PartialFailure_RefreshesBothFoldersAndReportsFailure(
+        MailProviderType providerType)
     {
         Provider provider = new() { PartialFailure = true };
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         provider.Seed(account, MailFolderKind.Inbox, 2);
         using MailInboxViewModel vm = Create(provider);
         await vm.ActivateAsync(account);
@@ -555,12 +661,15 @@ public sealed class YandexMailboxFreshnessTests
         Assert.Single(vm.Messages);
     }
 
-    [Fact]
-    public async Task AccountSwitchDuringMutation_DoesNotApplyResultToNewAccount_AndOldFoldersBecomeStale()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task AccountSwitchDuringMutation_DoesNotApplyResultToNewAccount_AndOldFoldersBecomeStale(
+        MailProviderType providerType)
     {
         Provider provider = new() { MutationRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
-        MailAccount first = Account();
-        MailAccount second = Account();
+        MailAccount first = Account(providerType);
+        MailAccount second = Account(providerType);
         provider.Seed(first, MailFolderKind.Inbox, 1);
         provider.Seed(second, MailFolderKind.Inbox, 1);
         using MailInboxViewModel vm = Create(provider);
@@ -595,7 +704,7 @@ public sealed class YandexMailboxFreshnessTests
         Assert.False(vm.ReportSelectedSpamCommand.CanExecute(null));
     }
 
-    private static MailAccount Account() => new() { Id = Guid.NewGuid(), Provider = MailProviderType.Yandex,
+    private static MailAccount Account(MailProviderType provider = MailProviderType.Yandex) => new() { Id = Guid.NewGuid(), Provider = provider,
         EmailAddress = "account@example.test", CredentialKey = Guid.NewGuid().ToString("N"), IsEnabled = true };
     private static MailInboxViewModel Create(Provider provider) => new(new MailReadProviderFactory([provider], mailboxManagementService: provider));
     private static async Task Open(MailInboxViewModel vm, MailFolderKind kind)
@@ -633,7 +742,8 @@ public sealed class YandexMailboxFreshnessTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource? MutationRelease { get; init; }
         public TaskCompletionSource MutationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public bool Supports(MailProviderType provider) => provider is MailProviderType.Yandex;
+        public bool Supports(MailProviderType provider) =>
+            MailProviderFeaturePolicies.Get(provider).IsManagedImap;
         public bool CanApply(MailFolderKind source, MailMailboxAction action) => action switch
         {
             MailMailboxAction.Archive or MailMailboxAction.Spam => source is MailFolderKind.Inbox,
@@ -651,11 +761,12 @@ public sealed class YandexMailboxFreshnessTests
             MailAccount account,
             MailFolderKind folder,
             int count,
-            uint uidValidity = 9)
+            uint uidValidity = 9,
+            DateTimeOffset? receivedAt = null)
         {
             _mail[(account.Id, folder)] = Enumerable.Range(1, count).Select(index => new MailMessageSummary(
                 ImapMailReadProvider.CreateMessageKey(folder, uidValidity, (uint)index), "Subject", "Sender", "sender@example.test",
-                DateTimeOffset.UnixEpoch, "", true)).ToList();
+                (receivedAt ?? DateTimeOffset.UnixEpoch).AddMinutes(index), "", true)).ToList();
         }
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(MailAccount account, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<MailFolder>>(new[] { MailFolderKind.Inbox, MailFolderKind.Sent, MailFolderKind.Drafts,

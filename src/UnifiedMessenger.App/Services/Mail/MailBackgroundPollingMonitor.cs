@@ -211,7 +211,8 @@ public sealed class MailBackgroundPollingMonitor(
     {
         try
         {
-            using IDisposable? imapLease = account.Provider is MailProviderType.Yandex
+            bool managedImap = MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap;
+            using IDisposable? imapLease = managedImap
                 ? await _imapMailboxChanges.EnterAsync(account.Id, cancellationToken) : null;
             IMailReadProvider provider = providerFactory.Get(account.Provider);
             if (account.Provider is MailProviderType.Gmail)
@@ -242,15 +243,14 @@ public sealed class MailBackgroundPollingMonitor(
                 .Where(identity => !string.IsNullOrWhiteSpace(identity))
                 .ToHashSet(StringComparer.Ordinal);
             int newMessageCount = 0;
-            bool yandex = account.Provider is MailProviderType.Yandex;
-            bool forceBaseline = yandex && _imapMailboxChanges.ConsumeBaselineRequest(account.Id);
-            uint highWaterUid = yandex
+            bool forceBaseline = managedImap && _imapMailboxChanges.ConsumeBaselineRequest(account.Id);
+            uint highWaterUid = managedImap
                 ? identities.Select(identity => uint.TryParse(identity, out uint uid) ? uid : 0).DefaultIfEmpty().Max()
                 : 0;
             if (_baselines.TryGetValue(account.Id, out MailInboxBaseline? previous)
                 && string.Equals(previous.IdentityScope, snapshot.IdentityScope, StringComparison.Ordinal))
             {
-                if (yandex)
+                if (managedImap)
                 {
                     // Removing a message exposes older UIDs below the top-100 window.
                     // Only UIDs above the previous high-water mark are new arrivals.
@@ -266,14 +266,14 @@ public sealed class MailBackgroundPollingMonitor(
             }
 
             _baselines[account.Id] = new MailInboxBaseline(snapshot.IdentityScope, identities, highWaterUid);
-            if (yandex)
+            if (managedImap)
             {
                 _imapMailboxChanges.RetireThrough(account.Id, snapshot.IdentityScope, highWaterUid);
             }
             int unreadCount = Math.Max(0, snapshot.UnreadCount);
             MailNotificationPreview? preview = null;
             NotificationSettings notificationSettings = settingsStore.Current.Notifications;
-            if (yandex
+            if (account.Provider is MailProviderType.Yandex
                 && newMessageCount == 1
                 && notificationSettings.IsEnabled
                 && !notificationSettings.DoNotDisturb

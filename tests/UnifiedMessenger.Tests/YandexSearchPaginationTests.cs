@@ -12,14 +12,17 @@ public sealed class YandexSearchPaginationTests
     public void UidCursor_BindsImmutableSnapshotToFolderQueryAndUidValidity()
     {
         string scope = MailKitImapInboxClient.CreateUidCursorScope("INBOX", "проект");
-        string cursor = MailKitImapInboxClient.CreateUidCursor(scope, 71, 900, 750, 318);
+        DateTimeOffset anchor = new(2026, 9, 17, 10, 30, 0, TimeSpan.Zero);
+        string cursor = MailKitImapInboxClient.CreateUidCursor(
+            scope, 71, 900, anchor.UtcTicks, 750, 318);
 
         MailKitImapInboxClient.ImapUidPageCursor parsed = Assert.IsType<MailKitImapInboxClient.ImapUidPageCursor>(
             MailKitImapInboxClient.ParseUidCursor(cursor, scope));
 
         Assert.Equal((uint)71, parsed.UidValidity);
         Assert.Equal((uint)900, parsed.SnapshotMaxUid);
-        Assert.Equal((uint)750, parsed.UpperInclusive);
+        Assert.Equal(anchor.UtcTicks, parsed.AnchorUtcTicks);
+        Assert.Equal((uint)750, parsed.AnchorUid);
         Assert.Equal(318, parsed.TotalCount);
         Assert.DoesNotContain("imap-index", cursor, StringComparison.Ordinal);
         Assert.Throws<MailReadException>(() => MailKitImapInboxClient.ParseUidCursor(
@@ -34,29 +37,88 @@ public sealed class YandexSearchPaginationTests
     }
 
     [Fact]
-    public void UidPages_DoNotShiftWhenNewMailArrivesOrOlderMailIsDeleted()
+    public void ManagedImapPages_UseReceivedChronologyWithoutLosingUidSnapshotSafety()
     {
-        UniqueId[] snapshot = Enumerable.Range(1, 150).Select(value => new UniqueId((uint)value)).ToArray();
-        UniqueId[] first = MailKitImapInboxClient.SelectNewestUids(snapshot, 150, 51).Take(50).ToArray();
-        uint nextUpper = first.Min(uid => uid.Id) - 1;
-        UniqueId[] changed = snapshot
-            .Where(uid => uid.Id != 99)
-            .Append(new UniqueId(151))
+        DateTimeOffset epoch = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        ImapChronologyEntry[] snapshot = Enumerable.Range(1, 120)
+            .Select(value => new ImapChronologyEntry((uint)value, epoch.AddMinutes(value)))
+            .Append(new ImapChronologyEntry(150, epoch.AddMinutes(20)))
+            .ToArray();
+        ImapChronologyEntry[] first = MailKitImapInboxClient
+            .SelectChronologicalPage(snapshot, null, 50)
+            .ToArray();
+        ImapChronologyEntry anchor = first[^1];
+        MailKitImapInboxClient.ImapUidPageCursor cursor = new(
+            7, 150, anchor.ReceivedAt.UtcTicks, anchor.UniqueId, snapshot.Length);
+        ImapChronologyEntry[] changed = snapshot
+            .Where(item => item.UniqueId != 65)
+            // A genuinely new delivery is outside the immutable UID snapshot.
+            .Append(new ImapChronologyEntry(151, epoch.AddDays(1)))
+            .Where(item => item.UniqueId <= cursor.SnapshotMaxUid)
             .ToArray();
 
-        UniqueId[] second = MailKitImapInboxClient.SelectNewestUids(changed, nextUpper, 50).ToArray();
-        uint[] expected = changed
-            .Where(uid => uid.Id <= nextUpper)
-            .OrderByDescending(uid => uid.Id)
-            .Take(50)
-            .Select(uid => uid.Id)
+        ImapChronologyEntry[] second = MailKitImapInboxClient
+            .SelectChronologicalPage(changed, cursor, 50)
             .ToArray();
 
-        Assert.Equal(Enumerable.Range(101, 50).Reverse().Select(value => (uint)value), first.Select(uid => uid.Id));
-        Assert.Equal(expected, second.Select(uid => uid.Id));
-        Assert.Empty(first.Select(uid => uid.Id).Intersect(second.Select(uid => uid.Id)));
-        Assert.DoesNotContain((uint)151, second.Select(uid => uid.Id));
-        Assert.DoesNotContain((uint)99, second.Select(uid => uid.Id));
+        Assert.Equal((uint)120, first[0].UniqueId);
+        Assert.DoesNotContain(first, item => item.UniqueId == 150);
+        Assert.Equal((uint)150, second[^1].UniqueId);
+        Assert.Empty(first.Select(item => item.UniqueId).Intersect(second.Select(item => item.UniqueId)));
+        Assert.DoesNotContain(second, item => item.UniqueId == 151);
+        Assert.DoesNotContain(second, item => item.UniqueId == 65);
+    }
+
+    [Fact]
+    public void MailRuMovedMessageWithHighUid_RemainsAtItsInternalDateAcrossAllPages()
+    {
+        DateTimeOffset epoch = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        List<ImapChronologyEntry> entries = Enumerable.Range(1, 120)
+            .Select(value => new ImapChronologyEntry((uint)value, epoch.AddMinutes(value)))
+            .ToList();
+        entries.Add(new ImapChronologyEntry(500, epoch.AddMinutes(20).AddSeconds(1)));
+
+        List<uint> allPages = [];
+        MailKitImapInboxClient.ImapUidPageCursor? cursor = null;
+        do
+        {
+            ImapChronologyEntry[] page = MailKitImapInboxClient
+                .SelectChronologicalPage(entries, cursor, 50)
+                .ToArray();
+            allPages.AddRange(page.Select(item => item.UniqueId));
+            if (page.Length < 50)
+            {
+                cursor = null;
+                break;
+            }
+
+            ImapChronologyEntry last = page[^1];
+            cursor = new(9, 500, last.ReceivedAt.UtcTicks, last.UniqueId, entries.Count);
+        }
+        while (allPages.Count < entries.Count);
+
+        Assert.Equal(entries.Count, allPages.Count);
+        Assert.Equal(entries.Count, allPages.Distinct().Count());
+        Assert.DoesNotContain((uint)500, allPages.Take(50));
+        Assert.True(allPages.IndexOf(500) > allPages.IndexOf(21));
+        Assert.True(allPages.IndexOf(500) < allPages.IndexOf(20));
+    }
+
+    [Fact]
+    public void ManagedImapSearch_UsesSameNewestFirstInternalDateOrder()
+    {
+        DateTimeOffset epoch = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        ImapChronologyEntry[] matches =
+        [
+            new(900, epoch.AddDays(-10)),
+            new(7, epoch),
+            new(8, epoch.AddDays(-1))
+        ];
+
+        IReadOnlyList<ImapChronologyEntry> page =
+            MailKitImapInboxClient.SelectChronologicalPage(matches, null, 50);
+
+        Assert.Equal([(uint)7, 8, 900], page.Select(item => item.UniqueId));
     }
 
     [Theory]
@@ -344,10 +406,13 @@ public sealed class YandexSearchPaginationTests
         Assert.True(viewModel.RefreshCommand.CanExecute(null));
     }
 
-    [Fact]
-    public async Task MailboxMutationFromSearchReconcilesSearchAndKeepsUiInteractive()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapMailboxMutationFromSearchReconcilesSearchAndKeepsUiInteractive(
+        MailProviderType providerType)
     {
-        MailAccount account = Account("one@yandex.test");
+        MailAccount account = Account("one@example.test", providerType);
         YandexSearchProvider provider = new();
         provider.SetPage(account.Id, MailFolderKind.Inbox, null, Page("normal", null, 1));
         int searchCall = 0;
@@ -554,7 +619,8 @@ public sealed class YandexSearchPaginationTests
     private sealed class RecordingMailboxService : IMailMailboxManagementService
     {
         public List<MailMailboxAction> Actions { get; } = [];
-        public bool Supports(MailProviderType provider) => provider is MailProviderType.Yandex;
+        public bool Supports(MailProviderType provider) =>
+            MailProviderFeaturePolicies.Get(provider).IsManagedImap;
         public bool CanApply(MailFolderKind source, MailMailboxAction action) => action is MailMailboxAction.Trash;
 
         public Task<MailMailboxMutationResult> ApplyAsync(

@@ -28,6 +28,7 @@ internal sealed record ImapInboxPageData(
     IReadOnlyList<ImapSummaryData> Items,
     string? NextCursor,
     long? TotalCount = null);
+internal readonly record struct ImapChronologyEntry(uint UniqueId, DateTimeOffset ReceivedAt);
 internal sealed record ImapMessageData(MimeMessage Message, bool IsUnread);
 internal sealed record ImapFolderDescriptor(MailFolderKind Kind, string FullName)
 {
@@ -605,10 +606,10 @@ internal sealed class ImapMailReadProvider(
 internal sealed class MailKitImapInboxClient : IImapInboxClient
 {
     private const string CursorPrefix = "imap-index:";
-    private const string UidCursorPrefix = "imap-uid:1:";
+    private const string UidCursorPrefix = "imap-uid:2:";
     private const int NotificationPreviewFetchByteLimit = 8192;
     private const int NotificationPreviewCharacterLimit = 280;
-    private const uint UidSearchWindowSize = 2048;
+    private const int ChronologyFetchBatchSize = 1000;
     internal const int BackgroundSnapshotMessageLimit = 100;
     internal static FolderAccess InboxAccess => FolderAccess.ReadOnly;
     internal static FolderAccess MutationAccess => FolderAccess.ReadWrite;
@@ -1077,85 +1078,75 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
                 ? SearchQuery.All
                 : SearchQuery.MessageContains(normalizedQuery);
             ImapUidPageCursor? parsed = ParseUidCursor(cursor, scope);
-            uint upperInclusive;
             uint snapshotMaxUid;
             long totalCount;
             long? displayedTotalCount;
-            IReadOnlyList<UniqueId>? initialMatches = null;
-            bool supportsExtendedSearch = client.Capabilities.HasFlag(ImapCapabilities.ESearch);
+            IList<UniqueId>? initialSnapshotMatches = null;
             if (parsed is ImapUidPageCursor continuation)
             {
                 EnsureUidCursorValidity(continuation, mailFolder.UidValidity);
 
                 snapshotMaxUid = continuation.SnapshotMaxUid;
-                upperInclusive = continuation.UpperInclusive;
                 totalCount = continuation.TotalCount;
-                if (supportsExtendedSearch)
-                {
-                    SearchResults currentSnapshot = await mailFolder.SearchAsync(
-                        SearchOptions.Count,
-                        new UniqueIdRange(new UniqueId(1), new UniqueId(snapshotMaxUid)),
-                        searchQuery,
-                        cancellationToken);
-                    totalCount = currentSnapshot.Count;
-                    displayedTotalCount = totalCount;
-                }
-                else
-                {
-                    // The initial snapshot total remains truthful for navigation.
-                    // Local mailbox mutations adjust the displayed count in the VM;
-                    // avoid overwriting that adjustment with a stale cursor value.
-                    displayedTotalCount = null;
-                }
+                // The initial snapshot total remains truthful for navigation.
+                // Local mailbox mutations adjust the displayed count in the VM;
+                // avoid overwriting that adjustment with a stale cursor value.
+                displayedTotalCount = null;
             }
             else
             {
-                if (normalizedQuery.Length == 0)
+                UniqueId? uidNext = mailFolder.UidNext;
+                snapshotMaxUid = uidNext is { IsValid: true } && uidNext.Value.Id > 1
+                    ? uidNext.Value.Id - 1
+                    : 0;
+                if (snapshotMaxUid == 0)
                 {
-                    totalCount = mailFolder.Count;
-                    UniqueId? uidNext = mailFolder.UidNext;
-                    snapshotMaxUid = uidNext is { IsValid: true } && uidNext.Value.Id > 1
-                        ? uidNext.Value.Id - 1
-                        : 0;
-                    if (totalCount > 0 && snapshotMaxUid == 0)
-                    {
-                        IList<UniqueId> all = await mailFolder.SearchAsync(SearchQuery.All, cancellationToken);
-                        snapshotMaxUid = all.Where(uid => uid.IsValid).Select(uid => uid.Id).DefaultIfEmpty().Max();
-                    }
+                    initialSnapshotMatches = await mailFolder.SearchAsync(searchQuery, cancellationToken);
+                    snapshotMaxUid = initialSnapshotMatches
+                        .Where(uid => uid.IsValid)
+                        .Select(uid => uid.Id)
+                        .DefaultIfEmpty()
+                        .Max();
                 }
-                else if (supportsExtendedSearch)
-                {
-                    SearchResults snapshot = await mailFolder.SearchAsync(
-                        SearchOptions.Count | SearchOptions.Max,
-                        searchQuery,
-                        cancellationToken);
-                    totalCount = snapshot.Count;
-                    snapshotMaxUid = snapshot.Max?.Id ?? 0;
-                }
-                else
-                {
-                    IList<UniqueId> matches = await mailFolder.SearchAsync(searchQuery, cancellationToken);
-                    initialMatches = SelectNewestUids(matches, uint.MaxValue, pageSize + 1);
-                    totalCount = matches.LongCount(uid => uid.IsValid);
-                    snapshotMaxUid = matches.Where(uid => uid.IsValid).Select(uid => uid.Id).DefaultIfEmpty().Max();
-                }
-
-                upperInclusive = snapshotMaxUid;
-                displayedTotalCount = totalCount;
+                totalCount = 0;
+                displayedTotalCount = 0;
             }
 
-            if (upperInclusive == 0 || snapshotMaxUid == 0 || totalCount == 0)
+            if (snapshotMaxUid == 0)
             {
                 return new ImapInboxPageData([], null, displayedTotalCount);
             }
 
-            IReadOnlyList<UniqueId> candidates = initialMatches ?? await FindPageUidsAsync(
-                    mailFolder,
+            UniqueIdRange snapshotRange = new(new UniqueId(1), new UniqueId(snapshotMaxUid));
+            IList<UniqueId> matches = initialSnapshotMatches ?? await mailFolder.SearchAsync(
+                    snapshotRange,
                     searchQuery,
-                    Math.Min(upperInclusive, snapshotMaxUid),
-                    pageSize + 1,
                     cancellationToken);
-            UniqueId[] pageUids = candidates.Take(pageSize).ToArray();
+            UniqueId[] snapshotUids = matches
+                .Where(uid => uid.IsValid && uid.Id <= snapshotMaxUid)
+                .Distinct()
+                .ToArray();
+            if (parsed is null)
+            {
+                totalCount = snapshotUids.LongLength;
+                displayedTotalCount = totalCount;
+            }
+
+            if (snapshotUids.Length == 0)
+            {
+                return new ImapInboxPageData([], null, displayedTotalCount);
+            }
+
+            IReadOnlyList<ImapChronologyEntry> chronology = await FetchChronologyAsync(
+                mailFolder,
+                snapshotUids,
+                cancellationToken);
+            IReadOnlyList<ImapChronologyEntry> candidates = SelectChronologicalPage(
+                chronology,
+                parsed,
+                pageSize + 1);
+            ImapChronologyEntry[] pageEntries = candidates.Take(pageSize).ToArray();
+            UniqueId[] pageUids = pageEntries.Select(entry => new UniqueId(entry.UniqueId)).ToArray();
             if (pageUids.Length == 0)
             {
                 return new ImapInboxPageData([], null, displayedTotalCount);
@@ -1172,12 +1163,19 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             ImapSummaryData[] summaries = fetched
                 .Where(summary => summary.UniqueId.IsValid)
                 .Select(summary => MapProtocolSummary(mailFolder.UidValidity, summary))
-                .OrderByDescending(summary => summary.UniqueId)
+                .OrderByDescending(summary => summary.ReceivedAt)
+                .ThenByDescending(summary => summary.UniqueId)
                 .ToArray();
             bool hasMore = candidates.Count > pageSize;
-            uint nextUpperInclusive = pageUids.Min(uid => uid.Id) - 1;
-            string? nextCursor = hasMore && nextUpperInclusive > 0
-                ? CreateUidCursor(scope, mailFolder.UidValidity, snapshotMaxUid, nextUpperInclusive, totalCount)
+            ImapChronologyEntry last = pageEntries[^1];
+            string? nextCursor = hasMore
+                ? CreateUidCursor(
+                    scope,
+                    mailFolder.UidValidity,
+                    snapshotMaxUid,
+                    last.ReceivedAt.UtcTicks,
+                    last.UniqueId,
+                    totalCount)
                 : null;
             return new ImapInboxPageData(summaries, nextCursor, displayedTotalCount);
         }
@@ -1203,38 +1201,41 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         }
     }
 
-    private static async Task<IReadOnlyList<UniqueId>> FindPageUidsAsync(
+    private static async Task<IReadOnlyList<ImapChronologyEntry>> FetchChronologyAsync(
         IMailFolder folder,
-        SearchQuery query,
-        uint upperInclusive,
-        int requestedCount,
+        IReadOnlyList<UniqueId> uniqueIds,
         CancellationToken cancellationToken)
     {
-        List<UniqueId> matches = new(requestedCount);
-        uint high = upperInclusive;
-        while (high > 0 && matches.Count < requestedCount)
+        List<ImapChronologyEntry> chronology = new(uniqueIds.Count);
+        for (int offset = 0; offset < uniqueIds.Count; offset += ChronologyFetchBatchSize)
         {
-            uint low = high >= UidSearchWindowSize ? high - UidSearchWindowSize + 1 : 1;
-            UniqueIdRange range = new(new UniqueId(low), new UniqueId(high));
-            IList<UniqueId> results = await folder.SearchAsync(range, query, cancellationToken);
-            matches.AddRange(SelectNewestUids(
-                results,
-                high,
-                requestedCount - matches.Count));
-            high = low == 1 ? 0 : low - 1;
+            UniqueId[] batch = uniqueIds.Skip(offset).Take(ChronologyFetchBatchSize).ToArray();
+            IList<IMessageSummary> summaries = await folder.FetchAsync(
+                batch,
+                MessageSummaryItems.UniqueId | MessageSummaryItems.InternalDate | MessageSummaryItems.Envelope,
+                cancellationToken);
+            chronology.AddRange(summaries
+                .Where(summary => summary.UniqueId.IsValid)
+                .Select(summary => new ImapChronologyEntry(
+                    summary.UniqueId.Id,
+                    summary.InternalDate ?? summary.Envelope?.Date ?? DateTimeOffset.MinValue)));
         }
 
-        return matches;
+        return chronology;
     }
 
-    internal static IReadOnlyList<UniqueId> SelectNewestUids(
-        IEnumerable<UniqueId> uniqueIds,
-        uint upperInclusive,
+    internal static IReadOnlyList<ImapChronologyEntry> SelectChronologicalPage(
+        IEnumerable<ImapChronologyEntry> entries,
+        ImapUidPageCursor? cursor,
         int requestedCount) =>
-        uniqueIds
-            .Where(uid => uid.IsValid && uid.Id <= upperInclusive)
-            .Distinct()
-            .OrderByDescending(uid => uid.Id)
+        entries
+            .DistinctBy(entry => entry.UniqueId)
+            .Where(entry => cursor is not ImapUidPageCursor continuation
+                || entry.ReceivedAt.UtcTicks < continuation.AnchorUtcTicks
+                || (entry.ReceivedAt.UtcTicks == continuation.AnchorUtcTicks
+                    && entry.UniqueId < continuation.AnchorUid))
+            .OrderByDescending(entry => entry.ReceivedAt)
+            .ThenByDescending(entry => entry.UniqueId)
             .Take(Math.Max(0, requestedCount))
             .ToArray();
 
@@ -1248,7 +1249,8 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         string scope,
         uint uidValidity,
         uint snapshotMaxUid,
-        uint upperInclusive,
+        long anchorUtcTicks,
+        uint anchorUid,
         long totalCount) =>
         string.Join(
             ':',
@@ -1256,7 +1258,8 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             scope,
             uidValidity.ToString(CultureInfo.InvariantCulture),
             snapshotMaxUid.ToString(CultureInfo.InvariantCulture),
-            upperInclusive.ToString(CultureInfo.InvariantCulture),
+            anchorUtcTicks.ToString(CultureInfo.InvariantCulture),
+            anchorUid.ToString(CultureInfo.InvariantCulture),
             totalCount.ToString(CultureInfo.InvariantCulture));
 
     internal static ImapUidPageCursor? ParseUidCursor(string? cursor, string expectedScope)
@@ -1267,18 +1270,21 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         }
 
         string[] parts = cursor.Split(':');
-        if (parts.Length != 7
+        if (parts.Length != 8
             || !string.Equals(parts[0], "imap-uid", StringComparison.Ordinal)
-            || !string.Equals(parts[1], "1", StringComparison.Ordinal)
+            || !string.Equals(parts[1], "2", StringComparison.Ordinal)
             || !string.Equals(parts[2], expectedScope, StringComparison.Ordinal)
             || !uint.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out uint uidValidity)
             || !uint.TryParse(parts[4], NumberStyles.None, CultureInfo.InvariantCulture, out uint snapshotMaxUid)
-            || !uint.TryParse(parts[5], NumberStyles.None, CultureInfo.InvariantCulture, out uint upperInclusive)
-            || !long.TryParse(parts[6], NumberStyles.None, CultureInfo.InvariantCulture, out long totalCount)
+            || !long.TryParse(parts[5], NumberStyles.None, CultureInfo.InvariantCulture, out long anchorUtcTicks)
+            || !uint.TryParse(parts[6], NumberStyles.None, CultureInfo.InvariantCulture, out uint anchorUid)
+            || !long.TryParse(parts[7], NumberStyles.None, CultureInfo.InvariantCulture, out long totalCount)
             || uidValidity == 0
             || snapshotMaxUid == 0
-            || upperInclusive == 0
-            || upperInclusive >= snapshotMaxUid
+            || anchorUtcTicks < DateTimeOffset.MinValue.UtcTicks
+            || anchorUtcTicks > DateTimeOffset.MaxValue.UtcTicks
+            || anchorUid == 0
+            || anchorUid > snapshotMaxUid
             || totalCount < 0)
         {
             throw new MailReadException(
@@ -1286,7 +1292,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
                 "Не удалось продолжить загрузку списка писем. Обновите папку.");
         }
 
-        return new ImapUidPageCursor(uidValidity, snapshotMaxUid, upperInclusive, totalCount);
+        return new ImapUidPageCursor(uidValidity, snapshotMaxUid, anchorUtcTicks, anchorUid, totalCount);
     }
 
     internal static void EnsureUidCursorValidity(ImapUidPageCursor cursor, uint currentUidValidity)
@@ -1302,7 +1308,8 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
     internal readonly record struct ImapUidPageCursor(
         uint UidValidity,
         uint SnapshotMaxUid,
-        uint UpperInclusive,
+        long AnchorUtcTicks,
+        uint AnchorUid,
         long TotalCount);
 
     private static void AddSpecialFolder(

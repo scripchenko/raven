@@ -106,8 +106,10 @@ public sealed class Stage73UnifiedInboxTests
     public async Task YandexProvider_UsesUidSafePageContract()
     {
         string scope = MailKitImapInboxClient.CreateUidCursorScope("INBOX", string.Empty);
-        string current = MailKitImapInboxClient.CreateUidCursor(scope, 7, 100, 50, 100);
-        string next = MailKitImapInboxClient.CreateUidCursor(scope, 7, 100, 20, 100);
+        string current = MailKitImapInboxClient.CreateUidCursor(
+            scope, 7, 100, DateTimeOffset.UtcNow.AddDays(-1).UtcTicks, 50, 100);
+        string next = MailKitImapInboxClient.CreateUidCursor(
+            scope, 7, 100, DateTimeOffset.UtcNow.AddDays(-2).UtcTicks, 20, 100);
         FakeImapInboxClient imap = new()
         {
             Page = new ImapInboxPageData([], next, 100)

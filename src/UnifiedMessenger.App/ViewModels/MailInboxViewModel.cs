@@ -414,7 +414,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             {
                 RaiseListStateChanged();
                 NotifyCommandStates();
-                if (IsYandexMailbox)
+                if (IsManagedImapMailbox)
                 {
                     OnPropertyChanged(nameof(CanUseMailboxActions));
                     NotifyMailboxCommandStates();
@@ -447,7 +447,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _isReadStateChanging, value))
             {
                 RaiseReadStateChanged();
-                if (IsYandexMailbox)
+                if (IsManagedImapMailbox)
                 {
                     OnPropertyChanged(nameof(CanUseMailboxActions));
                     NotifyMailboxCommandStates();
@@ -477,7 +477,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             {
                 OnPropertyChanged(nameof(CanUseMailboxActions));
                 NotifyMailboxCommandStates();
-                if (IsYandexMailbox)
+                if (IsManagedImapMailbox)
                 {
                     RaiseReadStateChanged();
                     RefreshCommand.NotifyCanExecuteChanged();
@@ -654,9 +654,9 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool IsMailboxManagementAvailable => IsGmailMailboxAvailable
         || ActiveAccount is { IsEnabled: true } account && _mailboxService?.Supports(account.Provider) == true;
     public bool CanUseMailboxActions => IsMailboxManagementAvailable && !IsMailboxChanging
-        && !(IsYandexMailbox && (IsReadStateChanging || IsListLoading));
+        && !(IsManagedImapMailbox && (IsReadStateChanging || IsListLoading));
     public bool ShowArchiveAction => IsGmailMailboxAvailable
-        || IsYandexMailbox && ActiveAccount is MailAccount account
+        || IsManagedImapMailbox && ActiveAccount is MailAccount account
         && _accountFolderStates.TryGetValue(account.Id, out AccountFolderState? catalog)
         && catalog.HasLoaded
         && catalog.Folders.Any(folder => folder.IsAvailable && folder.CanAcceptArchive);
@@ -711,7 +711,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         : "Пометить";
     public bool CanDeleteCurrentFolder => IsSearchActive || SelectedFolder?.Kind is not MailFolderKind.Trash;
     public bool ShowReportSpamAction =>
-        ActiveAccount?.Provider is MailProviderType.Gmail or MailProviderType.Yandex
+        (IsGmailMailboxAvailable || IsManagedImapMailbox)
         && !IsSearchActive
         && SelectedFolder?.Kind is MailFolderKind.Inbox;
     public bool ShowRestoreAction => !IsSearchActive && SelectedFolder?.Kind is MailFolderKind.Trash;
@@ -859,7 +859,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         _readStateCapability.CanSetReadState
         && HasSelectedContent
         && !IsReadStateChanging
-        && !(IsYandexMailbox && IsMailboxChanging);
+        && !(IsManagedImapMailbox && IsMailboxChanging);
     public string ReadStateActionText => IsReadStateChanging
         ? "Сохраняем…"
         : SelectedMessageSummary?.IsUnread == true
@@ -1858,7 +1858,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             || !freshness.AutoRefreshRequested
             || !freshness.IsStale
             || IsListLoading
-            || (IsYandexMailbox && IsMailboxChanging)
+            || (IsManagedImapMailbox && IsMailboxChanging)
             || !IsActiveTrackedInbox(accountId))
         {
             return;
@@ -2018,9 +2018,25 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
                 MailMessageSummary[] pending = state.PendingVisibleMessages.Values
                     .Where(message => !keys.Contains(message.MessageKey))
-                    .OrderByDescending(message => message.ReceivedAt)
                     .ToArray();
-                state.Messages.InsertRange(0, pending);
+                if (pending.Length > 0)
+                {
+                    MailMessageSummary[] chronologicalPage = state.Messages
+                        .Concat(pending)
+                        .OrderByDescending(message => message.ReceivedAt)
+                        .ThenByDescending(message => message.MessageKey, StringComparer.Ordinal)
+                        .Take(PageSize)
+                        .ToArray();
+                    state.Messages.Clear();
+                    keys.Clear();
+                    foreach (MailMessageSummary message in chronologicalPage)
+                    {
+                        if (keys.Add(message.MessageKey))
+                        {
+                            state.Messages.Add(message);
+                        }
+                    }
+                }
             }
 
             if (retained is not null && keys.Add(retained.MessageKey))
@@ -3003,7 +3019,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private Task ArchiveSelectedAsync() => ArchiveAsync(
         GetSelectedMessages()
-            .Where(message => IsYandexMailbox || message.ProviderLabelIds.Contains(GmailSystemFolders.Inbox))
+            .Where(message => IsManagedImapMailbox || message.ProviderLabelIds.Contains(GmailSystemFolders.Inbox))
             .Select(message => message.MessageKey)
             .ToArray());
 
@@ -3239,7 +3255,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         bool refreshCurrentFolderAfterSuccess = false,
         MailMailboxAction? imapAction = null)
     {
-        if (IsYandexMailbox && imapAction is MailMailboxAction action)
+        if (IsManagedImapMailbox && imapAction is MailMailboxAction action)
         {
             await ExecuteImapMailboxMutationAsync(messageKeys, action);
             return;
@@ -4130,13 +4146,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private CancellationToken GetActivationToken() => _activationCancellation?.Token ?? CancellationToken.None;
     private bool CanRefresh() => IsActive && SelectedFolder is not null && !IsListLoading
-        && !(IsYandexMailbox && IsMailboxChanging);
+        && !(IsManagedImapMailbox && IsMailboxChanging);
     private bool CanGoToPreviousPage() =>
         IsActive && CanNavigateToPreviousPage && !RequiresGmailReauthentication && !IsListLoading
-        && !(IsYandexMailbox && IsMailboxChanging);
+        && !(IsManagedImapMailbox && IsMailboxChanging);
     private bool CanGoToNextPage() =>
         IsActive && CanNavigateToNextPage && !RequiresGmailReauthentication && !IsListLoading
-        && !(IsYandexMailbox && IsMailboxChanging);
+        && !(IsManagedImapMailbox && IsMailboxChanging);
     private bool CanRetry() => IsActive && HasListError && !RequiresGmailReauthentication && !IsListLoading;
     private bool CanSearch() =>
         ActiveAccount is { IsEnabled: true } account
@@ -4193,12 +4209,12 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
     private bool CanArchiveSelection() =>
         CanMutateSelection()
-        && (IsYandexMailbox ? CanApplyImapAction(MailMailboxAction.Archive)
+        && (IsManagedImapMailbox ? CanApplyImapAction(MailMailboxAction.Archive)
             : GetSelectedMessages().Any(message => message.ProviderLabelIds.Contains(GmailSystemFolders.Inbox)));
 
     private bool CanArchiveDetail() =>
         CanMutateDetail()
-        && (IsYandexMailbox ? CanApplyImapAction(MailMailboxAction.Archive)
+        && (IsManagedImapMailbox ? CanApplyImapAction(MailMailboxAction.Archive)
             : SelectedMessageSummary!.ProviderLabelIds.Contains(GmailSystemFolders.Inbox));
 
     private bool CanReportSelectionSpam() =>
@@ -4602,7 +4618,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             || (!IsSearchActive && SelectedFolder?.SupportsReadState != true)
             || !_readStateCapability.CanSetReadState
             || IsReadStateChanging
-            || (IsYandexMailbox && IsMailboxChanging)
+            || (IsManagedImapMailbox && IsMailboxChanging)
             || _readDwellAttemptedTarget == target
             || _manualUnreadSuppressionTarget == target)
         {

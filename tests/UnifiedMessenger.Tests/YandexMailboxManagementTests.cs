@@ -148,10 +148,12 @@ public sealed class YandexMailboxManagementTests
         Assert.Empty(fixture.Session.Writes);
     }
 
-    [Fact]
-    public async Task MixedUidValidity_RejectsWholeBatchBeforeConnecting()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task MixedUidValidity_RejectsWholeBatchBeforeConnecting(MailProviderType provider)
     {
-        Fixture fixture = new();
+        Fixture fixture = new(provider);
         var result = await fixture.Apply(MailFolderKind.Inbox, MailMailboxAction.Trash, [Key(MailFolderKind.Inbox, 4), "imap:0:8:9"]);
         Assert.Empty(result.SucceededMessageKeys);
         Assert.Null(fixture.Session.Username);
@@ -188,10 +190,12 @@ public sealed class YandexMailboxManagementTests
         Assert.Equal(Key(MailFolderKind.Inbox, 1004, 17), item.DestinationMessageKey);
     }
 
-    [Fact]
-    public async Task AmbiguousInboxMove_RequestsOneSafeBaselineAndNeverRetries()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task AmbiguousInboxMove_RequestsOneSafeBaselineAndNeverRetries(MailProviderType provider)
     {
-        Fixture fixture = new();
+        Fixture fixture = new(provider);
         fixture.Session.FailMove = true;
         var result = await fixture.Apply(MailFolderKind.Trash, MailMailboxAction.Restore, [Key(MailFolderKind.Trash, 4)]);
         Assert.Empty(result.SucceededMessageKeys);
@@ -225,10 +229,13 @@ public sealed class YandexMailboxManagementTests
         Assert.False(fixture.Tracker.ConsumeBaselineRequest(fixture.Account.Id));
     }
 
-    [Fact]
-    public async Task FailureDuringSecondMove_ReportsConfirmedAmbiguousAndNotAttemptedWithoutRetry()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task FailureDuringSecondMove_ReportsConfirmedAmbiguousAndNotAttemptedWithoutRetry(
+        MailProviderType provider)
     {
-        Fixture fixture = new();
+        Fixture fixture = new(provider);
         fixture.Session.FailMoveUid = 9;
         string[] keys =
         [
@@ -272,9 +279,8 @@ public sealed class YandexMailboxManagementTests
 
     [Theory]
     [InlineData(MailProviderType.Gmail)]
-    [InlineData(MailProviderType.MailRu)]
     [InlineData(MailProviderType.GenericImap)]
-    public async Task OtherProviders_NeverUseYandexMutations(MailProviderType provider)
+    public async Task UnmanagedProviders_NeverUseImapMutations(MailProviderType provider)
     {
         Fixture fixture = new();
         fixture.Account.Provider = provider;
@@ -282,6 +288,33 @@ public sealed class YandexMailboxManagementTests
         Assert.Empty(result.SucceededMessageKeys);
         Assert.Empty(fixture.Credentials.ReadKeys);
         Assert.Null(fixture.Session.Username);
+    }
+
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapProviders_SupportUidSafeReadUnreadAndMove(MailProviderType provider)
+    {
+        Fixture readFixture = new(provider);
+        MailMailboxMutationResult read = await readFixture.Apply(
+            MailFolderKind.Inbox,
+            MailMailboxAction.Read,
+            [Key(MailFolderKind.Inbox, 4)]);
+        Assert.Single(read.SucceededMessageKeys);
+        Assert.Equal(["flag:4:Seen:True"], readFixture.Session.Writes);
+
+        Fixture moveFixture = new(provider);
+        MailMailboxMutationResult move = await moveFixture.Apply(
+            MailFolderKind.Spam,
+            MailMailboxAction.NotSpam,
+            [Key(MailFolderKind.Spam, 4), Key(MailFolderKind.Spam, 9)]);
+        Assert.Equal(2, move.SucceededMessageKeys.Count);
+        Assert.Equal(["move:4", "move:9"], moveFixture.Session.Writes);
+        Assert.All(move.ItemResults!, item =>
+        {
+            Assert.Equal(MailMailboxMutationItemStatus.Succeeded, item.Status);
+            Assert.NotNull(item.DestinationMessageKey);
+        });
     }
 
     [Fact]
@@ -298,10 +331,12 @@ public sealed class YandexMailboxManagementTests
         Assert.NotEqual(first.Session.Username, second.Session.Username);
     }
 
-    [Fact]
-    public async Task InboxMove_UsesUidValidityFromServerCopyUidResponse()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task InboxMove_UsesUidValidityFromServerCopyUidResponse(MailProviderType provider)
     {
-        Fixture fixture = new();
+        Fixture fixture = new(provider);
         fixture.Session.DestinationValidity = 25;
         var result = await fixture.Apply(MailFolderKind.Trash, MailMailboxAction.Restore, [Key(MailFolderKind.Trash, 4)]);
         Assert.Single(result.SucceededMessageKeys);
@@ -346,13 +381,35 @@ public sealed class YandexMailboxManagementTests
 
     private sealed class Fixture
     {
-        public MailAccount Account { get; } = new() { Id = Guid.NewGuid(), Provider = MailProviderType.Yandex,
-            EmailAddress = $"{Guid.NewGuid():N}@example.test", CredentialKey = Guid.NewGuid().ToString("N"), IsEnabled = true };
+        public MailAccount Account { get; }
         public CredentialStore Credentials { get; } = new();
         public Session Session { get; } = new();
         public ImapMailboxChangeTracker Tracker { get; } = new();
         public ImapMailboxManagementService Service { get; }
-        public Fixture() => Service = new(Credentials, new MailProviderFactory([new YandexMailProvider(new Validator())]), new SessionFactory(Session), Tracker);
+        public Fixture(MailProviderType provider = MailProviderType.Yandex)
+        {
+            Account = new MailAccount
+            {
+                Id = Guid.NewGuid(),
+                Provider = provider,
+                EmailAddress = $"{Guid.NewGuid():N}@example.test",
+                CredentialKey = Guid.NewGuid().ToString("N"),
+                IsEnabled = true
+            };
+            IMailProvider mailProvider = provider switch
+            {
+                MailProviderType.Yandex => new YandexMailProvider(new Validator()),
+                MailProviderType.MailRu => new MailRuMailProvider(new Validator()),
+                MailProviderType.Gmail => new GmailApiProvider(),
+                MailProviderType.GenericImap => new GenericImapMailProvider(new Validator()),
+                _ => throw new ArgumentOutOfRangeException(nameof(provider))
+            };
+            Service = new(
+                Credentials,
+                new MailProviderFactory([mailProvider]),
+                new SessionFactory(Session),
+                Tracker);
+        }
         public Task<MailMailboxMutationResult> Apply(MailFolderKind folder, MailMailboxAction action, string[] keys) => Service.ApplyAsync(Account, Folder(folder), keys, action);
     }
 

@@ -664,11 +664,14 @@ public sealed class MailBackgroundPollingMonitorTests
         Assert.Equal(string.Empty, preview);
     }
 
-    [Fact]
-    public async Task YandexRestoreSuppressesOnlyMappedUid_NotConcurrentNewMailOrOtherAccount()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapLocalInboxMoveSuppressesOnlyMappedUid_NotConcurrentNewMailOrOtherAccount(
+        MailProviderType providerType)
     {
-        MailAccount first = Account();
-        MailAccount second = Account();
+        MailAccount first = Account(providerType);
+        MailAccount second = Account(providerType);
         SnapshotProvider provider = new();
         provider.Enqueue(first.Id, Snapshot(1, "100"));
         provider.Enqueue(second.Id, Snapshot(1, "100"));
@@ -689,10 +692,12 @@ public sealed class MailBackgroundPollingMonitorTests
         Assert.Contains(events, item => item.MailAccountId == second.Id);
     }
 
-    [Fact]
-    public async Task YandexPollingWaitsForMutationUidMapping()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapPollingWaitsForMutationUidMapping(MailProviderType providerType)
     {
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         SnapshotProvider provider = new();
         provider.Enqueue(account.Id, Snapshot(1, "100"));
         provider.Enqueue(account.Id, Snapshot(2, "100", "101"));
@@ -710,10 +715,13 @@ public sealed class MailBackgroundPollingMonitorTests
         Assert.Empty(events);
     }
 
-    [Fact]
-    public async Task YandexAmbiguousMoveRebaselinesOnce_ThenDetectsNewMailNormally()
+    [Theory]
+    [InlineData(MailProviderType.Yandex)]
+    [InlineData(MailProviderType.MailRu)]
+    public async Task ManagedImapAmbiguousMoveRebaselinesOnce_ThenDetectsNewMailNormally(
+        MailProviderType providerType)
     {
-        MailAccount account = Account();
+        MailAccount account = Account(providerType);
         SnapshotProvider provider = new();
         provider.Enqueue(account.Id, Snapshot(1, "100"));
         provider.Enqueue(account.Id, Snapshot(2, "100", "101"));
@@ -727,6 +735,31 @@ public sealed class MailBackgroundPollingMonitorTests
         Assert.Empty(events);
         await monitor.PollOnceAsync();
         Assert.Equal(1, Assert.Single(events).NewMessageCount);
+    }
+
+    [Fact]
+    public async Task MailRuManagedPollingDoesNotEnableYandexPreviewEnrichment()
+    {
+        MailAccount account = Account(MailProviderType.MailRu);
+        SnapshotProvider provider = new();
+        provider.Enqueue(account.Id, Snapshot(1, "100"));
+        provider.Enqueue(account.Id, Snapshot(2, "100", "101") with
+        {
+            NotificationPreviews = new Dictionary<string, MailNotificationPreview>
+            {
+                ["101"] = new("Sender", "sender@example.test", "Subject", "Preview")
+            }
+        });
+        using MailBackgroundPollingMonitor monitor = CreateMonitor([account], provider);
+        List<MailNewMessageDetectedEventArgs> events = Subscribe(monitor);
+
+        await monitor.PollOnceAsync();
+        await monitor.PollOnceAsync();
+
+        MailNewMessageDetectedEventArgs detected = Assert.Single(events);
+        Assert.Equal(1, detected.NewMessageCount);
+        Assert.Null(detected.Preview);
+        Assert.Empty(provider.PreviewRequests);
     }
 
     [Fact]

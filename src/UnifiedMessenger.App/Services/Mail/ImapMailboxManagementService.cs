@@ -13,7 +13,8 @@ internal sealed class ImapMailboxManagementService(
     IImapMailboxSessionFactory sessions,
     ImapMailboxChangeTracker changes) : IMailMailboxManagementService
 {
-    public bool Supports(MailProviderType provider) => provider is MailProviderType.Yandex;
+    public bool Supports(MailProviderType provider) =>
+        MailProviderFeaturePolicies.Get(provider).IsManagedImap;
 
     public bool CanApply(MailFolderKind source, MailMailboxAction action) => action switch
     {
