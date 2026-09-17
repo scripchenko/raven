@@ -888,6 +888,40 @@ public sealed class Stage4TrayNotificationTests
         Assert.Equal("Preview body", popup.Body);
     }
 
+    [Theory]
+    [InlineData(ServiceType.Telegram, NotificationPopupBrand.Telegram)]
+    [InlineData(ServiceType.WhatsApp, NotificationPopupBrand.WhatsApp)]
+    public void MessengerPopup_UsesDeterministicSenderInitialsInsteadOfLargeProviderLogo(
+        ServiceType serviceType,
+        NotificationPopupBrand expectedBrand)
+    {
+        using NotificationFixture fixture = CreateNotificationFixture(serviceType);
+
+        fixture.Coordinator.Handle(
+            fixture.Request(new LifecycleProbe(), "Иван Петров", "Текст сообщения"));
+        fixture.Coordinator.Handle(
+            fixture.Request(new LifecycleProbe(), "иван петров", "Второе сообщение"));
+
+        Assert.Collection(
+            fixture.Popup.Shown,
+            first =>
+            {
+                Assert.Equal(expectedBrand, first.Brand);
+                Assert.Equal("ИП", first.SenderAvatarInitials);
+                Assert.True(first.ShowSenderInitials);
+                Assert.False(first.ShowContentSourceIcon);
+                Assert.Equal("Иван Петров", first.Title);
+                Assert.Equal("Текст сообщения", first.Body);
+            },
+            second =>
+            {
+                Assert.Equal(expectedBrand, second.Brand);
+                Assert.Equal("ИП", second.SenderAvatarInitials);
+                Assert.Equal("Второе сообщение", second.Body);
+            });
+        Assert.Equal(fixture.Popup.Shown[0].SenderAvatarBackground, fixture.Popup.Shown[1].SenderAvatarBackground);
+    }
+
     [Fact]
     public void PopupPreviewDisabled_DoesNotReceiveWebNotificationTitleOrBody()
     {
@@ -901,6 +935,9 @@ public sealed class Stage4TrayNotificationTests
         Assert.Equal("Новое сообщение в Telegram", popup.Title);
         Assert.Equal(string.Empty, popup.Body);
         Assert.DoesNotContain("Secret", popup.Title, StringComparison.Ordinal);
+        Assert.Equal("?", popup.SenderAvatarInitials);
+        Assert.True(popup.ShowSenderInitials);
+        Assert.False(popup.ShowContentSourceIcon);
     }
 
     [Fact]

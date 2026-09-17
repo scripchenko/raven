@@ -235,6 +235,15 @@ public sealed class WebNotificationCoordinator : IWebNotificationCoordinator
         string serviceName,
         PendingNotification pending)
     {
+        NotificationPopupBrand brand = service.ServiceType switch
+        {
+            ServiceType.Telegram => NotificationPopupBrand.Telegram,
+            ServiceType.WhatsApp => NotificationPopupBrand.WhatsApp,
+            _ => NotificationPopupBrand.Default
+        };
+        string senderIdentity = pending.ShowPreview
+            ? pending.Request.Title.Trim()
+            : string.Empty;
         string genericTitle = $"Новое сообщение в {serviceName}";
         string title = pending.ShowPreview && !string.IsNullOrWhiteSpace(pending.Request.Title)
             ? pending.Request.Title
@@ -245,7 +254,34 @@ public sealed class WebNotificationCoordinator : IWebNotificationCoordinator
             service.Id,
             serviceName,
             title,
-            body);
+            body,
+            Brand: brand,
+            SenderAvatarInitials: brand is NotificationPopupBrand.Telegram or NotificationPopupBrand.WhatsApp
+                ? CreateMessengerInitials(senderIdentity)
+                : null,
+            SenderAvatarIdentity: brand is NotificationPopupBrand.Telegram or NotificationPopupBrand.WhatsApp
+                ? string.IsNullOrWhiteSpace(senderIdentity)
+                    ? service.Id.ToString("N")
+                    : senderIdentity
+                : null);
+    }
+
+    internal static string CreateMessengerInitials(string? senderOrChatTitle)
+    {
+        string[] words = (senderOrChatTitle ?? string.Empty)
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(word => new string(word.Where(char.IsLetterOrDigit).ToArray()))
+            .Where(word => word.Length > 0)
+            .ToArray();
+        if (words.Length == 0)
+        {
+            return "?";
+        }
+
+        char first = char.ToUpperInvariant(words[0][0]);
+        return words.Length == 1
+            ? first.ToString()
+            : string.Concat(first, char.ToUpperInvariant(words[^1][0]));
     }
 
     private bool ShouldSuppress(ServiceInstance service)

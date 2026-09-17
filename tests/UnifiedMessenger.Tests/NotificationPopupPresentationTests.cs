@@ -171,6 +171,48 @@ public sealed class NotificationPopupPresentationTests
     }
 
     [Theory]
+    [InlineData("Telegram", NotificationPopupBrand.Telegram, "telegram.png")]
+    [InlineData("WhatsApp", NotificationPopupBrand.WhatsApp, "whatsapp.png")]
+    public void MessengerPopup_KeepsHeaderBrandAndUsesRightSideInitialsAvatar(
+        string serviceName,
+        NotificationPopupBrand brand,
+        string iconAsset)
+    {
+        RunSta(() =>
+        {
+            NotificationPopupDisplayModel model = new(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                serviceName,
+                "Иван Петров",
+                "Текст сообщения",
+                Brand: brand,
+                SenderAvatarInitials: "ИП",
+                SenderAvatarIdentity: "Иван Петров");
+            NotificationPopupWindow window = new(model);
+            try
+            {
+                ArrangeCard(window);
+
+                Image headerIcon = Assert.IsType<Image>(window.FindName("HeaderSourceIcon"));
+                Image contentIcon = Assert.IsType<Image>(window.FindName("ContentSourceIcon"));
+                Border avatar = Assert.IsType<Border>(window.FindName("SenderInitialsAvatar"));
+
+                Assert.EndsWith(iconAsset, headerIcon.Source.ToString(), StringComparison.Ordinal);
+                Assert.Equal(Visibility.Collapsed, contentIcon.Visibility);
+                Assert.Equal(Visibility.Visible, avatar.Visibility);
+                Assert.Equal("ИП", Assert.IsType<TextBlock>(avatar.Child).Text);
+                Assert.Equal("Иван Петров", Assert.IsType<TextBlock>(window.FindName("NotificationTitle")).Text);
+                Assert.Equal("Текст сообщения", Assert.IsType<TextBlock>(window.FindName("NotificationBody")).Text);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Theory]
     [InlineData("Telegram")]
     [InlineData("WhatsApp")]
     [InlineData("MAX")]
