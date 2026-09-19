@@ -1,6 +1,6 @@
 # Gmail OAuth development configuration
 
-UnifiedMessenger uses the Google OAuth 2.0 authorization-code flow for a **Desktop app** client.
+raven uses the Google OAuth 2.0 authorization-code flow for a **Desktop app** client.
 Authorization opens in the system browser and returns to a one-shot IPv4 loopback listener at
 `http://127.0.0.1:<random-port>/oauth2/callback/`.
 

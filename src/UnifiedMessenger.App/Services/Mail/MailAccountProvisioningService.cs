@@ -276,7 +276,7 @@ public sealed class MailAccountProvisioningService(
             {
                 return MailAccountPasswordReplacementResult.Failure(
                     MailConnectionFailureKind.InvalidConfiguration,
-                    "Почтовый аккаунт больше недоступен в настройках Lantern.");
+                    "Почтовый аккаунт больше недоступен в настройках raven.");
             }
 
             try

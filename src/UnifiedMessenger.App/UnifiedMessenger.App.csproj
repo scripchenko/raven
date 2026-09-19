@@ -7,21 +7,24 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>UnifiedMessenger.App</AssemblyName>
     <RootNamespace>UnifiedMessenger.App</RootNamespace>
-    <ApplicationIcon>Assets\Branding\lantern.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\Branding\lantern_system.ico</ApplicationIcon>
     <Version>0.1.0</Version>
     <AssemblyVersion>0.1.0.0</AssemblyVersion>
     <FileVersion>0.1.0.0</FileVersion>
-    <Product>Lantern</Product>
-    <Title>Lantern</Title>
-    <AssemblyTitle>Lantern</AssemblyTitle>
+    <Product>raven</Product>
+    <Title>raven</Title>
+    <AssemblyTitle>raven</AssemblyTitle>
     <Description>Windows-приложение для мессенджеров и почты.</Description>
     <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="Assets\Branding\lantern_system.ico" />
-    <Resource Include="Assets\Branding\lantern_icon.png" />
-    <Resource Include="Assets\Branding\lantern_logo.png" />
+    <Resource Include="Assets\Branding\lantern_sidebar.png" />
+    <Resource Include="Assets\Branding\raven_icon.png" />
+    <Resource Include="Assets\Branding\raven_logo.png" />
+    <Resource Include="Assets\Branding\raven_system.png" />
+    <Resource Include="Assets\Branding\raven_tile.png" />
     <Resource Include="Assets\Services\*.png" />
     <Content Include="Assets\Sounds\lantern_notification.wav"
              CopyToOutputDirectory="PreserveNewest"
@@ -45,8 +48,8 @@
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
                              Condition="'%(ResolvedFileToPublish.Extension)' == '.xml'" />
-      <ResolvedFileToPublish Include="$(MSBuildProjectDirectory)\Assets\Branding\lantern.ico">
-        <RelativePath>Assets\Branding\lantern.ico</RelativePath>
+      <ResolvedFileToPublish Include="$(MSBuildProjectDirectory)\Assets\Branding\raven.ico">
+        <RelativePath>Assets\Branding\raven.ico</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </ResolvedFileToPublish>
       <ResolvedFileToPublish Include="$(MSBuildProjectDirectory)\Assets\Branding\lantern_system.ico">

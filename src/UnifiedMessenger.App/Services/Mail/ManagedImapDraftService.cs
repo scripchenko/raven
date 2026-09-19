@@ -99,7 +99,7 @@ internal sealed class ManagedImapDraftService(
 {
     internal const string LogicalIdHeader = "X-Lantern-Draft-Id";
     private const string RichDraftWarning =
-        "Этот черновик содержит HTML-форматирование, которое Lantern не может сохранить без потерь.";
+        "Этот черновик содержит HTML-форматирование, которое raven не может сохранить без потерь.";
 
     public async Task<ManagedImapDraftLoadResult> LoadAsync(
         MailAccount account,
@@ -545,7 +545,7 @@ internal sealed class ManagedImapDraftService(
             identity,
             token,
             MailSendFailureKind.Ambiguous,
-            "Lantern не может подтвердить состояние черновика. Проверьте папку «Черновики» перед повтором.");
+            "raven не может подтвердить состояние черновика. Проверьте папку «Черновики» перед повтором.");
 
     private static bool IsTransportFailure(Exception exception) =>
         exception is IOException

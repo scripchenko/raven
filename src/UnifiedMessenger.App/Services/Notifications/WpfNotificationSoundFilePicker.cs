@@ -13,7 +13,7 @@ public sealed class WpfNotificationSoundFilePicker : INotificationSoundFilePicke
             CheckPathExists = true,
             Filter = "Поддерживаемые звуки (*.wav;*.mp3;*.wma)|*.wav;*.mp3;*.wma|WAV (*.wav)|*.wav|MP3 (*.mp3)|*.mp3|Windows Media Audio (*.wma)|*.wma",
             Multiselect = false,
-            Title = "Выбрать звук Lantern"
+            Title = "Выбрать звук raven"
         };
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }

@@ -90,7 +90,7 @@ public sealed class Stage2WebViewTests
     public void ErrorClassifier_RecognizesConnectivityFailures(CoreWebView2WebErrorStatus status)
     {
         Assert.True(WebViewErrorClassifier.IsConnectivityFailure(status));
-        Assert.False(string.IsNullOrWhiteSpace(WebViewErrorClassifier.GetUserMessage(status)));
+        Assert.False(string.IsNullOrWhiteSpace(WebViewErrorClassifier.GetUserMessage(status, "Telegram")));
     }
 
     [Fact]
@@ -98,5 +98,23 @@ public sealed class Stage2WebViewTests
     {
         Assert.False(WebViewErrorClassifier.IsConnectivityFailure(
             CoreWebView2WebErrorStatus.CertificateIsInvalid));
+    }
+
+    [Theory]
+    [InlineData("Telegram")]
+    [InlineData("WhatsApp")]
+    [InlineData("MAX")]
+    [InlineData("VK Мессенджер")]
+    public void ErrorClassifier_AttributesTimeoutToOriginatingService(string serviceName)
+    {
+        string message = WebViewErrorClassifier.GetUserMessage(
+            CoreWebView2WebErrorStatus.Timeout,
+            serviceName);
+
+        Assert.Contains(serviceName, message, StringComparison.Ordinal);
+        if (!serviceName.Equals("Telegram", StringComparison.Ordinal))
+        {
+            Assert.DoesNotContain("Telegram", message, StringComparison.Ordinal);
+        }
     }
 }

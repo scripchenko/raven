@@ -77,7 +77,7 @@ public sealed class WpfDraftShutdownFailurePresenter : IDraftShutdownFailurePres
         string detail = result.Status switch
         {
             ServerDraftFlushStatus.Ambiguous =>
-                "Lantern не может подтвердить сохранение черновика. Проверьте папку «Черновики» и повторите выход.",
+                "raven не может подтвердить сохранение черновика. Проверьте папку «Черновики» и повторите выход.",
             ServerDraftFlushStatus.TimedOutOrCanceled =>
                 "Сохранение черновика не завершилось вовремя. Проверьте подключение и повторите выход.",
             _ => "Не удалось сохранить черновик. Проверьте подключение и повторите выход."

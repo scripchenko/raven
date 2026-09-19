@@ -17,6 +17,8 @@ namespace UnifiedMessenger.App;
 
 public partial class App : System.Windows.Application
 {
+    private readonly ApplicationActivationRequestBuffer _activationRequests = new();
+    private ApplicationSingleInstanceCoordinator? _singleInstanceCoordinator;
     private ServiceProvider? _serviceProvider;
     private IApplicationSettingsStore? _settingsStore;
     private MainWindowViewModel? _mainWindowViewModel;
@@ -37,6 +39,18 @@ public partial class App : System.Windows.Application
 
         try
         {
+            _singleInstanceCoordinator = new ApplicationSingleInstanceCoordinator();
+            if (!_singleInstanceCoordinator.TryAcquirePrimaryInstance())
+            {
+                _ = await _singleInstanceCoordinator.TrySignalPrimaryInstanceAsync(
+                    ApplicationSingleInstanceCoordinator.ActivationTimeout);
+                Shutdown();
+                return;
+            }
+
+            _singleInstanceCoordinator.ActivationRequested += OnSingleInstanceActivationRequested;
+            _singleInstanceCoordinator.StartActivationListener();
+
             _serviceProvider = ConfigureServices();
             ISettingsService settingsService = _serviceProvider.GetRequiredService<ISettingsService>();
             _settingsStore = _serviceProvider.GetRequiredService<IApplicationSettingsStore>();
@@ -68,6 +82,7 @@ public partial class App : System.Windows.Application
                 _startupWindow = new StartupWindow();
                 _startupWindow.ExitRequested += OnStartupExitRequested;
                 _startupWindow.Show();
+                _activationRequests.SetTarget(DispatchActivationRequest);
 
                 Progress<StartupPrimeProgress> progress = new(_startupWindow.UpdateProgress);
                 try
@@ -87,12 +102,40 @@ public partial class App : System.Windows.Application
                 }
 
                 window.CompleteStartupPrime();
+                window.Show();
                 CloseStartupWindow();
             }
+            else
+            {
+                window.Show();
+            }
 
-            window.Show();
+            _activationRequests.SetTarget(DispatchActivationRequest);
             _trayCoordinator = _serviceProvider.GetRequiredService<IApplicationTrayCoordinator>();
-            _trayCoordinator.Initialize();
+            try
+            {
+                _trayCoordinator.Initialize();
+            }
+            catch (Exception exception)
+            {
+                System.Windows.MessageBox.Show(
+                    window,
+                    $"Не удалось запустить значок {BrandIdentity.DisplayName} в области уведомлений. "
+                        + "Окно останется открытым и не будет скрываться при закрытии.\n\n"
+                        + exception.Message,
+                    "Область уведомлений недоступна",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+
+            if (!ApplicationRuntimeAccessibility.HasUsableEntryPoint(
+                    window.IsVisible,
+                    _startupWindow?.IsVisible == true,
+                    _trayCoordinator.IsAvailable))
+            {
+                throw new InvalidOperationException("No usable application window or tray entry point is available.");
+            }
+
             StartMailBackgroundServices(loadResult.Settings.MailAccounts);
 
             if (!string.IsNullOrWhiteSpace(loadResult.WarningMessage))
@@ -118,6 +161,12 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _activationRequests.ClearTarget();
+        if (_singleInstanceCoordinator is not null)
+        {
+            _singleInstanceCoordinator.ActivationRequested -= OnSingleInstanceActivationRequested;
+        }
+
         if (_exitCoordinator is not null)
         {
             _exitCoordinator.ExitRequested -= OnExplicitExitRequested;
@@ -135,6 +184,8 @@ public partial class App : System.Windows.Application
         _startupMailUnreadCancellation = null;
         _mailBackgroundPollingMonitor = null;
         _mailBackgroundStartupTask = null;
+        _singleInstanceCoordinator?.Dispose();
+        _singleInstanceCoordinator = null;
         base.OnExit(e);
     }
 
@@ -178,6 +229,40 @@ public partial class App : System.Windows.Application
 
     private void OnStartupExitRequested(object? sender, EventArgs eventArgs) =>
         _exitCoordinator?.RequestExit();
+
+    private void OnSingleInstanceActivationRequested(object? sender, EventArgs eventArgs) =>
+        _activationRequests.RequestActivation();
+
+    private void DispatchActivationRequest()
+    {
+        _ = Dispatcher.InvokeAsync(
+            () =>
+            {
+                if (_exitCoordinator?.IsExiting == true)
+                {
+                    return;
+                }
+
+                if (MainWindow is MainWindow mainWindow && mainWindow.IsLoaded)
+                {
+                    _serviceProvider?.GetService<IWindowActivationService>()?.ShowAndActivate();
+                    return;
+                }
+
+                if (_startupWindow is { IsVisible: true } startupWindow)
+                {
+                    if (startupWindow.WindowState == WindowState.Minimized)
+                    {
+                        startupWindow.WindowState = WindowState.Normal;
+                    }
+
+                    _ = startupWindow.Activate();
+                    startupWindow.Topmost = true;
+                    startupWindow.Topmost = false;
+                    _ = startupWindow.Focus();
+                }
+            });
+    }
 
     private async Task ShutdownApplicationAsync()
     {

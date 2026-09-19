@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Threading;
 
 namespace UnifiedMessenger.App.Services.Tray;
@@ -54,11 +55,14 @@ public sealed class WpfWindowActivationService : IWindowActivationService
                     window.Show();
                 }
 
-                if (window.WindowState == WindowState.Minimized)
+                IntPtr windowHandle = new WindowInteropHelper(window).EnsureHandle();
+                if (window.WindowState == WindowState.Minimized
+                    || NativeWindowActivation.IsMinimized(windowHandle))
                 {
                     window.WindowState = WindowState.Normal;
                 }
 
+                NativeWindowActivation.RestoreAndActivate(windowHandle);
                 _ = window.Activate();
                 window.Topmost = true;
                 window.Topmost = false;

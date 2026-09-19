@@ -4,7 +4,7 @@ namespace UnifiedMessenger.App.Services.Branding;
 
 public static class BrandIdentity
 {
-    public const string DisplayName = "Lantern";
+    public const string DisplayName = "raven";
     public const string SystemIconPackUri =
         "pack://application:,,,/UnifiedMessenger.App;component/Assets/Branding/lantern_system.ico";
     public static string CreateWindowTitle(string? _) => DisplayName;
@@ -58,11 +58,11 @@ public static class BrandIconCatalog
         BrandIconKind.Gmail => "gmail.png",
         BrandIconKind.Yandex => "yandex_mail.png",
         BrandIconKind.MailRu => "mailru.png",
-        _ => "lantern_icon.png"
+        _ => "raven_icon.png"
     };
 
     public static string GetPackUri(BrandIconKind iconKind) => iconKind == BrandIconKind.Lantern
-        ? "pack://application:,,,/UnifiedMessenger.App;component/Assets/Branding/lantern_icon.png"
+        ? "pack://application:,,,/UnifiedMessenger.App;component/Assets/Branding/raven_icon.png"
         : $"pack://application:,,,/UnifiedMessenger.App;component/Assets/Services/{GetAssetFileName(iconKind)}";
 
     public static double GetSidebarPresentationSize(BrandIconKind iconKind) => iconKind switch

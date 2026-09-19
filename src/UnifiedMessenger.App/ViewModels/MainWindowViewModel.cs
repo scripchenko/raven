@@ -24,6 +24,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isInitialized;
     private bool _disposed;
     private bool _isSynchronizingSelection;
+    private Guid? _webViewStateServiceId;
 
     public MainWindowViewModel(
         IBuiltInServiceCatalog serviceCatalog,
@@ -703,7 +704,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private void NavigateHome() => _webViewSessionManager.NavigateHome();
 
     [RelayCommand]
-    private void Retry() => _webViewSessionManager.Retry();
+    private void Retry()
+    {
+        if (SelectedService is not ServiceInstance selected
+            || _webViewStateServiceId != selected.Id)
+        {
+            return;
+        }
+
+        _webViewSessionManager.Retry();
+    }
 
     [RelayCommand]
     private async Task ToggleDoNotDisturb()
@@ -751,6 +761,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        ResetWebViewPresentation();
+
         _settings.LastServiceId = value?.Id;
         if (value is not null)
         {
@@ -786,6 +798,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return;
         }
+
+        ResetWebViewPresentation();
 
         _settings.LastNavigationAccountId = value?.Id;
         if (value?.Service is ServiceInstance service)
@@ -864,6 +878,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnWebViewSessionStateChanged(object? sender, WebViewSessionStateChangedEventArgs eventArgs)
     {
+        if (eventArgs.ServiceInstanceId is Guid serviceInstanceId
+            && SelectedService?.Id != serviceInstanceId)
+        {
+            return;
+        }
+
+        _webViewStateServiceId = eventArgs.ServiceInstanceId;
         CanGoBack = eventArgs.State.CanGoBack;
         CanGoForward = eventArgs.State.CanGoForward;
         IsLoading = eventArgs.State.IsLoading;
@@ -871,6 +892,18 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         WebViewErrorMessage = eventArgs.State.ErrorMessage;
         WebViewErrorCode = eventArgs.State.ErrorCode;
         WebViewStatus = eventArgs.State.Status;
+    }
+
+    private void ResetWebViewPresentation()
+    {
+        _webViewStateServiceId = null;
+        CanGoBack = false;
+        CanGoForward = false;
+        IsLoading = false;
+        WebViewErrorTitle = null;
+        WebViewErrorMessage = null;
+        WebViewErrorCode = null;
+        WebViewStatus = WebViewSessionStatus.Uninitialized;
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);

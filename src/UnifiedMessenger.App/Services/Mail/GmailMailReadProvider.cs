@@ -1450,7 +1450,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
 
     internal static long? GetMessageOrientedLabelTotal(Google.Apis.Gmail.v1.Data.Label? label)
     {
-        // Lantern currently renders one row per Message. ThreadsTotal is only valid for a future thread-oriented list.
+        // raven currently renders one row per Message. ThreadsTotal is only valid for a future thread-oriented list.
         return label?.MessagesTotal is int messagesTotal
             ? Math.Max(0L, messagesTotal)
             : null;

@@ -42,7 +42,7 @@
                     <StackPanel>
                         <TextBlock FontSize="17" FontWeight="SemiBold" Text="Gmail" />
                         <TextBlock Margin="0,8,0,0"
-                                   Text="Авторизация откроется в системном браузере. Lantern не запрашивает пароль Google и не использует WebView2 для входа."
+                                   Text="Авторизация откроется в системном браузере. raven не запрашивает пароль Google и не использует WebView2 для входа."
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
@@ -50,7 +50,7 @@
                 <StackPanel x:Name="PasswordAccountFields">
                     <TextBlock Margin="0,16,0,0" FontWeight="SemiBold" Text="Адрес почты" />
                     <TextBox x:Name="EmailBox" Margin="0,7,0,0" />
-                    <TextBlock Margin="0,16,0,0" FontWeight="SemiBold" Text="Название в Lantern (необязательно)" />
+                    <TextBlock Margin="0,16,0,0" FontWeight="SemiBold" Text="Название в raven (необязательно)" />
                     <TextBox x:Name="DisplayNameBox" Margin="0,7,0,0" />
                     <TextBlock Margin="0,16,0,0" FontWeight="SemiBold" Text="Пароль приложения" />
                     <PasswordBox x:Name="SecretBox" Margin="0,7,0,0" />

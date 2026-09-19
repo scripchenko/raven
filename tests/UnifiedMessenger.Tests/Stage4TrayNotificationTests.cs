@@ -240,6 +240,57 @@ public sealed class Stage4TrayNotificationTests
     }
 
     [Fact]
+    public void TrayFailurePreventsHeadlessHideAndFallsBackToExit()
+    {
+        AppSettings settings = AppSettings.CreateDefault();
+        FakeSettingsStore store = new(settings);
+        ServiceActivityCoordinator activity = new();
+        using MainWindowViewModel viewModel = CreateViewModel(settings, store, activity);
+        FakeTrayIconService tray = new() { ShowException = new InvalidOperationException("tray unavailable") };
+        FakeWindowActivationService window = new();
+        using ApplicationTrayCoordinator coordinator = new(
+            tray,
+            window,
+            new ApplicationExitCoordinator(),
+            new FakeWebNotificationCoordinator(),
+            activity,
+            store,
+            viewModel,
+            new ImmediateDispatcher(),
+            new FakeTaskbarActivityIndicator());
+
+        Assert.Throws<InvalidOperationException>(() => coordinator.Initialize());
+
+        Assert.False(coordinator.IsAvailable);
+        Assert.Equal(1, tray.ShutdownCount);
+        tray.RaiseOpen();
+        Assert.Equal(0, window.ActivationCount);
+        bool closeToTray = ApplicationRuntimeAccessibility.CanHideMainWindow(
+            closeToTrayEnabled: true,
+            trayAvailable: coordinator.IsAvailable);
+        ApplicationExitCoordinator exit = new();
+        Assert.False(exit.ShouldHideToTray(closeToTray, applicationShutdownStarted: false));
+        Assert.True(exit.ShouldRequestExitFromWindowClose(closeToTray, applicationShutdownStarted: false));
+    }
+
+    [Theory]
+    [InlineData(true, false, false, true)]
+    [InlineData(false, true, false, true)]
+    [InlineData(false, false, true, true)]
+    [InlineData(false, false, false, false)]
+    public void RuntimeAccessibilityRequiresWindowOrTray(
+        bool mainWindowVisible,
+        bool startupWindowVisible,
+        bool trayAvailable,
+        bool expected) =>
+        Assert.Equal(
+            expected,
+            ApplicationRuntimeAccessibility.HasUsableEntryPoint(
+                mainWindowVisible,
+                startupWindowVisible,
+                trayAvailable));
+
+    [Fact]
     public void ExplicitExit_IsNotInterceptedByCloseToTray()
     {
         ApplicationExitCoordinator coordinator = new();
@@ -651,7 +702,7 @@ public sealed class Stage4TrayNotificationTests
 
         string tooltip = coordinator.CreateTrayToolTip([first, second]);
 
-        Assert.Equal("Lantern — 5 непрочитанных", tooltip);
+        Assert.Equal("raven — 5 непрочитанных", tooltip);
     }
 
     [Fact]
@@ -663,7 +714,7 @@ public sealed class Stage4TrayNotificationTests
 
         string tooltip = coordinator.CreateTrayToolTip([service]);
 
-        Assert.Equal("Lantern — есть новые события", tooltip);
+        Assert.Equal("raven — есть новые события", tooltip);
     }
 
     [Fact]
@@ -1678,9 +1729,15 @@ public sealed class Stage4TrayNotificationTests
         public bool ShowBalloonResult { get; set; } = true;
         public int ShutdownCount { get; private set; }
         public bool IsShutdown { get; private set; }
+        public Exception? ShowException { get; init; }
 
         public void Show(bool doNotDisturb, string toolTipText)
         {
+            if (ShowException is not null)
+            {
+                throw ShowException;
+            }
+
             DoNotDisturb = doNotDisturb;
             ToolTip = toolTipText;
         }

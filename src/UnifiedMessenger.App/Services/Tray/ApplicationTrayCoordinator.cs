@@ -21,6 +21,7 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
     private readonly IMailActivityCoordinator? _mailActivityCoordinator;
     private readonly IMailNotificationCoordinator? _mailNotificationCoordinator;
     private bool _initialized;
+    private bool _subscribed;
     private bool _shutdownStarted;
     private bool _disposed;
 
@@ -50,6 +51,8 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
         _mailNotificationCoordinator = mailNotificationCoordinator;
     }
 
+    public bool IsAvailable => _initialized && !_shutdownStarted && !_disposed;
+
     public void Initialize()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -58,21 +61,24 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
             return;
         }
 
-        _initialized = true;
-        _trayIcon.OpenRequested += OnOpenRequested;
-        _trayIcon.SettingsRequested += OnSettingsRequested;
-        _trayIcon.DoNotDisturbToggleRequested += OnDoNotDisturbToggleRequested;
-        _trayIcon.ExitRequested += OnExitRequested;
-        _activityCoordinator.ActivityChanged += OnActivityChanged;
-        if (_mailActivityCoordinator is not null)
+        Subscribe();
+        try
         {
-            _mailActivityCoordinator.ActivityChanged += OnActivityChanged;
+            _trayIcon.Show(
+                _settingsStore.Current.Notifications.DoNotDisturb,
+                _activityCoordinator.CreateTrayToolTip(_settingsStore.Current.Services));
+            _initialized = true;
+            UpdateActivityIndicators();
         }
-        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        _trayIcon.Show(
-            _settingsStore.Current.Notifications.DoNotDisturb,
-            _activityCoordinator.CreateTrayToolTip(_settingsStore.Current.Services));
-        UpdateActivityIndicators();
+        catch
+        {
+            Unsubscribe();
+            _shutdownStarted = true;
+            _trayIcon.BeginShutdown();
+            _notificationCoordinator.Shutdown();
+            _mailNotificationCoordinator?.Shutdown();
+            throw;
+        }
     }
 
     public bool TryShowCloseToTrayHint()
@@ -87,7 +93,7 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
 
         return _trayIcon.TryShowBalloon(
             BrandIdentity.DisplayName,
-            "Lantern продолжает работать в области уведомлений");
+            "raven продолжает работать в области уведомлений");
     }
 
     public void BeginShutdown()
@@ -203,11 +209,12 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
 
     private void Unsubscribe()
     {
-        if (!_initialized)
+        if (!_subscribed)
         {
             return;
         }
 
+        _subscribed = false;
         _initialized = false;
         _trayIcon.OpenRequested -= OnOpenRequested;
         _trayIcon.SettingsRequested -= OnSettingsRequested;
@@ -219,5 +226,26 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
             _mailActivityCoordinator.ActivityChanged -= OnActivityChanged;
         }
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+    }
+
+    private void Subscribe()
+    {
+        if (_subscribed)
+        {
+            return;
+        }
+
+        _subscribed = true;
+        _trayIcon.OpenRequested += OnOpenRequested;
+        _trayIcon.SettingsRequested += OnSettingsRequested;
+        _trayIcon.DoNotDisturbToggleRequested += OnDoNotDisturbToggleRequested;
+        _trayIcon.ExitRequested += OnExitRequested;
+        _activityCoordinator.ActivityChanged += OnActivityChanged;
+        if (_mailActivityCoordinator is not null)
+        {
+            _mailActivityCoordinator.ActivityChanged += OnActivityChanged;
+        }
+
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
     }
 }

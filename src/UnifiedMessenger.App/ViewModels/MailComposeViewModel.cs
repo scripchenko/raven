@@ -816,7 +816,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 {
                     throw new GmailDraftException(
                         MailSendFailureKind.Ambiguous,
-                        "Lantern не может подтвердить создание черновика. Проверьте папку «Черновики» перед удалением.");
+                        "raven не может подтвердить создание черновика. Проверьте папку «Черновики» перед удалением.");
                 }
 
                 if (state.Identity is GmailDraftIdentity identity)
@@ -920,7 +920,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 if (state.RequiresExplicitRetry)
                 {
                     FailureKind = MailSendFailureKind.Ambiguous;
-                    ErrorMessage = "Lantern не может подтвердить состояние черновика. Проверьте папку «Черновики» перед удалением.";
+                    ErrorMessage = "raven не может подтвердить состояние черновика. Проверьте папку «Черновики» перед удалением.";
                     SetDraftSaveStatus(state, "Не удалось сохранить");
                     return;
                 }

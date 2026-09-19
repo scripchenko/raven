@@ -15,7 +15,7 @@ $installerOutputDirectory = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'in
 $projectPath = Join-Path $repositoryRoot 'src\UnifiedMessenger.App\UnifiedMessenger.App.csproj'
 $installerScriptPath = Join-Path $repositoryRoot 'installer\Lantern.iss'
 $verificationScriptPath = Join-Path $PSScriptRoot 'verify-windows-package.ps1'
-$expectedInstallerPath = Join-Path $installerOutputDirectory 'Lantern-Setup-0.1.0-win-x64.exe'
+$expectedInstallerPath = Join-Path $installerOutputDirectory 'raven-Setup-0.1.0-win-x64.exe'
 
 function Assert-ArtifactPath {
     param(

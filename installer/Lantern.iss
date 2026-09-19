@@ -1,7 +1,7 @@
-#define AppName "Lantern"
+#define AppName "raven"
 #define AppVersion "0.1.0"
 #define AppExeName "UnifiedMessenger.App.exe"
-#define AppUserModelId "Scripchenko.Lantern"
+#define AppUserModelId "Scripchenko.Raven"
 #define PublishDir "..\artifacts\publish\win-x64"
 #define InstallerOutputDir "..\artifacts\installer"
 
@@ -12,19 +12,19 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppComments=Windows-приложение для мессенджеров и почты.
 DefaultDirName={localappdata}\Programs\Lantern
-DefaultGroupName=Lantern
+DefaultGroupName=raven
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#InstallerOutputDir}
-OutputBaseFilename=Lantern-Setup-{#AppVersion}-win-x64
-SetupIconFile={#PublishDir}\Assets\Branding\lantern.ico
-UninstallDisplayIcon={app}\{#AppExeName}
-UninstallDisplayName=Lantern
-VersionInfoDescription=Lantern Setup
-VersionInfoProductName=Lantern
+OutputBaseFilename=raven-Setup-{#AppVersion}-win-x64
+SetupIconFile={#PublishDir}\Assets\Branding\raven.ico
+UninstallDisplayIcon={app}\Assets\Branding\raven.ico
+UninstallDisplayName=raven
+VersionInfoDescription=raven Setup
+VersionInfoProductName=raven
 VersionInfoProductVersion=0.1.0
 VersionInfoVersion=0.1.0.0
 Compression=lzma2
@@ -48,8 +48,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Lantern"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\lantern_system.ico"; AppUserModelID: "{#AppUserModelId}"
-Name: "{autodesktop}\Lantern"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\lantern.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon
+Name: "{autoprograms}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"
+Name: "{autodesktop}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon
 
 [Code]
 const
@@ -83,8 +83,8 @@ begin
     Exit;
 
   if MsgBox(
-    'Для работы Lantern требуется Microsoft Edge WebView2 Evergreen Runtime.' + #13#10 + #13#10 +
-    'Установите Runtime с официальной страницы Microsoft, затем снова запустите установку Lantern.' + #13#10 + #13#10 +
+    'Для работы raven требуется Microsoft Edge WebView2 Evergreen Runtime.' + #13#10 + #13#10 +
+    'Установите Runtime с официальной страницы Microsoft, затем снова запустите установку raven.' + #13#10 + #13#10 +
     'Открыть официальную страницу сейчас?',
     mbConfirmation,
     MB_YESNO) = IDYES then

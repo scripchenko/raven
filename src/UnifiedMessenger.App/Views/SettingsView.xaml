@@ -127,7 +127,7 @@
                                     <TextBlock FontWeight="SemiBold" Text="Закрывать окно в трей" />
                                     <TextBlock Margin="0,6,0,0"
                                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="Если выключено, крестик полностью завершает Lantern."
+                                               Text="Если выключено, крестик полностью завершает raven."
                                                TextWrapping="Wrap" />
                                 </StackPanel>
                                 <CheckBox Grid.Column="1"
@@ -201,10 +201,10 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Margin="0,0,24,0">
-                                        <TextBlock FontWeight="SemiBold" Text="Звуки Lantern" />
+                                        <TextBlock FontWeight="SemiBold" Text="Звуки raven" />
                                         <TextBlock Margin="0,6,0,0"
                                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                                   Text="Управляет только звуками, которые воспроизводит Lantern. Звук веб-сервисов не изменяется."
+                                                   Text="Управляет только звуками, которые воспроизводит raven. Звук веб-сервисов не изменяется."
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <CheckBox Grid.Column="1"
@@ -218,10 +218,10 @@
 
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <StackPanel>
-                                <TextBlock FontWeight="SemiBold" Text="Звук Lantern" />
+                                <TextBlock FontWeight="SemiBold" Text="Звук raven" />
                                 <TextBlock Margin="0,6,0,12"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Один общий звук используется для Telegram, WhatsApp и MAX в режиме Lantern, а также для почты."
+                                           Text="Один общий звук используется для Telegram, WhatsApp и MAX в режиме raven, а также для почты."
                                            TextWrapping="Wrap" />
                                 <StackPanel Orientation="Horizontal">
                                     <RadioButton Margin="0,0,22,0"
@@ -261,7 +261,7 @@
                                 <TextBlock FontWeight="SemiBold" Text="Источник звука мессенджеров" />
                                 <TextBlock Margin="0,6,0,14"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Выбор влияет только на звук уведомления. В режиме «Звук веб-сервиса» Lantern не воспроизводит свой звук. Всплывающие уведомления и индикатор активности Lantern продолжают работать."
+                                           Text="Выбор влияет только на звук уведомления. В режиме «Звук веб-сервиса» raven не воспроизводит свой звук. Всплывающие уведомления и индикатор активности raven продолжают работать."
                                            TextWrapping="Wrap" />
 
                                 <Grid Margin="0,0,0,12">
@@ -274,7 +274,7 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetTelegramSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Звук Lantern"
+                                                     Content="Звук raven"
                                                      GroupName="TelegramSoundMode"
                                                      IsChecked="{Binding IsTelegramLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetTelegramSoundModeCommand}"
@@ -295,7 +295,7 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetWhatsAppSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Звук Lantern"
+                                                     Content="Звук raven"
                                                      GroupName="WhatsAppSoundMode"
                                                      IsChecked="{Binding IsWhatsAppLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetWhatsAppSoundModeCommand}"
@@ -316,7 +316,7 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetMaxSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Звук Lantern"
+                                                     Content="Звук raven"
                                                      GroupName="MaxSoundMode"
                                                      IsChecked="{Binding IsMaxLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetMaxSoundModeCommand}"
@@ -444,7 +444,7 @@
                                                Text="Автоматически показывать внешние изображения" />
                                     <TextBlock Margin="0,6,0,0"
                                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="Lantern загружает изображения через защищённый загрузчик без cookies и учётных данных. Отправитель всё равно может узнать о загрузке изображения."
+                                               Text="raven загружает изображения через защищённый загрузчик без cookies и учётных данных. Отправитель всё равно может узнать о загрузке изображения."
                                                TextWrapping="Wrap" />
                                 </StackPanel>
                                 <CheckBox Grid.Column="1"
@@ -523,7 +523,7 @@
                                    Text="О программе" />
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <StackPanel>
-                                <TextBlock FontSize="25" FontWeight="SemiBold" Text="Lantern" />
+                                <TextBlock FontSize="25" FontWeight="SemiBold" Text="raven" />
                                 <TextBlock Margin="0,6,0,0"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
                                            Text="{Binding ApplicationVersion, StringFormat=Версия {0}}" />

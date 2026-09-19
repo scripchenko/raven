@@ -2,16 +2,17 @@ using System.Resources;
 using System.Windows.Resources;
 using System.Xml.Linq;
 using UnifiedMessenger.App.Services.Branding;
+using UnifiedMessenger.App.Services.Persistence;
 
 namespace UnifiedMessenger.Tests;
 
 public sealed class Stage8PackagingTests
 {
     private const string InstallerAppId = "DFAA0CC1-B19F-4506-8124-750955F1C946";
-    private const string ShellAppUserModelId = "Scripchenko.Lantern";
+    private const string ShellAppUserModelId = "Scripchenko.Raven";
 
     [Fact]
-    public void ProjectMetadata_UsesLanternPreviewIdentityWithoutInternalRename()
+    public void ProjectMetadata_UsesRavenPublicIdentityWithoutInternalRename()
     {
         XDocument project = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "UnifiedMessenger.App.csproj"));
@@ -19,9 +20,9 @@ public sealed class Stage8PackagingTests
         Assert.Equal("0.1.0", GetProperty(project, "Version"));
         Assert.Equal("0.1.0.0", GetProperty(project, "AssemblyVersion"));
         Assert.Equal("0.1.0.0", GetProperty(project, "FileVersion"));
-        Assert.Equal("Lantern", GetProperty(project, "Product"));
-        Assert.Equal("Lantern", GetProperty(project, "Title"));
-        Assert.Equal("Lantern", GetProperty(project, "AssemblyTitle"));
+        Assert.Equal("raven", GetProperty(project, "Product"));
+        Assert.Equal("raven", GetProperty(project, "Title"));
+        Assert.Equal("raven", GetProperty(project, "AssemblyTitle"));
         Assert.Equal("Windows-приложение для мессенджеров и почты.", GetProperty(project, "Description"));
         Assert.Equal("false", GetProperty(project, "GenerateAssemblyCompanyAttribute"));
         Assert.Equal("UnifiedMessenger.App", GetProperty(project, "AssemblyName"));
@@ -64,7 +65,7 @@ public sealed class Stage8PackagingTests
     }
 
     [Fact]
-    public void LanternSystemIcon_IsEmbeddedRuntimeResourceAndNotContent()
+    public void HistoricalBracketSystemIcon_IsEmbeddedRuntimeResourceAndNotContent()
     {
         System.Reflection.Assembly assembly = typeof(BrandIconResources).Assembly;
         Assert.DoesNotContain(
@@ -89,11 +90,11 @@ public sealed class Stage8PackagingTests
     }
 
     [Fact]
-    public void LanternApplicationIcon_IsPublishedForShellWithoutWpfResourceClassification()
+    public void RavenDesktopShortcutIcon_IsPublishedWithoutWpfResourceClassification()
     {
         XDocument project = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "UnifiedMessenger.App.csproj"));
-        const string iconPath = "Assets\\Branding\\lantern.ico";
+        const string iconPath = "Assets\\Branding\\raven.ico";
 
         Assert.DoesNotContain(project.Descendants("Resource"), item =>
             string.Equals((string?)item.Attribute("Include"), iconPath, StringComparison.Ordinal));
@@ -103,14 +104,14 @@ public sealed class Stage8PackagingTests
         XElement publishItem = Assert.Single(project.Descendants("ResolvedFileToPublish"), item =>
             string.Equals(
                 (string?)item.Attribute("Include"),
-                "$(MSBuildProjectDirectory)\\Assets\\Branding\\lantern.ico",
+                "$(MSBuildProjectDirectory)\\Assets\\Branding\\raven.ico",
                 StringComparison.Ordinal));
         Assert.Equal(iconPath, publishItem.Element("RelativePath")?.Value);
         Assert.Equal("PreserveNewest", publishItem.Element("CopyToPublishDirectory")?.Value);
     }
 
     [Fact]
-    public void LanternSystemIcon_IsPublishedSeparatelyWithoutContentClassification()
+    public void HistoricalBracketSystemIcon_IsPublishedSeparatelyWithoutContentClassification()
     {
         XDocument project = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "UnifiedMessenger.App.csproj"));
@@ -136,6 +137,7 @@ public sealed class Stage8PackagingTests
         string installer = ReadInstallerScript();
 
         Assert.Contains($"AppId={{{{{InstallerAppId}}}", installer, StringComparison.Ordinal);
+        Assert.Contains("#define AppName \"raven\"", installer, StringComparison.Ordinal);
         Assert.Contains("AppName={#AppName}", installer, StringComparison.Ordinal);
         Assert.Contains("AppVersion={#AppVersion}", installer, StringComparison.Ordinal);
         Assert.Contains("PrivilegesRequired=lowest", installer, StringComparison.Ordinal);
@@ -151,7 +153,7 @@ public sealed class Stage8PackagingTests
         string installer = ReadInstallerScript();
 
         Assert.Contains(
-            "Name: \"{autoprograms}\\Lantern\"; Filename: \"{app}\\{#AppExeName}\"",
+            "Name: \"{autoprograms}\\raven\"; Filename: \"{app}\\{#AppExeName}\"",
             installer,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -160,14 +162,14 @@ public sealed class Stage8PackagingTests
             StringComparison.Ordinal);
         Assert.Contains("Flags: unchecked", installer, StringComparison.Ordinal);
         Assert.Contains(
-            "Name: \"{autodesktop}\\Lantern\"; Filename: \"{app}\\{#AppExeName}\";",
+            "Name: \"{autodesktop}\\raven\"; Filename: \"{app}\\{#AppExeName}\";",
             installer,
             StringComparison.Ordinal);
         Assert.Contains("Tasks: desktopicon", installer, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Installer_StartMenuUsesCompactIcon_WhileDesktopExeAndSetupKeepFullIcon()
+    public void InstallerAndShortcutsUseRavenWhileNativeWindowUsesBracket()
     {
         string installer = ReadInstallerScript();
         string project = File.ReadAllText(FindRepositoryFile(
@@ -176,24 +178,32 @@ public sealed class Stage8PackagingTests
             "src", "UnifiedMessenger.App", "Views", "MainWindow.xaml"));
 
         Assert.Contains(
-            "Name: \"{autoprograms}\\Lantern\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\lantern_system.ico\"; AppUserModelID: \"{#AppUserModelId}\"",
+            "Name: \"{autoprograms}\\raven\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven.ico\"; AppUserModelID: \"{#AppUserModelId}\"",
             installer,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Name: \"{autodesktop}\\Lantern\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\lantern.ico\"; AppUserModelID: \"{#AppUserModelId}\"; Tasks: desktopicon",
+            "Name: \"{autodesktop}\\raven\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven.ico\"; AppUserModelID: \"{#AppUserModelId}\"; Tasks: desktopicon",
             installer,
             StringComparison.Ordinal);
-        Assert.Contains("SetupIconFile={#PublishDir}\\Assets\\Branding\\lantern.ico", installer, StringComparison.Ordinal);
-        Assert.Contains("<ApplicationIcon>Assets\\Branding\\lantern.ico</ApplicationIcon>", project, StringComparison.Ordinal);
+        Assert.Contains("SetupIconFile={#PublishDir}\\Assets\\Branding\\raven.ico", installer, StringComparison.Ordinal);
+        Assert.Contains("<ApplicationIcon>Assets\\Branding\\lantern_system.ico</ApplicationIcon>", project, StringComparison.Ordinal);
         Assert.Contains(
             "Icon=\"/UnifiedMessenger.App;component/Assets/Branding/lantern_system.ico\"",
             mainWindow,
             StringComparison.Ordinal);
+        Assert.Contains("Assets/Branding/raven_logo.png", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Assets/Branding/lantern_sidebar.png", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RenderOptions.BitmapScalingMode=\"HighQuality\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Title=\"\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.Name=\"raven\"", mainWindow, StringComparison.Ordinal);
     }
 
     [Fact]
     public void ShellIdentity_UsesStableAppIdAndPhysicalCompactRelaunchIcon()
     {
+        string shellIdentity = File.ReadAllText(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Services", "Branding", "WindowsShellIdentity.cs"));
+
         Assert.Equal(ShellAppUserModelId, WindowsShellIdentity.ApplicationUserModelId);
         Assert.Equal(
             Path.Combine("C:\\Lantern", "Assets", "Branding", "lantern_system.ico") + ",0",
@@ -201,6 +211,8 @@ public sealed class Stage8PackagingTests
         Assert.Equal(
             "\"C:\\Lantern\\UnifiedMessenger.App.exe\"",
             WindowsShellIdentity.CreateRelaunchCommand("C:\\Lantern\\UnifiedMessenger.App.exe"));
+        Assert.Contains("Marshal.StringToCoTaskMemUni(value)", shellIdentity, StringComparison.Ordinal);
+        Assert.DoesNotContain("InitPropVariantFromString", shellIdentity, StringComparison.Ordinal);
 
         string installer = ReadInstallerScript();
         Assert.Contains($"#define AppUserModelId \"{ShellAppUserModelId}\"", installer, StringComparison.Ordinal);
@@ -227,7 +239,12 @@ public sealed class Stage8PackagingTests
             "WindowsShellIdentity.TryApplyToWindow(_mainWindowHandle)",
             mainWindow,
             StringComparison.Ordinal);
-        Assert.Contains("taskbarItem.Overlay = HasActivity ? ActivityOverlay : null", taskbarIndicator, StringComparison.Ordinal);
+        Assert.Contains(
+            "NativeWindowCaption.TryHideBranding(_mainWindowHandle)",
+            mainWindow,
+            StringComparison.Ordinal);
+        Assert.Contains("taskbarItem.Overlay = null", taskbarIndicator, StringComparison.Ordinal);
+        Assert.DoesNotContain("ActivityOverlay", taskbarIndicator, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -286,6 +303,28 @@ public sealed class Stage8PackagingTests
         Assert.Contains("*.credential.bin", verificationScript, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("'WebView2'", verificationScript, StringComparison.Ordinal);
         Assert.Contains("'.git'", verificationScript, StringComparison.Ordinal);
+        Assert.Contains("'Assets/Sounds/lantern_notification.wav'", verificationScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("'.wav'", verificationScript, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BrandingMigration_PreservesUnifiedMessengerDataRoots()
+    {
+        AppPaths paths = new();
+
+        Assert.Equal(
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "UnifiedMessenger"),
+            paths.RoamingDataFolder);
+        Assert.Equal(
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "UnifiedMessenger"),
+            paths.LocalDataFolder);
+        Assert.Equal(Path.Combine(paths.LocalDataFolder, "WebView2"), paths.WebViewDataFolder);
+        Assert.DoesNotContain("raven", paths.RoamingDataFolder, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("raven", paths.LocalDataFolder, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

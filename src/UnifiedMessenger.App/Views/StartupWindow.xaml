@@ -57,7 +57,7 @@
                     <Image Width="194"
                            Height="50"
                            HorizontalAlignment="Center"
-                           Source="/UnifiedMessenger.App;component/Assets/Branding/lantern_logo.png"
+                           Source="/UnifiedMessenger.App;component/Assets/Branding/raven_logo.png"
                            Stretch="Uniform"
                            SnapsToDevicePixels="True"
                            UseLayoutRounding="True" />

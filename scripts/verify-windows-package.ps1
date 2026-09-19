@@ -58,7 +58,7 @@ function Assert-FileExists {
     }
 }
 
-function Assert-PublishedLanternResource {
+function Assert-PublishedRavenResource {
     param(
         [Parameter(Mandatory)]
         [string]$AssemblyPath
@@ -78,11 +78,11 @@ $assembly = [Reflection.Assembly]::LoadFile($assemblyPath)
 $contentIcons = @($assembly.GetCustomAttributesData() | Where-Object {
     $_.AttributeType.FullName -eq 'System.Windows.Resources.AssemblyAssociatedContentFileAttribute' -and
     [string]$_.ConstructorArguments[0].Value -in @(
-        'assets/branding/lantern.ico',
+        'assets/branding/raven.ico',
         'assets/branding/lantern_system.ico')
 })
 if ($contentIcons.Count -ne 0) {
-    throw 'Lantern icons ошибочно классифицированы как WPF Content.'
+    throw 'Hybrid branding icons ошибочно классифицированы как WPF Content.'
 }
 
 $resourceStream = $assembly.GetManifestResourceStream('UnifiedMessenger.App.g.resources')
@@ -93,19 +93,35 @@ if ($null -eq $resourceStream) {
 try {
     $reader = [Resources.ResourceReader]::new($resourceStream)
     try {
-        $requiredIcons = @('assets/branding/lantern_system.ico')
-        $foundIcons = @{}
+        $requiredResources = @(
+            'assets/branding/lantern_system.ico',
+            'assets/branding/lantern_sidebar.png',
+            'assets/branding/raven_icon.png',
+            'assets/branding/raven_logo.png',
+            'assets/branding/raven_tile.png'
+        )
+        $forbiddenLegacyResources = @(
+            'assets/branding/lantern_icon.png',
+            'assets/branding/lantern_logo.png'
+        )
+        $foundResources = @{}
         $entries = $reader.GetEnumerator()
         while ($entries.MoveNext()) {
             $key = [string]$entries.Key
-            if ($requiredIcons -contains $key) {
-                $foundIcons[$key] = $true
+            if ($requiredResources -contains $key -or $forbiddenLegacyResources -contains $key) {
+                $foundResources[$key] = $true
             }
         }
 
-        foreach ($requiredIcon in $requiredIcons) {
-            if (-not $foundIcons.ContainsKey($requiredIcon)) {
-                throw "Embedded Lantern icon отсутствует в WPF resources: $requiredIcon"
+        foreach ($requiredResource in $requiredResources) {
+            if (-not $foundResources.ContainsKey($requiredResource)) {
+                throw "Embedded hybrid branding resource отсутствует в WPF resources: $requiredResource"
+            }
+        }
+
+        foreach ($legacyResource in $forbiddenLegacyResources) {
+            if ($foundResources.ContainsKey($legacyResource)) {
+                throw "Legacy Lantern branding resource попал в WPF resources: $legacyResource"
             }
         }
     }
@@ -127,7 +143,7 @@ try {
     $icon = $resourceType.GetMethod('LoadSystemIcon').Invoke($null, @())
     try {
         if ($null -eq $icon -or $icon.Width -le 0 -or $icon.Height -le 0) {
-            throw 'Production Lantern icon loader вернул некорректный icon.'
+            throw 'Production bracket system icon loader вернул некорректный icon.'
         }
     }
     finally {
@@ -144,7 +160,7 @@ finally {
     try {
         & $hostExecutable -NoLogo -NoProfile -NonInteractive -Command $probe
         if ($LASTEXITCODE -ne 0) {
-            throw "Runtime-проверка embedded Lantern icon завершилась с кодом $LASTEXITCODE."
+            throw "Runtime-проверка embedded raven icon завершилась с кодом $LASTEXITCODE."
         }
     }
     finally {
@@ -170,27 +186,27 @@ Assert-FileExists -Path (Join-Path $PublishDirectory 'hostfxr.dll') -Label 'Self
 Assert-FileExists -Path (Join-Path $PublishDirectory 'hostpolicy.dll') -Label 'Self-contained hostpolicy'
 Assert-FileExists -Path (Join-Path $PublishDirectory 'coreclr.dll') -Label 'Self-contained CoreCLR'
 Assert-FileExists -Path (Join-Path $PublishDirectory 'PresentationFramework.dll') -Label 'WPF runtime'
-$publishedLanternIconPath = Join-Path $PublishDirectory 'Assets\Branding\lantern.ico'
-$sourceLanternIconPath = Join-Path $RepositoryRoot 'src\UnifiedMessenger.App\Assets\Branding\lantern.ico'
-$publishedLanternSystemIconPath = Join-Path $PublishDirectory 'Assets\Branding\lantern_system.ico'
-$sourceLanternSystemIconPath = Join-Path $RepositoryRoot 'src\UnifiedMessenger.App\Assets\Branding\lantern_system.ico'
-Assert-FileExists -Path $publishedLanternIconPath -Label 'Published Lantern icon'
-Assert-FileExists -Path $sourceLanternIconPath -Label 'Source Lantern icon'
-Assert-FileExists -Path $publishedLanternSystemIconPath -Label 'Published Lantern system icon'
-Assert-FileExists -Path $sourceLanternSystemIconPath -Label 'Source Lantern system icon'
+$publishedRavenIconPath = Join-Path $PublishDirectory 'Assets\Branding\raven.ico'
+$sourceRavenIconPath = Join-Path $RepositoryRoot 'src\UnifiedMessenger.App\Assets\Branding\raven.ico'
+$publishedBracketSystemIconPath = Join-Path $PublishDirectory 'Assets\Branding\lantern_system.ico'
+$sourceBracketSystemIconPath = Join-Path $RepositoryRoot 'src\UnifiedMessenger.App\Assets\Branding\lantern_system.ico'
+Assert-FileExists -Path $publishedRavenIconPath -Label 'Published raven icon'
+Assert-FileExists -Path $sourceRavenIconPath -Label 'Source raven icon'
+Assert-FileExists -Path $publishedBracketSystemIconPath -Label 'Published historical bracket system icon'
+Assert-FileExists -Path $sourceBracketSystemIconPath -Label 'Source historical bracket system icon'
 Assert-FileExists -Path $InstallerScriptPath -Label 'Installer script'
 
-if ((Get-FileHash -LiteralPath $publishedLanternIconPath -Algorithm SHA256).Hash -ne
-    (Get-FileHash -LiteralPath $sourceLanternIconPath -Algorithm SHA256).Hash) {
-    throw 'Published Lantern icon не совпадает с исходным branding resource.'
+if ((Get-FileHash -LiteralPath $publishedRavenIconPath -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath $sourceRavenIconPath -Algorithm SHA256).Hash) {
+    throw 'Published raven icon не совпадает с исходным branding resource.'
 }
 
-if ((Get-FileHash -LiteralPath $publishedLanternSystemIconPath -Algorithm SHA256).Hash -ne
-    (Get-FileHash -LiteralPath $sourceLanternSystemIconPath -Algorithm SHA256).Hash) {
-    throw 'Published Lantern system icon не совпадает с исходным compact resource.'
+if ((Get-FileHash -LiteralPath $publishedBracketSystemIconPath -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath $sourceBracketSystemIconPath -Algorithm SHA256).Hash) {
+    throw 'Published bracket system icon не совпадает с точным historical resource.'
 }
 
-Assert-PublishedLanternResource -AssemblyPath (Join-Path $PublishDirectory 'UnifiedMessenger.App.dll')
+Assert-PublishedRavenResource -AssemblyPath (Join-Path $PublishDirectory 'UnifiedMessenger.App.dll')
 
 $webViewLoaders = @(Get-ChildItem -LiteralPath $PublishDirectory -Recurse -File |
     Where-Object { $_.Name -eq 'WebView2Loader.dll' })
@@ -295,7 +311,12 @@ foreach ($file in $files) {
         throw "Запрещённый файл в publish output: $relativePath"
     }
 
-    if ($allowedExtensions -notcontains $file.Extension.ToLowerInvariant()) {
+    $isBundledNotificationSound =
+        $relativePath.Replace('\', '/').Equals(
+            'Assets/Sounds/lantern_notification.wav',
+            [StringComparison]::OrdinalIgnoreCase)
+    if ($allowedExtensions -notcontains $file.Extension.ToLowerInvariant() -and
+        -not $isBundledNotificationSound) {
         throw "Неожиданный тип файла в publish output: $relativePath"
     }
 }
@@ -314,18 +335,18 @@ if ($fileSources.Count -ne 1 -or $fileSources[0].Groups[1].Value -ne '{#PublishD
     throw 'Installer должен иметь единственный payload Source из {#PublishDir}\*.'
 }
 
-$startMenuShortcutIconFragment = 'Name: "{autoprograms}\Lantern"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\lantern_system.ico"; AppUserModelID: "{#AppUserModelId}"'
+$startMenuShortcutIconFragment = 'Name: "{autoprograms}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"'
 if (-not $installerScript.Contains($startMenuShortcutIconFragment, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Start Menu shortcut должен использовать compact Lantern system icon.'
+    throw 'Start Menu shortcut должен использовать full raven app icon.'
 }
 
-$desktopShortcutIconFragment = 'Name: "{autodesktop}\Lantern"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\lantern.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon'
+$desktopShortcutIconFragment = 'Name: "{autodesktop}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon'
 if (-not $installerScript.Contains($desktopShortcutIconFragment, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Desktop shortcut должен использовать full Lantern icon.'
+    throw 'Desktop shortcut должен использовать full raven icon.'
 }
 
-if (-not $installerScript.Contains('#define AppUserModelId "Scripchenko.Lantern"', [StringComparison]::Ordinal)) {
-    throw 'Installer shortcuts должны использовать stable Lantern AppUserModelID.'
+if (-not $installerScript.Contains('#define AppUserModelId "Scripchenko.Raven"', [StringComparison]::Ordinal)) {
+    throw 'Installer shortcuts должны использовать Raven AppUserModelID.'
 }
 
 $forbiddenInstallerFragments = @(

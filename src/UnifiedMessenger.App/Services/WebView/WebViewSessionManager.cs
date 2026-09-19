@@ -405,7 +405,7 @@ public sealed class WebViewSessionManager(
 
         _activeSession = null;
         State = WebViewSessionState.Uninitialized;
-        StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(State));
+        StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(null, State));
     }
 
     public void GoBack()
@@ -721,7 +721,9 @@ public sealed class WebViewSessionManager(
             session,
             isOffline ? WebViewSessionStatus.Offline : WebViewSessionStatus.Failed,
             isOffline ? "Нет подключения к интернету" : $"Ошибка загрузки {session.ServiceInstance.DisplayName}",
-            WebViewErrorClassifier.GetUserMessage(eventArgs.WebErrorStatus),
+            WebViewErrorClassifier.GetUserMessage(
+                eventArgs.WebErrorStatus,
+                serviceCatalog.Get(session.ServiceInstance.ServiceType).DisplayName),
             eventArgs.WebErrorStatus.ToString());
     }
 
@@ -992,7 +994,9 @@ public sealed class WebViewSessionManager(
         }
 
         State = session.State;
-        StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(State));
+        StateChanged?.Invoke(
+            this,
+            new WebViewSessionStateChangedEventArgs(session.ServiceInstance.Id, State));
     }
 
     private Task ReleaseSessionCore(SessionEntry session, bool updateState)
@@ -1036,7 +1040,7 @@ public sealed class WebViewSessionManager(
             if (updateState)
             {
                 State = WebViewSessionState.Uninitialized;
-                StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(State));
+                StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(null, State));
             }
         }
 

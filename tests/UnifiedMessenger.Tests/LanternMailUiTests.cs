@@ -209,7 +209,7 @@ public sealed class LanternMailUiTests
                 or "{Binding NavigateHomeCommand}");
         Assert.DoesNotContain("SelectedAccountLabel", window.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("· WebView2", window.ToString(), StringComparison.Ordinal);
-        Assert.Equal("Lantern", BrandIdentity.CreateWindowTitle("Telegram"));
+        Assert.Equal("raven", BrandIdentity.CreateWindowTitle("Telegram"));
     }
 
     [Fact]

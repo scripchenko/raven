@@ -17,24 +17,19 @@
                     BorderThickness="1"
                     CornerRadius="24">
                 <StackPanel>
-                    <Border Width="72"
-                            Height="72"
-                            HorizontalAlignment="Center"
-                            Background="{DynamicResource AccentSoftBrush}"
-                            CornerRadius="20">
-                        <TextBlock HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"
-                                   FontSize="30"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource AccentBrush}"
-                                   Text="U" />
-                    </Border>
+                    <Image Width="72"
+                           Height="72"
+                           HorizontalAlignment="Center"
+                           Source="/UnifiedMessenger.App;component/Assets/Branding/raven_tile.png"
+                           Stretch="Uniform"
+                           SnapsToDevicePixels="True"
+                           UseLayoutRounding="True" />
 
                     <TextBlock Margin="0,24,0,8"
                                HorizontalAlignment="Center"
                                FontSize="30"
                                FontWeight="SemiBold"
-                               Text="Добро пожаловать в Lantern" />
+                               Text="Добро пожаловать в raven" />
                     <TextBlock MaxWidth="620"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}"

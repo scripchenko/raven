@@ -6,7 +6,8 @@
         xmlns:converters="clr-namespace:UnifiedMessenger.App.Converters"
         xmlns:views="clr-namespace:UnifiedMessenger.App.Views"
         mc:Ignorable="d"
-        Title="{Binding WindowTitle}"
+        Title=""
+        AutomationProperties.Name="raven"
         Icon="/UnifiedMessenger.App;component/Assets/Branding/lantern_system.ico"
         Width="1180"
         Height="760"
@@ -107,6 +108,17 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
+                <Image Grid.Column="0"
+                       Width="72"
+                       Height="24"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Source="/UnifiedMessenger.App;component/Assets/Branding/raven_logo.png"
+                       Stretch="Uniform"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       SnapsToDevicePixels="True"
+                       UseLayoutRounding="True" />
+
                 <Grid Grid.Column="1" Margin="12,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -179,12 +191,13 @@
 
                 <Border Width="48"
                         Height="48"
-                        Padding="6"
-                        Background="{DynamicResource SidebarHoverBrush}"
-                        CornerRadius="14"
-                        ToolTip="Lantern">
-                    <Image Source="/UnifiedMessenger.App;component/Assets/Branding/lantern_icon.png"
+                        Background="Transparent"
+                        ToolTip="raven">
+                    <Image Width="40"
+                           Height="40"
+                           Source="/UnifiedMessenger.App;component/Assets/Branding/lantern_sidebar.png"
                            Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
                            SnapsToDevicePixels="True"
                            UseLayoutRounding="True" />
                 </Border>

@@ -170,7 +170,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private async Task SelectDefaultLanternSound()
     {
         await _mainWindowViewModel.RestoreDefaultLanternSoundAsync();
-        SoundStatusMessage = "Используется стандартный звук Lantern.";
+        SoundStatusMessage = "Используется стандартный звук raven.";
     }
 
     [RelayCommand]
@@ -198,7 +198,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         LanternSoundImportResult result = await _mainWindowViewModel.ImportCustomLanternSoundAsync(
             selectedPath);
         SoundStatusMessage = result.Success
-            ? "Пользовательский звук сохранён внутри Lantern."
+            ? "Пользовательский звук сохранён внутри raven."
             : result.ErrorMessage;
         RefreshLanternSoundBindings();
     }
@@ -207,7 +207,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private void PreviewLanternSound()
     {
         SoundStatusMessage = _mainWindowViewModel.PreviewLanternSound()
-            ? "Воспроизводится текущий звук Lantern."
+            ? "Воспроизводится текущий звук raven."
             : "Не удалось воспроизвести звук; будет использован безопасный fallback.";
     }
 
@@ -215,7 +215,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private async Task RestoreDefaultLanternSound()
     {
         await _mainWindowViewModel.RestoreDefaultLanternSoundAsync();
-        SoundStatusMessage = "Стандартный звук Lantern восстановлен.";
+        SoundStatusMessage = "Стандартный звук raven восстановлен.";
     }
 
     internal void OpenAccount(ServiceInstance service) => _mainWindowViewModel.SelectService(service.Id);

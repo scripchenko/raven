@@ -1,12 +1,10 @@
 using System.Windows;
-using System.Windows.Media;
 using System.Windows.Shell;
 
 namespace UnifiedMessenger.App.Services.Tray;
 
 public sealed class WpfTaskbarActivityIndicator : ITaskbarActivityIndicator
 {
-    private static readonly ImageSource ActivityOverlay = CreateActivityOverlay();
     private Window? _window;
 
     public bool HasActivity { get; private set; }
@@ -37,18 +35,9 @@ public sealed class WpfTaskbarActivityIndicator : ITaskbarActivityIndicator
     {
         if (_window?.TaskbarItemInfo is TaskbarItemInfo taskbarItem)
         {
-            taskbarItem.Overlay = HasActivity ? ActivityOverlay : null;
+            // The final Raven hybrid mapping deliberately keeps the historical
+            // bracket unobstructed in icon-only Windows shell surfaces.
+            taskbarItem.Overlay = null;
         }
-    }
-
-    private static ImageSource CreateActivityOverlay()
-    {
-        GeometryDrawing drawing = new(
-            new SolidColorBrush(System.Windows.Media.Color.FromRgb(229, 57, 53)),
-            new System.Windows.Media.Pen(System.Windows.Media.Brushes.White, 1.5),
-            new EllipseGeometry(new System.Windows.Point(8, 8), 6.5, 6.5));
-        DrawingImage image = new(drawing);
-        image.Freeze();
-        return image;
     }
 }

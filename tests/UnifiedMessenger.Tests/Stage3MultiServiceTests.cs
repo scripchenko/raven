@@ -131,6 +131,120 @@ public sealed class Stage3MultiServiceTests
         viewModel.Initialize(settings);
 
         Assert.Equal(whatsapp.Id, viewModel.SelectedService?.Id);
+        Assert.Equal("https://web.whatsapp.com/", viewModel.SelectedService?.StartUrl);
+        Assert.Equal(whatsapp.ProfileName, viewModel.SelectedService?.ProfileName);
+    }
+
+    [Fact]
+    public void ServiceSwitch_IgnoresStaleErrorAndRetryRemainsOwnedBySelectedSession()
+    {
+        AppSettings settings = AppSettings.CreateDefault();
+        ServiceInstance telegram = ServiceInstanceManager.Add(settings, _catalog.Get(ServiceType.Telegram));
+        ServiceInstance whatsapp = ServiceInstanceManager.Add(settings, _catalog.Get(ServiceType.WhatsApp));
+        ServiceInstance max = ServiceInstanceManager.Add(settings, _catalog.Get(ServiceType.Max));
+        ServiceInstance vk = ServiceInstanceManager.Add(settings, _catalog.Get(ServiceType.VkMessenger));
+        StubSessionManager sessions = new();
+        settings.LastServiceId = telegram.Id;
+        using MainWindowViewModel viewModel = new(
+            _catalog,
+            sessions,
+            new ApplicationSettingsStore(new StubSettingsService()),
+            new ServiceActivityCoordinator(),
+            new StubWebNotificationCoordinator());
+        viewModel.Initialize(settings);
+
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems.Single(item => item.Id == whatsapp.Id);
+        sessions.RaiseState(
+            telegram.Id,
+            new WebViewSessionState(
+                WebViewSessionStatus.Offline,
+                false,
+                false,
+                "Нет подключения к интернету",
+                "Telegram не ответил вовремя.",
+                "Timeout"));
+
+        Assert.Equal(WebViewSessionStatus.Uninitialized, viewModel.WebViewStatus);
+        Assert.Null(viewModel.WebViewErrorMessage);
+        viewModel.RetryCommand.Execute(null);
+        Assert.Equal(0, sessions.RetryCalls);
+
+        sessions.RaiseState(
+            whatsapp.Id,
+            new WebViewSessionState(
+                WebViewSessionStatus.Offline,
+                false,
+                false,
+                "Нет подключения к интернету",
+                "WhatsApp не ответил вовремя.",
+                "Timeout"));
+
+        Assert.True(viewModel.HasWebViewError);
+        Assert.Equal("WhatsApp не ответил вовремя.", viewModel.WebViewErrorMessage);
+        viewModel.RetryCommand.Execute(null);
+        Assert.Equal(1, sessions.RetryCalls);
+
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems.Single(item => item.Id == max.Id);
+        sessions.RaiseState(
+            whatsapp.Id,
+            new WebViewSessionState(
+                WebViewSessionStatus.Failed,
+                false,
+                false,
+                "Ошибка загрузки WhatsApp",
+                "Не удалось загрузить WhatsApp.",
+                "ConnectionAborted"));
+
+        Assert.Equal(WebViewSessionStatus.Uninitialized, viewModel.WebViewStatus);
+        Assert.Null(viewModel.WebViewErrorMessage);
+        viewModel.RetryCommand.Execute(null);
+        Assert.Equal(1, sessions.RetryCalls);
+
+        sessions.RaiseState(
+            max.Id,
+            new WebViewSessionState(
+                WebViewSessionStatus.Offline,
+                false,
+                false,
+                "Нет подключения к интернету",
+                "MAX не ответил вовремя.",
+                "Timeout"));
+        Assert.Equal("MAX не ответил вовремя.", viewModel.WebViewErrorMessage);
+
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems.Single(item => item.Id == vk.Id);
+        sessions.RaiseState(
+            vk.Id,
+            new WebViewSessionState(
+                WebViewSessionStatus.Offline,
+                false,
+                false,
+                "Нет подключения к интернету",
+                "VK Мессенджер не ответил вовремя.",
+                "Timeout"));
+        Assert.Equal("VK Мессенджер не ответил вовремя.", viewModel.WebViewErrorMessage);
+
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems.Single(item => item.Id == telegram.Id);
+        sessions.RaiseState(
+            telegram.Id,
+            new WebViewSessionState(
+                WebViewSessionStatus.Offline,
+                false,
+                false,
+                "Нет подключения к интернету",
+                "Telegram не ответил вовремя.",
+                "Timeout"));
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems.Single(item => item.Id == whatsapp.Id);
+        sessions.RaiseState(
+            telegram.Id,
+            new WebViewSessionState(
+                WebViewSessionStatus.Offline,
+                false,
+                false,
+                "Нет подключения к интернету",
+                "Telegram не ответил вовремя.",
+                "Timeout"));
+        Assert.Equal(WebViewSessionStatus.Uninitialized, viewModel.WebViewStatus);
+        Assert.Null(viewModel.WebViewErrorMessage);
     }
 
     [Fact]
@@ -318,11 +432,7 @@ public sealed class Stage3MultiServiceTests
 
     private sealed class StubSessionManager : IWebViewSessionManager
     {
-        public event EventHandler<WebViewSessionStateChangedEventArgs>? StateChanged
-        {
-            add { }
-            remove { }
-        }
+        public event EventHandler<WebViewSessionStateChangedEventArgs>? StateChanged;
 
         public event EventHandler<WebViewSessionRecreationRequestedEventArgs>? SessionRecreationRequested
         {
@@ -351,6 +461,7 @@ public sealed class Stage3MultiServiceTests
         public bool IsShutdownStarted { get; private set; }
         public int InitializedSessionCount => 0;
         public int InitialNavigationCount => 0;
+        public int RetryCalls { get; private set; }
         public Task<bool> InitializeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, bool activate, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<bool> PrimeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
@@ -365,7 +476,7 @@ public sealed class Stage3MultiServiceTests
         public void GoForward() { }
         public void Reload() { }
         public void NavigateHome() { }
-        public void Retry() { }
+        public void Retry() => RetryCalls++;
         public void ReleaseSession(Guid serviceInstanceId) { }
         public Task ReleaseSessionAsync(Guid serviceInstanceId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
@@ -373,6 +484,9 @@ public sealed class Stage3MultiServiceTests
         public void ReleaseAllSessions() { }
         public void BeginShutdown() => IsShutdownStarted = true;
         public void Dispose() { }
+
+        public void RaiseState(Guid? serviceInstanceId, WebViewSessionState state) =>
+            StateChanged?.Invoke(this, new WebViewSessionStateChangedEventArgs(serviceInstanceId, state));
     }
 
     private sealed class StubSettingsService : ISettingsService

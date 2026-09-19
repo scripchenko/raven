@@ -9,7 +9,7 @@ public static class BrandIconResources
     {
         Uri resourceUri = new(BrandIdentity.SystemIconPackUri, UriKind.Absolute);
         System.Windows.Resources.StreamResourceInfo resource = System.Windows.Application.GetResourceStream(resourceUri)
-            ?? throw new InvalidOperationException("Lantern system icon resource is unavailable.");
+            ?? throw new InvalidOperationException("raven system icon resource is unavailable.");
 
         using Stream stream = resource.Stream;
         using Icon source = new(stream);

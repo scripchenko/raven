@@ -193,13 +193,16 @@ public partial class MainWindow : Window
     {
         _mailInboxViewModel.SetDetailHostActive(false);
         bool shutdownStarted = Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished;
-        if (_exitCoordinator.ShouldHideToTray(_viewModel.CloseToTray, shutdownStarted))
+        bool closeToTray = ApplicationRuntimeAccessibility.CanHideMainWindow(
+            _viewModel.CloseToTray,
+            _trayCoordinator.IsAvailable);
+        if (_exitCoordinator.ShouldHideToTray(closeToTray, shutdownStarted))
         {
             eventArgs.Cancel = true;
             Hide();
             _ = ShowTrayHintOnceAsync();
         }
-        else if (_exitCoordinator.ShouldRequestExitFromWindowClose(_viewModel.CloseToTray, shutdownStarted))
+        else if (_exitCoordinator.ShouldRequestExitFromWindowClose(closeToTray, shutdownStarted))
         {
             eventArgs.Cancel = true;
             _exitCoordinator.RequestExit();
@@ -459,6 +462,7 @@ public partial class MainWindow : Window
     {
         _mainWindowHandle = new WindowInteropHelper(this).Handle;
         _ = WindowsShellIdentity.TryApplyToWindow(_mainWindowHandle);
+        _ = NativeWindowCaption.TryHideBranding(_mainWindowHandle);
         _windowSource = HwndSource.FromHwnd(_mainWindowHandle);
         _windowSource?.AddHook(WindowMessageHook);
     }

@@ -116,7 +116,7 @@ internal sealed class GmailDraftService(
     IMailMimeMessageFactory mimeMessageFactory) : IGmailDraftService
 {
     private const string RichDraftWarning =
-        "Этот черновик содержит форматирование, которое Lantern не может сохранить без потерь. Откройте его в Gmail.";
+        "Этот черновик содержит форматирование, которое raven не может сохранить без потерь. Откройте его в Gmail.";
 
     public async Task<GmailDraftLoadResult> LoadAsync(
         MailAccount account,

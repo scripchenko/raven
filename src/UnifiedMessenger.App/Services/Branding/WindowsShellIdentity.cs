@@ -5,8 +5,8 @@ namespace UnifiedMessenger.App.Services.Branding;
 
 internal static class WindowsShellIdentity
 {
-    internal const string ApplicationUserModelId = "Scripchenko.Lantern";
-    internal const string SystemIconRelativePath = @"Assets\Branding\lantern_system.ico";
+    internal const string ApplicationUserModelId = "Scripchenko.Raven";
+    internal const string RelaunchIconRelativePath = @"Assets\Branding\lantern_system.ico";
 
     private static readonly Guid PropertyStoreInterfaceId =
         new("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
@@ -75,7 +75,7 @@ internal static class WindowsShellIdentity
     internal static string CreateRelaunchIconResource(string applicationDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationDirectory);
-        string iconPath = Path.GetFullPath(Path.Combine(applicationDirectory, SystemIconRelativePath));
+        string iconPath = Path.GetFullPath(Path.Combine(applicationDirectory, RelaunchIconRelativePath));
         return $"{iconPath},0";
     }
 
@@ -87,10 +87,7 @@ internal static class WindowsShellIdentity
 
     private static bool TrySetString(IPropertyStore propertyStore, PropertyKey propertyKey, string value)
     {
-        if (InitPropVariantFromString(value, out PropVariant propertyValue) < 0)
-        {
-            return false;
-        }
+        PropVariant propertyValue = PropVariant.CreateString(value);
 
         try
         {
@@ -98,7 +95,7 @@ internal static class WindowsShellIdentity
         }
         finally
         {
-            _ = PropVariantClear(ref propertyValue);
+            propertyValue.Dispose();
         }
     }
 
@@ -117,14 +114,6 @@ internal static class WindowsShellIdentity
         IntPtr windowHandle,
         ref Guid interfaceId,
         [MarshalAs(UnmanagedType.Interface)] out IPropertyStore propertyStore);
-
-    [DllImport("propsys.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
-    private static extern int InitPropVariantFromString(
-        [MarshalAs(UnmanagedType.LPWStr)] string value,
-        out PropVariant propertyValue);
-
-    [DllImport("ole32.dll", PreserveSig = true)]
-    private static extern int PropVariantClear(ref PropVariant propertyValue);
 
     [ComImport]
     [Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
@@ -155,12 +144,36 @@ internal static class WindowsShellIdentity
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 16)]
-    private struct PropVariant
+    private struct PropVariant : IDisposable
     {
+        private const ushort UnicodeString = 31;
+
         [FieldOffset(0)]
         private ushort _variantType;
 
         [FieldOffset(8)]
         private IntPtr _pointerValue;
+
+        public static PropVariant CreateString(string value)
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            return new PropVariant
+            {
+                _variantType = UnicodeString,
+                _pointerValue = Marshal.StringToCoTaskMemUni(value)
+            };
+        }
+
+        public void Dispose()
+        {
+            if (_pointerValue == IntPtr.Zero)
+            {
+                return;
+            }
+
+            Marshal.FreeCoTaskMem(_pointerValue);
+            _pointerValue = IntPtr.Zero;
+            _variantType = 0;
+        }
     }
 }

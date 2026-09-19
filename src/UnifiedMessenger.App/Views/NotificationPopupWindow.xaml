@@ -31,7 +31,7 @@
         </DrawingImage>
 
         <Style x:Key="PopupSourceIconStyle" TargetType="Image">
-            <Setter Property="Source" Value="/UnifiedMessenger.App;component/Assets/Branding/lantern_icon.png" />
+            <Setter Property="Source" Value="/UnifiedMessenger.App;component/Assets/Branding/raven_icon.png" />
             <Setter Property="Stretch" Value="Uniform" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="RenderOptions.BitmapScalingMode" Value="HighQuality" />
