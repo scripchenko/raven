@@ -6,6 +6,8 @@ using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
 using UnifiedMessenger.App.Services.Notifications;
+using UnifiedMessenger.App.Services.Updates;
+using UnifiedMessenger.App.Services.WebView;
 
 namespace UnifiedMessenger.App.ViewModels;
 
@@ -14,16 +16,22 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly MainWindowViewModel _mainWindowViewModel;
     private readonly IBuiltInServiceCatalog _serviceCatalog;
     private readonly INotificationSoundFilePicker? _notificationSoundFilePicker;
+    private readonly IUpdateCheckService? _updateCheckService;
+    private readonly IExternalBrowserService? _externalBrowserService;
     private bool _disposed;
 
     public SettingsViewModel(
         MainWindowViewModel mainWindowViewModel,
         IBuiltInServiceCatalog serviceCatalog,
-        INotificationSoundFilePicker? notificationSoundFilePicker = null)
+        INotificationSoundFilePicker? notificationSoundFilePicker = null,
+        IUpdateCheckService? updateCheckService = null,
+        IExternalBrowserService? externalBrowserService = null)
     {
         _mainWindowViewModel = mainWindowViewModel;
         _serviceCatalog = serviceCatalog;
         _notificationSoundFilePicker = notificationSoundFilePicker;
+        _updateCheckService = updateCheckService;
+        _externalBrowserService = externalBrowserService;
         Sections =
         [
             new(SettingsSection.General, "Общие", "⚙"),
@@ -84,13 +92,62 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public bool IsCustomLanternSound => !IsDefaultLanternSound;
     public string LanternCustomSoundDisplayName =>
         _mainWindowViewModel.LanternCustomSoundDisplayName ?? "Файл не выбран";
-    public string ApplicationVersion => CreateApplicationVersion();
+    public string ApplicationVersion => $"raven {(_updateCheckService?.CurrentVersion ?? new Version(0, 1, 0)).ToString(3)}";
+    public string? UpdateStatusMessage { get; private set; }
+    public bool HasUpdateAvailable { get; private set; }
+    public string SupportLabel => "Поддержка: @dscripchenko";
+    public Uri SupportUri => new("https://t.me/dscripchenko");
 
     [ObservableProperty]
     private string? _soundStatusMessage;
 
     [RelayCommand]
     private void Close() => _mainWindowViewModel.CloseSettingsCommand.Execute(null);
+
+    [RelayCommand]
+    private async Task CheckForUpdates()
+    {
+        if (_updateCheckService is null)
+        {
+            UpdateStatusMessage = "Не удалось проверить обновления.";
+            OnPropertyChanged(nameof(UpdateStatusMessage));
+            return;
+        }
+
+        UpdateCheckResult result = await _updateCheckService.CheckAsync(manual: true);
+        HasUpdateAvailable = result.Status is UpdateCheckStatus.UpdateAvailable;
+        UpdateStatusMessage = result.Status switch
+        {
+            UpdateCheckStatus.UpdateAvailable when result.Release is not null
+                => $"Доступна новая версия raven {result.Release.Version}",
+            UpdateCheckStatus.Current => "Установлена актуальная версия raven.",
+            UpdateCheckStatus.NoRelease => "Публичный релиз пока не опубликован.",
+            _ => "Не удалось проверить обновления."
+        };
+        OnPropertyChanged(nameof(HasUpdateAvailable));
+        OnPropertyChanged(nameof(UpdateStatusMessage));
+        if (result.Release is not null)
+        {
+            _pendingReleaseUrl = result.Release.ReleaseUrl;
+        }
+        OnPropertyChanged(nameof(CanDownloadUpdate));
+        DownloadUpdateCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanDownloadUpdate))]
+    private void DownloadUpdate()
+    {
+        if (_pendingReleaseUrl is not null)
+        {
+            _externalBrowserService?.TryOpen(_pendingReleaseUrl);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenSupport() => _externalBrowserService?.TryOpen(SupportUri);
+
+    public bool CanDownloadUpdate => HasUpdateAvailable && _pendingReleaseUrl is not null;
+    private Uri? _pendingReleaseUrl;
 
     public void RequestAddMailAccount() => AddMailAccountRequested?.Invoke(this, EventArgs.Empty);
 
@@ -385,14 +442,6 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         {
             account.NotifyOrderChanged();
         }
-    }
-
-    private static string CreateApplicationVersion()
-    {
-        Version? version = typeof(SettingsViewModel).Assembly.GetName().Version;
-        return version is null
-            ? "1.0.0"
-            : $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
     }
 
     private async Task SetServiceSoundModeAsync(

@@ -535,9 +535,23 @@
                                 <Button Margin="0,22,0,0"
                                         HorizontalAlignment="Left"
                                         Content="Проверить обновления"
-                                        IsEnabled="False"
+                                        Command="{Binding CheckForUpdatesCommand}"
+                                        Style="{StaticResource CompactButtonStyle}" />
+                                <TextBlock Margin="0,10,0,0"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding UpdateStatusMessage}"
+                                           TextWrapping="Wrap" />
+                                <Button Margin="0,8,0,0"
+                                        HorizontalAlignment="Left"
+                                        Content="Скачать"
+                                        Command="{Binding DownloadUpdateCommand}"
                                         Style="{StaticResource CompactButtonStyle}"
-                                        ToolTip="Обновления будут добавлены на отдельном этапе" />
+                                        Visibility="{Binding CanDownloadUpdate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <Button Margin="0,8,0,0"
+                                        HorizontalAlignment="Left"
+                                        Content="Поддержка: @dscripchenko"
+                                        Command="{Binding OpenSupportCommand}"
+                                        Style="{StaticResource CompactButtonStyle}" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

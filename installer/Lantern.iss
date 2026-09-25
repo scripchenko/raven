@@ -2,8 +2,13 @@
 #define AppVersion "0.1.0"
 #define AppExeName "UnifiedMessenger.App.exe"
 #define AppUserModelId "Scripchenko.Raven"
+#define DesktopIconName "raven"
+#ifndef PublishDir
 #define PublishDir "..\artifacts\publish\win-x64"
+#endif
+#ifndef InstallerOutputDir
 #define InstallerOutputDir "..\artifacts\installer"
+#endif
 
 [Setup]
 AppId={{DFAA0CC1-B19F-4506-8124-750955F1C946}
@@ -41,15 +46,17 @@ ChangesEnvironment=no
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
-[Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"
-Name: "{autodesktop}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon
+Name: "{autodesktop}\{#DesktopIconName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven_desktop.ico"; AppUserModelID: "{#AppUserModelId}"
+
+[InstallDelete]
+Type: files; Name: "{autodesktop}\UnifiedMessenger.lnk"
+Type: files; Name: "{autodesktop}\UnifiedMessenger.App.lnk"
+Type: files; Name: "{autodesktop}\Lantern.lnk"
 
 [Code]
 const

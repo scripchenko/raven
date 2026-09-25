@@ -136,6 +136,42 @@ public sealed class Stage3MultiServiceTests
     }
 
     [Fact]
+    public void HomeNavigationPreservesSelectedServiceAndSessionThenReturnsToSameAccount()
+    {
+        AppSettings settings = AppSettings.CreateDefault();
+        ServiceInstance telegram = ServiceInstanceManager.Add(settings, _catalog.Get(ServiceType.Telegram));
+        StubSessionManager sessions = new();
+        using MainWindowViewModel viewModel = new(
+            _catalog,
+            sessions,
+            new ApplicationSettingsStore(new StubSettingsService()),
+            new ServiceActivityCoordinator(),
+            new StubWebNotificationCoordinator());
+        viewModel.Initialize(settings);
+        NavigationAccountItem selected = Assert.Single(viewModel.NavigationItems);
+
+        viewModel.OpenHomeCommand.Execute(null);
+
+        Assert.True(viewModel.IsHomeSelected);
+        Assert.Same(selected, viewModel.SelectedNavigationItem);
+        Assert.Same(telegram, viewModel.SelectedService);
+        Assert.Null(viewModel.HeaderNavigationItem);
+        Assert.False(viewModel.HasSelectedAccount);
+        Assert.False(viewModel.HasActiveWebView);
+        Assert.Equal(0, sessions.ReleaseSessionCount);
+
+        viewModel.ActivateNavigationItem(selected);
+
+        Assert.False(viewModel.IsHomeSelected);
+        Assert.Same(selected, viewModel.SelectedNavigationItem);
+        Assert.Same(telegram, viewModel.SelectedService);
+        Assert.Same(selected, viewModel.HeaderNavigationItem);
+        Assert.True(viewModel.HasSelectedAccount);
+        Assert.True(viewModel.HasActiveWebView);
+        Assert.Equal(0, sessions.ReleaseSessionCount);
+    }
+
+    [Fact]
     public void ServiceSwitch_IgnoresStaleErrorAndRetryRemainsOwnedBySelectedSession()
     {
         AppSettings settings = AppSettings.CreateDefault();
@@ -462,6 +498,7 @@ public sealed class Stage3MultiServiceTests
         public int InitializedSessionCount => 0;
         public int InitialNavigationCount => 0;
         public int RetryCalls { get; private set; }
+        public int ReleaseSessionCount { get; private set; }
         public Task<bool> InitializeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, bool activate, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<bool> PrimeAsync(IntPtr parentWindow, Rectangle bounds, ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
@@ -477,8 +514,12 @@ public sealed class Stage3MultiServiceTests
         public void Reload() { }
         public void NavigateHome() { }
         public void Retry() => RetryCalls++;
-        public void ReleaseSession(Guid serviceInstanceId) { }
-        public Task ReleaseSessionAsync(Guid serviceInstanceId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void ReleaseSession(Guid serviceInstanceId) => ReleaseSessionCount++;
+        public Task ReleaseSessionAsync(Guid serviceInstanceId, CancellationToken cancellationToken = default)
+        {
+            ReleaseSession(serviceInstanceId);
+            return Task.CompletedTask;
+        }
         public Task<bool> ClearProfileAsync(ServiceInstance serviceInstance, CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
         public void ReleaseAllSessions() { }

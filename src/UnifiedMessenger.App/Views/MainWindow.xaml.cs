@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
@@ -318,6 +319,7 @@ public partial class MainWindow : Window
         }
 
         if (eventArgs.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen)
+            || eventArgs.PropertyName == nameof(MainWindowViewModel.IsHomeSelected)
             || eventArgs.PropertyName == nameof(MainWindowViewModel.WebViewStatus))
         {
             UpdateDirectSurface(moveFocus: false);
@@ -696,6 +698,18 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AccountsList_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs eventArgs)
+    {
+        if (!_viewModel.IsHomeSelected
+            || ItemsControl.ContainerFromElement(AccountsList, eventArgs.OriginalSource as DependencyObject)
+                is not ListBoxItem { DataContext: NavigationAccountItem item })
+        {
+            return;
+        }
+
+        _viewModel.ActivateNavigationItem(item);
+    }
+
     private async void OnSettingsChangeMailAccountPasswordRequested(
         object? sender,
         SettingsMailAccountEventArgs eventArgs)
@@ -1032,6 +1046,7 @@ public partial class MainWindow : Window
         bool isVisible = IsVisible
             && WindowState != WindowState.Minimized
             && !_viewModel.IsSettingsOpen
+            && !_viewModel.IsHomeSelected
             && !_viewModel.HasWebViewError
             && _viewModel.SelectedService?.IsEnabled == true;
 
@@ -1280,7 +1295,7 @@ public partial class MainWindow : Window
             IsVisible,
             WindowState == WindowState.Minimized,
             _viewModel.IsSettingsOpen,
-            _viewModel.SelectedService is not null,
+            _viewModel.IsHomeSelected || _viewModel.SelectedService is not null,
             _mailInboxViewModel.ActiveAccount is { IsEnabled: true }
                 && _viewModel.SelectedMailAccount?.Id == _mailInboxViewModel.ActiveAccount.Id,
             _mailInboxViewModel.IsComposeOpen || !_mailInboxViewModel.IsMessageDetailVisible
@@ -1293,6 +1308,7 @@ public partial class MainWindow : Window
             && IsActive
             && WindowState != WindowState.Minimized
             && !_viewModel.IsSettingsOpen
+            && !_viewModel.IsHomeSelected
             && _viewModel.SelectedService is null
             && _viewModel.SelectedMailAccount?.Id == _mailInboxViewModel.ActiveAccount?.Id;
         _mailInboxViewModel.SetDetailHostActive(isActive);

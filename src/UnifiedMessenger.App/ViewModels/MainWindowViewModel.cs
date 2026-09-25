@@ -65,6 +65,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(WindowTitle))]
     [NotifyPropertyChangedFor(nameof(SelectedAccountDisplayName))]
     [NotifyPropertyChangedFor(nameof(SelectedAccountLabel))]
+    [NotifyPropertyChangedFor(nameof(HeaderNavigationItem))]
     private NavigationAccountItem? _selectedNavigationItem;
 
     [ObservableProperty]
@@ -119,13 +120,25 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(WindowTitle))]
     private bool _isSettingsOpen;
 
-    public bool HasSelectedService => SelectedService is not null;
-    public bool HasSelectedAccount => SelectedNavigationItem is not null;
-    public bool HasActiveWebView => SelectedService?.IsEnabled == true;
-    public bool IsSelectedServiceDisabled => SelectedService is { IsEnabled: false };
-    public bool IsMailSelected => SelectedMailAccount is not null;
-    public bool IsSelectedMailAccountEnabled => SelectedMailAccount is { IsEnabled: true };
-    public bool IsSelectedMailAccountDisabled => SelectedMailAccount is { IsEnabled: false };
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedAccount))]
+    [NotifyPropertyChangedFor(nameof(HasSelectedService))]
+    [NotifyPropertyChangedFor(nameof(HasActiveWebView))]
+    [NotifyPropertyChangedFor(nameof(IsSelectedServiceDisabled))]
+    [NotifyPropertyChangedFor(nameof(IsMailSelected))]
+    [NotifyPropertyChangedFor(nameof(IsSelectedMailAccountEnabled))]
+    [NotifyPropertyChangedFor(nameof(IsSelectedMailAccountDisabled))]
+    [NotifyPropertyChangedFor(nameof(SelectedAccountDisplayName))]
+    [NotifyPropertyChangedFor(nameof(HeaderNavigationItem))]
+    private bool _isHomeSelected;
+
+    public bool HasSelectedService => !IsHomeSelected && SelectedService is not null;
+    public bool HasSelectedAccount => !IsHomeSelected && SelectedNavigationItem is not null;
+    public bool HasActiveWebView => !IsHomeSelected && SelectedService?.IsEnabled == true;
+    public bool IsSelectedServiceDisabled => !IsHomeSelected && SelectedService is { IsEnabled: false };
+    public bool IsMailSelected => !IsHomeSelected && SelectedMailAccount is not null;
+    public bool IsSelectedMailAccountEnabled => !IsHomeSelected && SelectedMailAccount is { IsEnabled: true };
+    public bool IsSelectedMailAccountDisabled => !IsHomeSelected && SelectedMailAccount is { IsEnabled: false };
     public bool HasWebViewError => HasActiveWebView
         && WebViewStatus is WebViewSessionStatus.Offline or WebViewSessionStatus.Failed;
     public bool IsWebViewInitializing => HasActiveWebView
@@ -155,7 +168,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ? BrandIdentity.CreateWindowTitle("Настройки")
         : BrandIdentity.CreateWindowTitle(SelectedNavigationItem?.DisplayName);
 
-    public string SelectedAccountDisplayName => SelectedNavigationItem?.DisplayName ?? BrandIdentity.DisplayName;
+    public string SelectedAccountDisplayName => IsHomeSelected
+        ? BrandIdentity.DisplayName
+        : SelectedNavigationItem?.DisplayName ?? BrandIdentity.DisplayName;
+    public NavigationAccountItem? HeaderNavigationItem => IsHomeSelected ? null : SelectedNavigationItem;
 
     public string SelectedAccountLabel => SelectedMailAccount is MailAccount mailAccount
         ? $"{GetMailProviderDisplayName(mailAccount.Provider)} · Почта"
@@ -388,6 +404,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         if (service is not null)
         {
             SelectedNavigationItem = NavigationItems.First(item => item.Id == service.Id);
+            IsHomeSelected = false;
             IsSettingsOpen = false;
         }
     }
@@ -399,13 +416,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         if (item is not null)
         {
             SelectedNavigationItem = item;
+            IsHomeSelected = false;
             IsSettingsOpen = false;
         }
     }
 
     public void MarkSelectedServiceViewed(bool isMainWindowVisible, bool isMainWindowActive)
     {
-        if (IsSettingsOpen || !isMainWindowVisible || !isMainWindowActive)
+        if (IsSettingsOpen || IsHomeSelected || !isMainWindowVisible || !isMainWindowActive)
         {
             return;
         }
@@ -736,6 +754,23 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private void OpenSettings() => IsSettingsOpen = true;
 
     [RelayCommand]
+    private void OpenHome()
+    {
+        IsSettingsOpen = false;
+        IsHomeSelected = true;
+    }
+
+    public void ActivateNavigationItem(NavigationAccountItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        NavigationAccountItem target = NavigationItems.FirstOrDefault(candidate => candidate.Id == item.Id)
+            ?? throw new InvalidOperationException("The navigation account is no longer available.");
+        SelectedNavigationItem = target;
+        IsHomeSelected = false;
+        IsSettingsOpen = false;
+    }
+
+    [RelayCommand]
     private void CloseSettings() => IsSettingsOpen = false;
 
     private bool CanUseSelectedWebView() => HasActiveWebView;
@@ -781,6 +816,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         if (_isSynchronizingSelection)
         {
             return;
+        }
+
+        if (value is not null)
+        {
+            IsHomeSelected = false;
         }
 
         _isSynchronizingSelection = true;

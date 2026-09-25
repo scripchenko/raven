@@ -187,11 +187,15 @@ Assert-FileExists -Path (Join-Path $PublishDirectory 'hostpolicy.dll') -Label 'S
 Assert-FileExists -Path (Join-Path $PublishDirectory 'coreclr.dll') -Label 'Self-contained CoreCLR'
 Assert-FileExists -Path (Join-Path $PublishDirectory 'PresentationFramework.dll') -Label 'WPF runtime'
 $publishedRavenIconPath = Join-Path $PublishDirectory 'Assets\Branding\raven.ico'
+$publishedDesktopIconPath = Join-Path $PublishDirectory 'Assets\Branding\raven_desktop.ico'
 $sourceRavenIconPath = Join-Path $RepositoryRoot 'src\UnifiedMessenger.App\Assets\Branding\raven.ico'
+$sourceDesktopIconPath = Join-Path $RepositoryRoot 'src\UnifiedMessenger.App\Assets\Branding\raven_desktop.ico'
 $publishedBracketSystemIconPath = Join-Path $PublishDirectory 'Assets\Branding\lantern_system.ico'
 $sourceBracketSystemIconPath = Join-Path $RepositoryRoot 'src\UnifiedMessenger.App\Assets\Branding\lantern_system.ico'
 Assert-FileExists -Path $publishedRavenIconPath -Label 'Published raven icon'
+Assert-FileExists -Path $publishedDesktopIconPath -Label 'Published raven desktop icon'
 Assert-FileExists -Path $sourceRavenIconPath -Label 'Source raven icon'
+Assert-FileExists -Path $sourceDesktopIconPath -Label 'Source raven desktop icon'
 Assert-FileExists -Path $publishedBracketSystemIconPath -Label 'Published historical bracket system icon'
 Assert-FileExists -Path $sourceBracketSystemIconPath -Label 'Source historical bracket system icon'
 Assert-FileExists -Path $InstallerScriptPath -Label 'Installer script'
@@ -199,6 +203,10 @@ Assert-FileExists -Path $InstallerScriptPath -Label 'Installer script'
 if ((Get-FileHash -LiteralPath $publishedRavenIconPath -Algorithm SHA256).Hash -ne
     (Get-FileHash -LiteralPath $sourceRavenIconPath -Algorithm SHA256).Hash) {
     throw 'Published raven icon не совпадает с исходным branding resource.'
+}
+if ((Get-FileHash -LiteralPath $publishedDesktopIconPath -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath $sourceDesktopIconPath -Algorithm SHA256).Hash) {
+    throw 'Published raven desktop icon не совпадает с исходным branding resource.'
 }
 
 if ((Get-FileHash -LiteralPath $publishedBracketSystemIconPath -Algorithm SHA256).Hash -ne
@@ -340,9 +348,15 @@ if (-not $installerScript.Contains($startMenuShortcutIconFragment, [StringCompar
     throw 'Start Menu shortcut должен использовать full raven app icon.'
 }
 
-$desktopShortcutIconFragment = 'Name: "{autodesktop}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon'
+$desktopShortcutIconFragment = 'Name: "{autodesktop}\{#DesktopIconName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven_desktop.ico"; AppUserModelID: "{#AppUserModelId}"'
 if (-not $installerScript.Contains($desktopShortcutIconFragment, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Desktop shortcut должен использовать full raven icon.'
+}
+
+foreach ($legacyShortcut in @('UnifiedMessenger.lnk', 'UnifiedMessenger.App.lnk', 'Lantern.lnk')) {
+    if (-not $installerScript.Contains("Type: files; Name: `"{autodesktop}\$legacyShortcut`"", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Installer должен удалить legacy Desktop shortcut: $legacyShortcut"
+    }
 }
 
 if (-not $installerScript.Contains('#define AppUserModelId "Scripchenko.Raven"', [StringComparison]::Ordinal)) {

@@ -278,5 +278,9 @@ Write-MultiResolutionIcon `
     -SourcePath (Join-Path $sourceDirectory 'raven_system.png') `
     -DestinationPath (Join-Path $outputDirectory 'raven_system.ico') `
     -CropTransparentMargins
+Write-MultiResolutionIcon `
+    -SourcePath (Join-Path $sourceDirectory 'raven_icon.png') `
+    -DestinationPath (Join-Path $outputDirectory 'raven_desktop.ico') `
+    -CropTransparentMargins
 
 Write-Host "Generated Raven branding resources in $outputDirectory"

@@ -52,6 +52,10 @@
         <RelativePath>Assets\Branding\raven.ico</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </ResolvedFileToPublish>
+      <ResolvedFileToPublish Include="$(MSBuildProjectDirectory)\Assets\Branding\raven_desktop.ico">
+        <RelativePath>Assets\Branding\raven_desktop.ico</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
       <ResolvedFileToPublish Include="$(MSBuildProjectDirectory)\Assets\Branding\lantern_system.ico">
         <RelativePath>Assets\Branding\lantern_system.ico</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

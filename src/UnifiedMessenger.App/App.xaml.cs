@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using UnifiedMessenger.App.Models;
@@ -10,6 +11,7 @@ using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
 using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
+using UnifiedMessenger.App.Services.Updates;
 using UnifiedMessenger.App.ViewModels;
 using UnifiedMessenger.App.Views;
 
@@ -30,15 +32,19 @@ public partial class App : System.Windows.Application
     private CancellationTokenSource? _startupMailUnreadCancellation;
     private IMailBackgroundPollingMonitor? _mailBackgroundPollingMonitor;
     private Task? _mailBackgroundStartupTask;
+    private CancellationTokenSource? _updateCheckCancellation;
+    private Task? _updateCheckTask;
     private StartupWindow? _startupWindow;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        string startupStage = "initialize-shell-identity";
         _ = WindowsShellIdentity.TryInitializeProcess();
         base.OnStartup(e);
 
         try
         {
+            startupStage = "acquire-single-instance";
             _singleInstanceCoordinator = new ApplicationSingleInstanceCoordinator();
             if (!_singleInstanceCoordinator.TryAcquirePrimaryInstance())
             {
@@ -51,6 +57,7 @@ public partial class App : System.Windows.Application
             _singleInstanceCoordinator.ActivationRequested += OnSingleInstanceActivationRequested;
             _singleInstanceCoordinator.StartActivationListener();
 
+            startupStage = "configure-services";
             _serviceProvider = ConfigureServices();
             ISettingsService settingsService = _serviceProvider.GetRequiredService<ISettingsService>();
             _settingsStore = _serviceProvider.GetRequiredService<IApplicationSettingsStore>();
@@ -58,26 +65,34 @@ public partial class App : System.Windows.Application
             _exitCoordinator = _serviceProvider.GetRequiredService<IApplicationExitCoordinator>();
             _exitCoordinator.ExitRequested += OnExplicitExitRequested;
 
+            startupStage = "load-settings";
             SettingsLoadResult loadResult = await settingsService.LoadAsync();
+            startupStage = "initialize-settings-store";
             _settingsStore.Initialize(loadResult.Settings);
+            startupStage = "process-pending-webview-profile-deletions";
             IWebViewProfileCleaner profileCleaner = _serviceProvider.GetRequiredService<IWebViewProfileCleaner>();
             bool pendingProfilesChanged = await profileCleaner.ProcessPendingDeletionsAsync(loadResult.Settings);
             if (loadResult.WasMigrated || pendingProfilesChanged)
             {
+                startupStage = "persist-migrated-settings";
                 await _settingsStore.SaveAsync();
             }
 
+            startupStage = "initialize-main-view-model";
             _mainWindowViewModel.Initialize(loadResult.Settings);
+            startupStage = "restore-managed-imap-drafts";
             MailComposeViewModel compose = _serviceProvider.GetRequiredService<MailComposeViewModel>();
             await compose.RestoreManagedImapDraftRecoveriesAsync(loadResult.Settings.MailAccounts);
             _webViewSessionManager = _serviceProvider.GetRequiredService<IWebViewSessionManager>();
             _webViewEventCoordinator = _serviceProvider.GetRequiredService<IWebViewEventCoordinator>();
 
+            startupStage = "construct-main-window";
             MainWindow window = _serviceProvider.GetRequiredService<MainWindow>();
             MainWindow = window;
             WebViewRuntimeInfo runtimeInfo = window.DetectRuntimeForStartup();
             if (runtimeInfo.IsAvailable)
             {
+                startupStage = "prime-webview-services";
                 _startupCancellation = new CancellationTokenSource();
                 _startupWindow = new StartupWindow();
                 _startupWindow.ExitRequested += OnStartupExitRequested;
@@ -102,14 +117,17 @@ public partial class App : System.Windows.Application
                 }
 
                 window.CompleteStartupPrime();
+                startupStage = "show-main-window";
                 window.Show();
                 CloseStartupWindow();
             }
             else
             {
+                startupStage = "show-main-window-without-webview-runtime";
                 window.Show();
             }
 
+            startupStage = "initialize-tray";
             _activationRequests.SetTarget(DispatchActivationRequest);
             _trayCoordinator = _serviceProvider.GetRequiredService<IApplicationTrayCoordinator>();
             try
@@ -136,7 +154,10 @@ public partial class App : System.Windows.Application
                 throw new InvalidOperationException("No usable application window or tray entry point is available.");
             }
 
+            startupStage = "start-mail-background-services";
             StartMailBackgroundServices(loadResult.Settings.MailAccounts);
+            startupStage = "schedule-automatic-update-check";
+            ScheduleAutomaticUpdateCheck();
 
             if (!string.IsNullOrWhiteSpace(loadResult.WarningMessage))
             {
@@ -150,6 +171,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception exception)
         {
+            StartupDiagnostics.TryWriteFailure(startupStage, exception);
             System.Windows.MessageBox.Show(
                 $"Не удалось запустить {BrandIdentity.DisplayName}.\n\n{exception.Message}",
                 "Ошибка запуска",
@@ -177,6 +199,7 @@ public partial class App : System.Windows.Application
         _trayCoordinator = null;
         CloseStartupWindow();
         BeginMailBackgroundShutdown();
+        _updateCheckCancellation?.Cancel();
         _startupCancellation?.Dispose();
         _startupCancellation = null;
         _serviceProvider?.Dispose();
@@ -184,6 +207,9 @@ public partial class App : System.Windows.Application
         _startupMailUnreadCancellation = null;
         _mailBackgroundPollingMonitor = null;
         _mailBackgroundStartupTask = null;
+        _updateCheckCancellation?.Dispose();
+        _updateCheckCancellation = null;
+        _updateCheckTask = null;
         _singleInstanceCoordinator?.Dispose();
         _singleInstanceCoordinator = null;
         base.OnExit(e);
@@ -317,6 +343,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IServiceActivityCoordinator, ServiceActivityCoordinator>();
         services.AddSingleton<IUiDispatcher, WpfUiDispatcher>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<HttpClient>();
+        services.AddSingleton<IRavenReleaseClient, GitHubReleaseClient>();
+        services.AddSingleton<IUpdateCheckService, UpdateCheckService>();
         services.AddSingleton<IMailCredentialProtector, DpapiMailCredentialProtector>();
         services.AddSingleton<IMailCredentialStore, FileMailCredentialStore>();
         services.AddSingleton<IManagedImapDraftRecoveryStore, FileManagedImapDraftRecoveryStore>();
@@ -486,6 +515,58 @@ public partial class App : System.Windows.Application
     {
         _startupMailUnreadCancellation?.Cancel();
         _mailBackgroundPollingMonitor?.BeginShutdown();
+    }
+
+    private void StartAutomaticUpdateCheck()
+    {
+        _updateCheckCancellation = new CancellationTokenSource();
+        IUpdateCheckService service = _serviceProvider!.GetRequiredService<IUpdateCheckService>();
+        _updateCheckTask = RunAutomaticUpdateCheckAsync(service, _updateCheckCancellation.Token);
+    }
+
+    private void ScheduleAutomaticUpdateCheck()
+    {
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            () =>
+            {
+                try
+                {
+                    StartAutomaticUpdateCheck();
+                }
+                catch (Exception)
+                {
+                    // Update infrastructure is optional and cannot affect startup.
+                }
+            });
+    }
+
+    private async Task RunAutomaticUpdateCheckAsync(IUpdateCheckService service, CancellationToken cancellationToken)
+    {
+        try
+        {
+            UpdateCheckResult result = await service.CheckAsync(manual: false, cancellationToken);
+            if (result.Status is not UpdateCheckStatus.UpdateAvailable || result.Release is null
+                || _exitCoordinator?.IsExiting == true)
+            {
+                return;
+            }
+
+            INotificationPopupService popup = _serviceProvider!.GetRequiredService<INotificationPopupService>();
+            _ = popup.TryShow(new NotificationPopupDisplayModel(
+                Guid.NewGuid(),
+                Guid.Empty,
+                BrandIdentity.DisplayName,
+                $"Доступна новая версия raven {result.Release.Version}",
+                "Откройте «О программе», чтобы скачать обновление."));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            // Automatic checks are deliberately silent and never affect startup.
+        }
     }
 
     private async Task StopMailBackgroundServicesAsync()

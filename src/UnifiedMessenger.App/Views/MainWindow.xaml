@@ -137,6 +137,16 @@
                     </StackPanel>
 
                     <Grid Grid.Column="1" Margin="10,0" VerticalAlignment="Center">
+                        <Grid.Style>
+                            <Style TargetType="Grid">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsHomeSelected}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Style>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -144,7 +154,7 @@
                         <Image Width="20"
                                Height="20"
                                Margin="0,0,8,0"
-                               Source="{Binding SelectedNavigationItem, Converter={StaticResource BrandIconConverter}}"
+                               Source="{Binding HeaderNavigationItem, Converter={StaticResource BrandIconConverter}}"
                                Stretch="Uniform"
                                SnapsToDevicePixels="True"
                                UseLayoutRounding="True" />
@@ -189,10 +199,19 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border Width="48"
-                        Height="48"
-                        Background="Transparent"
-                        ToolTip="raven">
+                <Button AutomationProperties.AutomationId="OpenHomeButton"
+                        Command="{Binding OpenHomeCommand}"
+                        ToolTip="Главная">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource SidebarActionButtonStyle}">
+                            <Setter Property="Margin" Value="0" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsHomeSelected}" Value="True">
+                                    <Setter Property="Background" Value="{DynamicResource SidebarHoverBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
                     <Image Width="40"
                            Height="40"
                            Source="/UnifiedMessenger.App;component/Assets/Branding/lantern_sidebar.png"
@@ -200,13 +219,14 @@
                            RenderOptions.BitmapScalingMode="HighQuality"
                            SnapsToDevicePixels="True"
                            UseLayoutRounding="True" />
-                </Border>
+                </Button>
 
                 <ListBox x:Name="AccountsList"
                          Grid.Row="1"
                          Margin="0,14"
                          ItemsSource="{Binding NavigationItems}"
                          SelectedItem="{Binding SelectedNavigationItem}"
+                         PreviewMouseLeftButtonDown="AccountsList_PreviewMouseLeftButtonDown"
                          Background="Transparent"
                          BorderThickness="0"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -265,10 +285,14 @@
                                 </Grid>
                             </Border>
                             <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True" />
+                                        <Condition Binding="{Binding DataContext.IsHomeSelected, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
+                                    </MultiDataTrigger.Conditions>
                                     <Setter TargetName="ServiceTile" Property="Background" Value="{DynamicResource SidebarHoverBrush}" />
                                     <Setter TargetName="ServiceTile" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-                                </DataTrigger>
+                                </MultiDataTrigger>
                                 <DataTrigger Binding="{Binding IsEnabled}" Value="False">
                                     <Setter TargetName="ServiceTile" Property="Opacity" Value="0.42" />
                                 </DataTrigger>
@@ -309,7 +333,7 @@
                         <Style TargetType="views:WelcomeView">
                             <Setter Property="Visibility" Value="Collapsed" />
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedNavigationItem}" Value="{x:Null}">
+                                <DataTrigger Binding="{Binding IsHomeSelected}" Value="True">
                                     <Setter Property="Visibility" Value="Visible" />
                                 </DataTrigger>
                             </Style.Triggers>
@@ -321,7 +345,18 @@
                       Background="White"
                       Visibility="{Binding HasActiveWebView, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
-                <views:MailInboxView x:Name="MailInboxContent" />
+                <views:MailInboxView x:Name="MailInboxContent">
+                    <views:MailInboxView.Style>
+                        <Style TargetType="views:MailInboxView">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding DataContext.IsHomeSelected, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </views:MailInboxView.Style>
+                </views:MailInboxView>
 
                 <Border Margin="36"
                         Padding="38"

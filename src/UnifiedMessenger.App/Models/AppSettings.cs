@@ -24,6 +24,8 @@ public sealed class AppSettings
     public List<ServiceInstance> Services { get; set; } = [];
     public List<MailAccount> MailAccounts { get; set; } = [];
     public List<string> PendingProfileDeletions { get; set; } = [];
+    public DateTimeOffset? LastAutomaticUpdateCheckUtc { get; set; }
+    public string? LastNotifiedUpdateVersion { get; set; }
 
     public static AppSettings CreateDefault() => new();
 }

@@ -48,6 +48,8 @@ public sealed class LanternBrandingTests
         Assert.Contains("Background=\"Transparent\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Assets/Branding/raven_logo.png", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Assets/Branding/lantern_sidebar.png", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"OpenHomeButton\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding OpenHomeCommand}\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Width=\"40\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Height=\"40\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("RenderOptions.BitmapScalingMode=\"HighQuality\"", mainWindow, StringComparison.Ordinal);
@@ -55,7 +57,10 @@ public sealed class LanternBrandingTests
             1,
             mainWindow.Split("Assets/Branding/lantern_system.ico", StringSplitOptions.None).Length - 1);
         Assert.Contains("Assets/Branding/raven_logo.png", startupWindow, StringComparison.Ordinal);
-        Assert.Contains("Assets/Branding/raven_tile.png", welcomeView, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"WelcomeView\"", welcomeView, StringComparison.Ordinal);
+        Assert.Contains("raven — мессенджеры и почта в одном окне.", welcomeView, StringComparison.Ordinal);
+        Assert.Contains("Поддержка: @dscripchenko", welcomeView, StringComparison.Ordinal);
+        Assert.DoesNotContain("raven_tile.png", welcomeView, StringComparison.Ordinal);
         Assert.Contains("Assets/Branding/raven_icon.png", notificationPopup, StringComparison.Ordinal);
         Assert.Contains("taskbarItem.Overlay = null", taskbarIndicator, StringComparison.Ordinal);
         Assert.Contains("Title=\"\"", mainWindow, StringComparison.Ordinal);
@@ -65,6 +70,24 @@ public sealed class LanternBrandingTests
         Assert.DoesNotContain("ActivityOverlay", taskbarIndicator, StringComparison.Ordinal);
         Assert.DoesNotContain("lantern_taskbar.ico", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("lantern_taskbar.ico", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePresentation_UsesWindowHomeStateAndDoesNotRenderADuplicateHeaderBrand()
+    {
+        string mainWindow = File.ReadAllText(FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Views", "MainWindow.xaml"));
+
+        Assert.Contains("<views:WelcomeView>", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Binding=\"{Binding IsHomeSelected}\" Value=\"True\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains(
+            "Binding=\"{Binding DataContext.IsHomeSelected, RelativeSource={RelativeSource AncestorType=Window}}\" Value=\"True\"",
+            mainWindow,
+            StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Visibility\" Value=\"Collapsed\" />", mainWindow, StringComparison.Ordinal);
+        Assert.Equal(
+            1,
+            mainWindow.Split("Assets/Branding/raven_logo.png", StringSplitOptions.None).Length - 1);
     }
 
     [Fact]
@@ -129,12 +152,43 @@ public sealed class LanternBrandingTests
     }
 
     [Fact]
-    public void RavenDesktopShortcutIcon_ContainsRequiredMultiResolutionFrames()
+    public void RavenStartMenuShortcutIcon_ContainsRequiredMultiResolutionFrames()
     {
         string path = FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Assets", "Branding", "raven.ico");
 
         Assert.True(ReadIconSizes(path).IsSupersetOf([16, 24, 32, 48, 64, 128, 256]));
+    }
+
+    [Fact]
+    public void RavenDesktopShortcutIcon_IsDedicatedAndContainsRequiredMultiResolutionFrames()
+    {
+        string desktopPath = FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Assets", "Branding", "raven_desktop.ico");
+        string nativePath = FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Assets", "Branding", "lantern_system.ico");
+
+        Assert.True(ReadIconSizes(desktopPath).IsSupersetOf([16, 20, 24, 32, 40, 48, 64, 128, 256]));
+        Assert.NotEqual(
+            Convert.ToHexString(File.ReadAllBytes(nativePath)),
+            Convert.ToHexString(File.ReadAllBytes(desktopPath)));
+    }
+
+    [Fact]
+    public void RavenDesktopShortcutIcon_UsesATightlyCroppedDesktopPresentation()
+    {
+        string path = FindRepositoryFile(
+            "src", "UnifiedMessenger.App", "Assets", "Branding", "raven_desktop.ico");
+        using System.Drawing.Icon icon = new(path, 128, 128);
+        using System.Drawing.Bitmap bitmap = icon.ToBitmap();
+        System.Drawing.Rectangle visibleBounds = GetVisibleBounds(bitmap, alphaThreshold: 8);
+
+        Assert.InRange(visibleBounds.Width, 122, 128);
+        Assert.InRange(visibleBounds.Height, 92, 104);
+        Assert.InRange(visibleBounds.Left, 0, 4);
+        Assert.InRange(bitmap.Width - visibleBounds.Right, 0, 4);
+        Assert.InRange(visibleBounds.Top, 10, 20);
+        Assert.InRange(bitmap.Height - visibleBounds.Bottom, 10, 20);
     }
 
     [Theory]

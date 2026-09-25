@@ -90,24 +90,26 @@ public sealed class Stage8PackagingTests
     }
 
     [Fact]
-    public void RavenDesktopShortcutIcon_IsPublishedWithoutWpfResourceClassification()
+    public void RavenShortcutIcons_ArePublishedWithoutWpfResourceClassification()
     {
         XDocument project = XDocument.Load(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "UnifiedMessenger.App.csproj"));
-        const string iconPath = "Assets\\Branding\\raven.ico";
+        foreach ((string iconPath, string projectPath) in new[]
+                 {
+                     ("Assets\\Branding\\raven.ico", "$(MSBuildProjectDirectory)\\Assets\\Branding\\raven.ico"),
+                     ("Assets\\Branding\\raven_desktop.ico", "$(MSBuildProjectDirectory)\\Assets\\Branding\\raven_desktop.ico")
+                 })
+        {
+            Assert.DoesNotContain(project.Descendants("Resource"), item =>
+                string.Equals((string?)item.Attribute("Include"), iconPath, StringComparison.Ordinal));
+            Assert.DoesNotContain(project.Descendants("Content"), item =>
+                string.Equals((string?)item.Attribute("Include"), iconPath, StringComparison.Ordinal));
 
-        Assert.DoesNotContain(project.Descendants("Resource"), item =>
-            string.Equals((string?)item.Attribute("Include"), iconPath, StringComparison.Ordinal));
-        Assert.DoesNotContain(project.Descendants("Content"), item =>
-            string.Equals((string?)item.Attribute("Include"), iconPath, StringComparison.Ordinal));
-
-        XElement publishItem = Assert.Single(project.Descendants("ResolvedFileToPublish"), item =>
-            string.Equals(
-                (string?)item.Attribute("Include"),
-                "$(MSBuildProjectDirectory)\\Assets\\Branding\\raven.ico",
-                StringComparison.Ordinal));
-        Assert.Equal(iconPath, publishItem.Element("RelativePath")?.Value);
-        Assert.Equal("PreserveNewest", publishItem.Element("CopyToPublishDirectory")?.Value);
+            XElement publishItem = Assert.Single(project.Descendants("ResolvedFileToPublish"), item =>
+                string.Equals((string?)item.Attribute("Include"), projectPath, StringComparison.Ordinal));
+            Assert.Equal(iconPath, publishItem.Element("RelativePath")?.Value);
+            Assert.Equal("PreserveNewest", publishItem.Element("CopyToPublishDirectory")?.Value);
+        }
     }
 
     [Fact]
@@ -148,7 +150,7 @@ public sealed class Stage8PackagingTests
     }
 
     [Fact]
-    public void Installer_CreatesStartMenuAndUncheckedDesktopShortcut()
+    public void Installer_CreatesExplicitRavenStartMenuAndDesktopShortcuts()
     {
         string installer = ReadInstallerScript();
 
@@ -157,15 +159,10 @@ public sealed class Stage8PackagingTests
             installer,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Name: \"desktopicon\"; Description: \"{cm:CreateDesktopIcon}\";",
+            "Name: \"{autodesktop}\\{#DesktopIconName}\"; Filename: \"{app}\\{#AppExeName}\";",
             installer,
             StringComparison.Ordinal);
-        Assert.Contains("Flags: unchecked", installer, StringComparison.Ordinal);
-        Assert.Contains(
-            "Name: \"{autodesktop}\\raven\"; Filename: \"{app}\\{#AppExeName}\";",
-            installer,
-            StringComparison.Ordinal);
-        Assert.Contains("Tasks: desktopicon", installer, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Tasks]", installer, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -182,7 +179,7 @@ public sealed class Stage8PackagingTests
             installer,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Name: \"{autodesktop}\\raven\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven.ico\"; AppUserModelID: \"{#AppUserModelId}\"; Tasks: desktopicon",
+            "Name: \"{autodesktop}\\{#DesktopIconName}\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven_desktop.ico\"; AppUserModelID: \"{#AppUserModelId}\"",
             installer,
             StringComparison.Ordinal);
         Assert.Contains("SetupIconFile={#PublishDir}\\Assets\\Branding\\raven.ico", installer, StringComparison.Ordinal);
@@ -196,6 +193,18 @@ public sealed class Stage8PackagingTests
         Assert.Contains("RenderOptions.BitmapScalingMode=\"HighQuality\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Title=\"\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.Name=\"raven\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("raven_desktop.ico", installer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_RemovesOnlyKnownLegacyDesktopShortcutsBeforeCreatingRavenShortcut()
+    {
+        string installer = ReadInstallerScript();
+
+        Assert.Contains("Type: files; Name: \"{autodesktop}\\UnifiedMessenger.lnk\"", installer, StringComparison.Ordinal);
+        Assert.Contains("Type: files; Name: \"{autodesktop}\\UnifiedMessenger.App.lnk\"", installer, StringComparison.Ordinal);
+        Assert.Contains("Type: files; Name: \"{autodesktop}\\Lantern.lnk\"", installer, StringComparison.Ordinal);
+        Assert.DoesNotContain("{autodesktop}\\*.lnk", installer, StringComparison.Ordinal);
     }
 
     [Fact]

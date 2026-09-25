@@ -3,84 +3,39 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             AutomationProperties.AutomationId="WelcomeView"
              mc:Ignorable="d"
              d:DesignHeight="640"
              d:DesignWidth="960">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Margin="48">
-            <Border MaxWidth="820"
-                    Padding="48"
+        <Grid Margin="48,72">
+            <Border MaxWidth="680"
+                    Padding="44"
                     HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
+                    VerticalAlignment="Top"
                     Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource DividerBrush}"
                     BorderThickness="1"
                     CornerRadius="24">
                 <StackPanel>
-                    <Image Width="72"
-                           Height="72"
-                           HorizontalAlignment="Center"
-                           Source="/UnifiedMessenger.App;component/Assets/Branding/raven_tile.png"
-                           Stretch="Uniform"
-                           SnapsToDevicePixels="True"
-                           UseLayoutRounding="True" />
-
-                    <TextBlock Margin="0,24,0,8"
+                    <TextBlock Margin="0,0,0,12"
                                HorizontalAlignment="Center"
-                               FontSize="30"
+                               FontSize="26"
                                FontWeight="SemiBold"
-                               Text="Добро пожаловать в raven" />
+                               Text="raven — мессенджеры и почта в одном окне." />
                     <TextBlock MaxWidth="620"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="Добавляйте Telegram, WhatsApp, MAX и VK Мессенджер кнопкой «+». Каждый аккаунт открывается в отдельном сохраняемом профиле WebView2."
+                               Text="Чтобы начать, откройте Настройки и добавьте нужные аккаунты."
                                TextAlignment="Center"
                                TextWrapping="Wrap" />
 
-                    <ItemsControl Margin="0,32,0,0" ItemsSource="{Binding AvailableServices}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel HorizontalAlignment="Center" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Width="126"
-                                        Margin="6"
-                                        Padding="12"
-                                        Background="{DynamicResource WindowBackgroundBrush}"
-                                        CornerRadius="14">
-                                    <StackPanel>
-                                        <Border Width="38"
-                                                Height="38"
-                                                HorizontalAlignment="Center"
-                                                Background="{DynamicResource AccentSoftBrush}"
-                                                CornerRadius="11">
-                                            <TextBlock HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"
-                                                       FontWeight="Bold"
-                                                       Foreground="{DynamicResource AccentBrush}"
-                                                       Text="{Binding Glyph}" />
-                                        </Border>
-                                        <TextBlock Margin="0,8,0,0"
-                                                   HorizontalAlignment="Center"
-                                                   FontSize="12"
-                                                   Text="{Binding DisplayName}"
-                                                   TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <Button Margin="0,18,0,0"
+                            HorizontalAlignment="Center"
+                            Content="Поддержка: @dscripchenko"
+                            Click="Support_Click"
+                            Padding="16,8" />
 
-                    <Border Margin="0,30,0,0"
-                            Padding="16,12"
-                            Background="{DynamicResource AccentSoftBrush}"
-                            CornerRadius="12">
-                        <TextBlock Foreground="{DynamicResource TextPrimaryBrush}"
-                                   Text="Этап 3 · несколько сервисов и независимые аккаунты"
-                                   TextAlignment="Center" />
-                    </Border>
                 </StackPanel>
             </Border>
         </Grid>
