@@ -1,18 +1,11 @@
-# Gmail OAuth development configuration
+# Gmail OAuth: конфигурация для разработки
 
-raven uses the Google OAuth 2.0 authorization-code flow for a **Desktop app** client.
-Authorization opens in the system browser and returns to a one-shot IPv4 loopback listener at
-`http://127.0.0.1:<random-port>/oauth2/callback/`.
+raven использует Google OAuth 2.0 authorization-code flow для Desktop application. Вход открывается в системном браузере, ответ принимается одноразовым локальным listener на `http://127.0.0.1:<random-port>/oauth2/callback/`.
 
-The downloaded Google Desktop client configuration is local-only and must be stored at:
+Конфигурация клиента читается из `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. Это локальный Google JSON с объектом `installed`, полями `client_id` и `client_secret`. Его, коды авторизации и токены нельзя коммитить. Исторический `credentials.example.json` в Git history был только placeholder; он не подходит для реального входа.
 
-`%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`
+Новое подключение Gmail в текущем коде запрашивает `https://www.googleapis.com/auth/gmail.modify`. Для старых credential с `gmail.readonly` предусмотрен запрос расширенного доступа, когда операция этого требует. Scope `gmail.send` отдельно не запрашивается текущим потоком. Фактический запрос и согласие всегда нужно сверять с текущим кодом и экраном Google перед выпуском новой версии.
 
-This file, authorization codes, tokens, and DPAPI credential blobs must never be committed. The
-application requests only `https://www.googleapis.com/auth/gmail.readonly`. Refresh tokens and the
-client metadata required to refresh them are stored as a typed credential protected with Windows
-DPAPI `CurrentUser`; access tokens remain in memory.
+Refresh credential и метаданные, нужные для его обновления, хранятся как типизированная запись под защитой Windows DPAPI `CurrentUser`. Access token остаётся в памяти. Конфигурация Desktop OAuth client не входит в installer и не шифруется приложением.
 
-For an External OAuth consent screen with publishing status **Testing**, Google normally issues a
-refresh token that expires after seven days when Gmail scopes are requested. This is a Google
-testing-mode limitation rather than an application credential-storage failure.
+Пользовательские шаги описаны в [gmail-setup.md](gmail-setup.md).

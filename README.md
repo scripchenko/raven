@@ -1,142 +1,63 @@
 # raven
 
-raven — экспериментальное лёгкое Windows-приложение, которое должно объединить Telegram, WhatsApp, MAX, VK Мессенджер и Gmail в одном окне. Веб-мессенджеры будут использовать официальные сайты в Microsoft Edge WebView2. Gmail будет отдельным модулем на Gmail API с OAuth 2.0 в системном браузере.
+[Русская версия](README.ru.md)
 
-> Проект находится в экспериментальной разработке. Не используйте его как единственный способ доступа к важным аккаунтам.
+raven is a Windows desktop app that brings messaging services and email accounts into one window.
 
-## Текущий статус
+## Supported services
 
-Этапы 1–4 находятся в `main`. В текущей рабочей ветке реализуется **этап 5 — встроенные настройки приложения**:
+| Messaging through the official web app | Email |
+| --- | --- |
+| Telegram, WhatsApp, MAX, VK | Gmail, Yandex Mail, Mail.ru, other IMAP/SMTP accounts |
 
-- решение на .NET 10 с WPF-приложением и xUnit-тестами;
-- MVVM на `CommunityToolkit.Mvvm` и контейнер зависимостей;
-- модели настроек и экземпляров сервисов;
-- единый каталог адресов и разрешённых доменов;
-- главное окно, левая панель и экран приветствия;
-- атомарное JSON-хранилище с восстановлением после повреждения;
-- Telegram, WhatsApp, MAX и VK Мессенджер на официальных веб-адресах;
-- несколько аккаунтов одного сервиса с независимыми `ServiceInstance`;
-- общий `%LOCALAPPDATA%\UnifiedMessenger\WebView2` и отдельный профиль `service-{guid}` для каждого аккаунта;
-- сохранение авторизации средствами стандартного профиля WebView2;
-- ленивое создание WebView2 при первом выборе аккаунта;
-- добавление, переименование, включение, отключение, сортировка и подтверждаемое удаление аккаунтов;
-- восстановление порядка и последнего выбранного аккаунта;
-- безопасная очистка только удаляемого профиля с отложенным повтором для занятых файлов;
-- безопасная навигация, внешние ссылки в системном браузере и блокировка неконтролируемых popup-окон;
-- проверка Evergreen Runtime, состояния загрузки и ошибок, однократное восстановление после сбоя процесса.
-- один постоянный значок в системном трее с командами открытия, «Не беспокоить» и выхода;
-- закрытие главного окна в трей с однократной подсказкой и корректный явный выход;
-- глобальный режим «Не беспокоить» (`Ctrl+Shift+M`) и отключение уведомлений отдельного аккаунта;
-- best-effort badge по начальному счётчику в заголовке страницы и точка активности по факту web-уведомления;
-- отдельное сохраняемое решение о разрешении web-уведомлений для каждого аккаунта;
-- собственные WPF-popup: до трёх одновременно, очередь не более 20 ожидающих элементов и безопасное отключение preview.
-- встроенный экран настроек с разделами «Общие», «Уведомления», «Аккаунты» и «О программе»;
-- мгновенное применение настроек без отдельной кнопки сохранения;
-- доступ к одному экрану настроек из левой панели и контекстного меню tray;
-- управление существующими аккаунтами через операции Stage 3 без изменения `ServiceInstance.Id` и `ProfileName`.
+Messaging services run in Microsoft Edge WebView2. Gmail uses the Gmail API and Google OAuth in the system browser. Yandex Mail, Mail.ru and other supported mail servers use IMAP and SMTP. Available folders and mailbox actions depend on the mail server.
 
-Все адреса и отдельные списки разрешённых доменов находятся в централизованном каталоге. Gmail, автозапуск, updater, темы и режимы управления памятью в этап 5 не входят.
+## What raven offers
 
-## Поддерживаемые сервисы
+- Multiple accounts, including multiple accounts for one service. Each web messenger account has its own persistent WebView2 profile.
+- Mail folders, message reading, attachments, compose, replies and forwarding. Supported providers also offer server search, mailbox actions and saved drafts.
+- Desktop notifications, account notification controls, a global Do Not Disturb mode and sound settings. Supported messenger notifications can use the bundled or a custom sound.
+- A system tray icon, Home page and Settings. Closing the window can keep raven running in the tray.
+- A check for newer stable GitHub releases. Updates are downloaded and installed by the user.
+- External links opened in the system browser, subject to the app's navigation policy.
 
-| Сервис | Планируемый способ подключения | Статус |
-|---|---|---|
-| Telegram | официальный `web.telegram.org` в WebView2 | реализовано, этап 2/3 |
-| WhatsApp | официальный `web.whatsapp.com` в WebView2 | реализовано, этап 3 |
-| MAX | официальный `web.max.ru` в WebView2 | реализовано, этап 3 |
-| VK Мессенджер | официальный `web.vk.me` в WebView2 | реализовано, этап 3 |
-| Gmail | Gmail API и OAuth 2.0 в системном браузере | этап 7 |
+## Install raven v0.1.0
 
-## Системные требования
+Download `raven-Setup-0.1.0-win-x64.exe` from the [official v0.1.0 release](https://github.com/scripchenko/raven/releases/tag/v0.1.0).
 
-- Windows 10 версии 1809 или новее либо Windows 11, x64;
-- .NET 10 SDK для разработки;
-- установленный Microsoft Edge WebView2 Evergreen Runtime для этапов с веб-сервисами.
+User requirements:
 
-WebView2 Runtime не включается целиком в portable-публикацию. Приложение проверяет его наличие перед созданием контрола и при отсутствии предлагает открыть официальную страницу установки Evergreen Runtime.
+- Windows 10 version 1809 or newer, or Windows 11, on x64 hardware;
+- Microsoft Edge WebView2 Evergreen Runtime.
 
-## Сборка, запуск и тесты
+The installer contains a self-contained .NET 10 build. Users do **not** need the .NET SDK or a separately installed .NET runtime. WebView2 Evergreen is a separate requirement and is not bundled.
 
-Из корня репозитория:
+The v0.1.0 installer is unsigned. Windows SmartScreen may warn on first launch. Check that the installer came from the official repository release; do not disable SmartScreen globally.
+
+Gmail additionally requires a local Google Desktop OAuth client configuration supplied by the user; it is not bundled with the installer. See [Gmail setup](docs/gmail-setup.md) before adding a Gmail account. Other mail providers may require an app password and provider-specific IMAP/SMTP access.
+
+## Local data and privacy
+
+Settings and account identifiers live under `%APPDATA%\UnifiedMessenger`. WebView2 profiles, protected mail credentials and other local app data live under `%LOCALAPPDATA%\UnifiedMessenger`. These historical directory names are retained for compatibility with existing accounts and sessions.
+
+Web messenger pages are displayed by WebView2. To provide email features, raven retrieves and processes mail content through Gmail API or IMAP/SMTP. Mail credentials are protected with Windows DPAPI for the current user; WebView2 maintains its own session data. See [Security and privacy](docs/security.md) for details.
+
+## Support
+
+[Contact @dscripchenko on Telegram](https://t.me/dscripchenko).
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## Development
+
+Building from source requires the .NET 10 SDK. Building the Windows installer also requires Inno Setup 6. From the repository root:
 
 ```powershell
-dotnet restore
-dotnet build -c Release
-dotnet run --project src/UnifiedMessenger.App/UnifiedMessenger.App.csproj
-dotnet test -c Release --no-restore
-```
-
-Или через сценарии:
-
-```powershell
-./scripts/build.ps1
-./scripts/test.ps1
-./scripts/publish-win-x64.ps1
+dotnet build UnifiedMessenger.sln --configuration Release
+dotnet test UnifiedMessenger.sln --configuration Release
 ./scripts/build-windows-package.ps1
 ```
 
-Публикация создаётся в `artifacts/publish/win-x64` как folder-based self-contained `win-x64`, без trimming и без single-file упаковки. Полная инструкция по publish и Inno Setup installer: [docs/windows-distribution.md](docs/windows-distribution.md).
-
-## Данные приложения
-
-Настройки пользователя:
-
-```text
-%APPDATA%\UnifiedMessenger\settings.json
-```
-
-Локальные данные, будущие профили WebView2 и логи:
-
-```text
-%LOCALAPPDATA%\UnifiedMessenger\
-├── WebView2\
-└── Logs\
-```
-
-Настройки имеют `schemaVersion`. Схема 3 сохраняет список, порядок, состояние, последний выбранный аккаунт, режим «Не беспокоить», заглушение, `ShowNotificationPreview` и решение о разрешении уведомлений каждого аккаунта, а также безопасную очередь удаления только уже удалённых профилей. `UnreadCount` и `HasUnreadActivity` являются только runtime-состоянием и в JSON не записываются. Запись выполняется через временный файл с проверкой JSON и заменой основного файла. Повреждённый файл перемещается рядом с исходным под именем `settings.corrupt-*.json`, после чего приложение запускается с безопасными значениями по умолчанию.
-
-## Режимы памяти
-
-Архитектура предусматривает три режима, которые будут подключены на отдельном будущем этапе:
-
-- **Обычный** — уже открытые сервисы остаются загруженными;
-- **Экономный** — режим по умолчанию, невидимые сервисы смогут приостанавливаться после периода бездействия;
-- **Минимальный** — одновременно существует только один WebView2.
-
-Фактическое потребление памяти зависит от числа открытых сервисов и сложности их веб-страниц. Фиксированный объём памяти не гарантируется.
-
-## Трей и уведомления
-
-Закрытие главного окна по умолчанию скрывает его в область уведомлений; если `CloseToTray` выключен, крестик запускает тот же штатный полный lifecycle, что и команда «Выход». Режим «Не беспокоить» и заглушение аккаунта подавляют новые popup-уведомления, но не отключают сервис и не очищают его индикатор активности. До трёх собственных popup показываются в правом нижнем углу без активации окна; `ShowBalloonTip` остаётся резервным вариантом. Общая новая активность дополнительно отображается красным overlay на кнопке приложения в панели задач.
-
-Telegram, WhatsApp и MAX по умолчанию используют общий bundled-звук raven по событию `NotificationReceived`; для каждого типа сервиса можно выбрать режим «raven» или «Родной». В режиме raven встроенный web-звук при необходимости отключается пользователем вручную. Приложение не меняет web-настройки и не заглушает WebView2, поэтому voice messages, calls, video и другое media продолжают работать независимо.
-
-Явный Exit идемпотентен: контекстное меню и `NotifyIcon` удаляются до освобождения WebView2, новые UI-события блокируются, popup и их таймеры закрываются, а настройки сохраняются асинхронно до вызова `Application.Shutdown`. Крестик скрывает окно при `CloseToTray=true` и запускает полный штатный выход при `CloseToTray=false`.
-
-## Настройки
-
-Экран настроек открывается внутри `MainWindow` кнопкой внизу левой панели или пунктом «Настройки» в меню tray. Открытие и закрытие экрана не удаляет и не перезагружает созданные WebView2-сессии. Переключатели `CloseToTray`, уведомлений, DND, preview и звуков raven применяются и атомарно сохраняются сразу. Раздел аккаунтов переиспользует операции переименования, включения, заглушения, сортировки и безопасного удаления профиля, уже используемые главным окном.
-
-Bundled `lantern_notification.wav` является стандартным звуком raven; историческое имя файла сохранено как внутренний совместимый идентификатор. Пользовательский WAV/MP3/WMA сначала проверяется штатным Windows-декодером, затем копируется в `%LOCALAPPDATA%\UnifiedMessenger\Sounds`; в настройках сохраняются только безопасное имя внутренней копии и отображаемое имя файла. Потерянная или недекодируемая custom-копия автоматически даёт fallback к bundled-звуку. Почтовый notification sound сохраняет прежний системный Windows playback path.
-
-WebView2 web-уведомления не гарантируют полноценный push: они возможны только от уже созданных и работающих WebView2-сессий, поэтому сервис, который ни разу не открывали, может не иметь активной сессии. Если установленный Runtime не поддерживает типизированное событие `NotificationReceived`, приложение продолжает работу с `DocumentTitleChanged` как fallback. Счётчик по заголовку является best-effort, а сайты могут изменить его формат.
-
-Приложение не внедряет JavaScript, не анализирует DOM и не читает переписку. Заголовок и текст берутся только из типизированного `CoreWebView2.NotificationReceived`, удерживаются в памяти до завершения popup и никогда не сохраняются в настройках, журнале или истории. При `ShowNotificationPreview=false` UI получает только общий текст вида «Новое сообщение в Telegram».
-
-## Добавление сервиса
-
-Кнопка `+` открывает выбор Telegram, WhatsApp, MAX или VK Мессенджера и поле названия аккаунта. Вход выполняется пользователем самостоятельно на официальной странице. Приложение не вводит логин, пароль, код подтверждения и не сканирует QR-код за пользователя.
-
-Настройка Gmail описана отдельно: [docs/gmail-setup.md](docs/gmail-setup.md). Сам Gmail-модуль пока не реализован.
-
-## Безопасность и конфиденциальность
-
-- пароли и cookies не сохраняются приложением в JSON или собственной базе;
-- сообщения, контакты и письма не читаются через DOM;
-- разрешены только HTTPS-переходы на домены из каталога конкретного сервиса;
-- внешние ссылки должны открываться системным браузером;
-- реальные OAuth-секреты и токены запрещено добавлять в репозиторий;
-- Gmail будет авторизоваться только через системный браузер и официальный OAuth для desktop-приложения;
-- чувствительное содержимое не должно попадать в журналы.
-
-Подробнее: [docs/security.md](docs/security.md) и [docs/architecture.md](docs/architecture.md).
+The internal executable remains `UnifiedMessenger.App.exe`. See [architecture](docs/architecture.md), [Windows distribution](docs/windows-distribution.md) and [Gmail OAuth development setup](docs/gmail-oauth-development.md).

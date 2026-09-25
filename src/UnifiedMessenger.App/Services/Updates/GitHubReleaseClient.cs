@@ -7,8 +7,8 @@ namespace UnifiedMessenger.App.Services.Updates;
 
 public sealed class GitHubReleaseClient : IRavenReleaseClient
 {
-    public const string LatestReleaseEndpoint = "https://api.github.com/repos/scripchenko/Lantern/releases/latest";
-    public const string ReleasesPage = "https://github.com/scripchenko/Lantern/releases";
+    public const string LatestReleaseEndpoint = "https://api.github.com/repos/scripchenko/raven/releases/latest";
+    public const string ReleasesPage = "https://github.com/scripchenko/raven/releases";
     private readonly HttpClient _httpClient;
 
     public GitHubReleaseClient(HttpClient httpClient)

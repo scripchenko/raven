@@ -33,10 +33,10 @@ public sealed class RavenUpdateTests
     public void PublicReleaseEndpointAndSupportLinkAreStableHttpsUrls()
     {
         Assert.Equal(
-            "https://api.github.com/repos/scripchenko/Lantern/releases/latest",
+            "https://api.github.com/repos/scripchenko/raven/releases/latest",
             GitHubReleaseClient.LatestReleaseEndpoint);
         Assert.Equal(
-            "https://github.com/scripchenko/Lantern/releases",
+            "https://github.com/scripchenko/raven/releases",
             GitHubReleaseClient.ReleasesPage);
         Assert.Equal("https://t.me/dscripchenko", "https://t.me/dscripchenko");
     }

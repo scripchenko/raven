@@ -13,6 +13,8 @@
 dotnet-sdk*/
 temp-sdk/
 *.dmp
+*.tmp
+*.temp
 
 # Credentials, private keys, OAuth data and local environment files
 credentials.json
@@ -27,6 +29,7 @@ google-oauth*.json
 .env.*
 !.env.example
 secrets.json
+**/auth.json
 appsettings.*.local.json
 *.key
 *.pem
@@ -44,8 +47,14 @@ appsettings.*.local.json
 *.user.config
 **/Logs/
 *.log
+**/Diagnostics/
 **/WebView2/
+**/WV2Profile/
+**/EBWebView/
 **/User Data/
+**/Session Storage/
+**/Local Storage/
+**/IndexedDB/
 **/Cookies
 **/Cookies-*
 **/Network/Cookies

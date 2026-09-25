@@ -1,4 +1,5 @@
-# Gmail module placeholder
+# Gmail implementation
 
-Gmail API and desktop OAuth integration are intentionally deferred to stage 7.
-Gmail will not authenticate inside WebView2.
+Gmail is implemented in the shared `Services/Mail` area through Gmail API, Desktop OAuth, mail read/send, mailbox management, server drafts, search and notification services. This directory name remains as a historical module boundary; it is not a description of an unimplemented feature.
+
+See [Gmail setup](../../../../docs/gmail-setup.md) and [architecture](../../../../docs/architecture.md).
