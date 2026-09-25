@@ -175,11 +175,11 @@ public sealed class Stage8PackagingTests
             "src", "UnifiedMessenger.App", "Views", "MainWindow.xaml"));
 
         Assert.Contains(
-            "Name: \"{autoprograms}\\raven\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven.ico\"; AppUserModelID: \"{#AppUserModelId}\"",
+            "Name: \"{autoprograms}\\raven\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven.ico\"",
             installer,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Name: \"{autodesktop}\\{#DesktopIconName}\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven_desktop.ico\"; AppUserModelID: \"{#AppUserModelId}\"",
+            "Name: \"{autodesktop}\\{#DesktopIconName}\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven_desktop.ico\"",
             installer,
             StringComparison.Ordinal);
         Assert.Contains("SetupIconFile={#PublishDir}\\Assets\\Branding\\raven.ico", installer, StringComparison.Ordinal);
@@ -224,10 +224,7 @@ public sealed class Stage8PackagingTests
         Assert.DoesNotContain("InitPropVariantFromString", shellIdentity, StringComparison.Ordinal);
 
         string installer = ReadInstallerScript();
-        Assert.Contains($"#define AppUserModelId \"{ShellAppUserModelId}\"", installer, StringComparison.Ordinal);
-        Assert.Equal(
-            2,
-            installer.Split($"AppUserModelID: \"{{#AppUserModelId}}\"", StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("AppUserModelID:", installer, StringComparison.OrdinalIgnoreCase);
         Assert.Contains($"AppId={{{{{InstallerAppId}}}", installer, StringComparison.Ordinal);
     }
 

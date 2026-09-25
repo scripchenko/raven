@@ -343,12 +343,12 @@ if ($fileSources.Count -ne 1 -or $fileSources[0].Groups[1].Value -ne '{#PublishD
     throw 'Installer должен иметь единственный payload Source из {#PublishDir}\*.'
 }
 
-$startMenuShortcutIconFragment = 'Name: "{autoprograms}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"'
+$startMenuShortcutIconFragment = 'Name: "{autoprograms}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"'
 if (-not $installerScript.Contains($startMenuShortcutIconFragment, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Start Menu shortcut должен использовать full raven app icon.'
 }
 
-$desktopShortcutIconFragment = 'Name: "{autodesktop}\{#DesktopIconName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven_desktop.ico"; AppUserModelID: "{#AppUserModelId}"'
+$desktopShortcutIconFragment = 'Name: "{autodesktop}\{#DesktopIconName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven_desktop.ico"'
 if (-not $installerScript.Contains($desktopShortcutIconFragment, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Desktop shortcut должен использовать full raven icon.'
 }
@@ -359,8 +359,8 @@ foreach ($legacyShortcut in @('UnifiedMessenger.lnk', 'UnifiedMessenger.App.lnk'
     }
 }
 
-if (-not $installerScript.Contains('#define AppUserModelId "Scripchenko.Raven"', [StringComparison]::Ordinal)) {
-    throw 'Installer shortcuts должны использовать Raven AppUserModelID.'
+if ($installerScript.Contains('AppUserModelID:', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Shortcut AppUserModelID перекрывает bracket relaunch icon в taskbar.'
 }
 
 $forbiddenInstallerFragments = @(

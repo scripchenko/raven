@@ -1,7 +1,6 @@
 #define AppName "raven"
 #define AppVersion "0.1.0"
 #define AppExeName "UnifiedMessenger.App.exe"
-#define AppUserModelId "Scripchenko.Raven"
 #define DesktopIconName "raven"
 #ifndef PublishDir
 #define PublishDir "..\artifacts\publish\win-x64"
@@ -50,8 +49,9 @@ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"; AppUserModelID: "{#AppUserModelId}"
-Name: "{autodesktop}\{#DesktopIconName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven_desktop.ico"; AppUserModelID: "{#AppUserModelId}"
+; Keep shortcut icons as Raven crow; the window's explicit shell identity supplies the taskbar bracket.
+Name: "{autoprograms}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven.ico"
+Name: "{autodesktop}\{#DesktopIconName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven_desktop.ico"
 
 [InstallDelete]
 Type: files; Name: "{autodesktop}\UnifiedMessenger.lnk"
