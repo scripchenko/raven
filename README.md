@@ -59,13 +59,15 @@ The installer contains a self-contained .NET 10 build. Users do **not** need the
 
 raven v0.1.0 is unsigned. Windows SmartScreen may warn when launching the installer. Check that it came from the official repository release; do not disable SmartScreen globally.
 
+The project is preparing an application for free Open Source code signing through SignPath Foundation. Acceptance is not confirmed. See the [Code signing policy](CODE_SIGNING_POLICY.md).
+
 Gmail additionally requires a local Google Desktop OAuth client configuration supplied by the user; it is not bundled with the installer. See [Gmail setup](docs/gmail-setup.md) before adding a Gmail account. Other mail providers may require an app password and provider-specific IMAP/SMTP access.
 
 ## Privacy and security
 
 Settings and account identifiers live under `%APPDATA%\UnifiedMessenger`. WebView2 profiles, protected mail credentials and other local app data live under `%LOCALAPPDATA%\UnifiedMessenger`. These historical directory names are retained for compatibility with existing accounts and sessions.
 
-Web messenger pages are displayed by WebView2. To provide email features, raven retrieves and processes mail content through Gmail API or IMAP/SMTP. Mail credentials are protected with Windows DPAPI for the current user; WebView2 maintains its own session data. See [Security and privacy](docs/security.md) for details.
+Web messenger pages are displayed by WebView2. To provide email features, raven retrieves and processes mail content through Gmail API or IMAP/SMTP. Mail credentials are protected with Windows DPAPI for the current user; WebView2 maintains its own session data. See [Security and privacy](docs/security.md) and the [Privacy policy](PRIVACY.md) for details.
 
 ## Support
 
@@ -86,3 +88,9 @@ The internal executable remains `UnifiedMessenger.App.exe`. See [architecture](d
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+## Code signing policy
+
+raven v0.1.0 is currently unsigned. The project is preparing an application for free Open Source code signing through SignPath Foundation; acceptance is not confirmed.
+
+[Code signing policy](CODE_SIGNING_POLICY.md)
