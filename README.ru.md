@@ -1,8 +1,31 @@
-# raven
+<p align="center">
+  <img src="branding/raven/raven_logo.png" width="260" alt="raven">
+</p>
 
-[English version](README.md)
+<p align="center">Мессенджеры и почта в одном окне для Windows.</p>
 
-raven — приложение для Windows, объединяющее мессенджеры и почтовые аккаунты в одном окне.
+<p align="center"><a href="README.md">English version</a></p>
+
+<p align="center">
+  <a href="https://github.com/scripchenko/raven/releases/latest"><img src="https://img.shields.io/github/v/release/scripchenko/raven?label=release" alt="Последний выпуск"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D6" alt="Windows x64">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="Лицензия MIT"></a>
+</p>
+
+<p align="center"><strong><a href="https://github.com/scripchenko/raven/releases/latest">Скачать последний выпуск</a></strong><br>Текущий выпуск: v0.1.0</p>
+
+raven — приложение для Windows, объединяющее мессенджеры и почтовые аккаунты в одном окне. Сессии веб-мессенджеров и почта доступны в одном месте.
+
+## Скриншоты
+
+<p align="center">
+  <img src="docs/screenshots/messenger.png" width="90%" alt="Мессенджер в raven">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/mail.png" width="45%" alt="Почта в raven">&nbsp;
+  <img src="docs/screenshots/accounts.png" width="45%" alt="Аккаунты и настройки raven">
+</p>
 
 ## Поддерживаемые сервисы
 
@@ -21,18 +44,20 @@ raven — приложение для Windows, объединяющее месс
 - Проверка новых стабильных выпусков на GitHub. Пользователь скачивает и устанавливает обновление самостоятельно.
 - Открытие внешних ссылок в системном браузере с учётом политики навигации приложения.
 
-## Установка raven v0.1.0
+## Установка
 
-Скачайте `raven-Setup-0.1.0-win-x64.exe` из [официального выпуска v0.1.0](https://github.com/scripchenko/raven/releases/tag/v0.1.0).
+1. Откройте [последний выпуск](https://github.com/scripchenko/raven/releases/latest).
+2. Скачайте установщик raven для Windows x64.
+3. Запустите установщик.
 
-Требования для пользователя:
+Требования:
 
 - Windows 10 версии 1809 или новее либо Windows 11, x64;
 - Microsoft Edge WebView2 Evergreen Runtime.
 
 Installer содержит автономную сборку .NET 10. Пользователю **не нужны** .NET SDK и отдельная установка .NET runtime. WebView2 Evergreen устанавливается отдельно и в installer не входит.
 
-Installer v0.1.0 не подписан цифровой подписью. При первом запуске Windows SmartScreen может показать предупреждение. Проверяйте, что файл загружен из официального выпуска; не отключайте SmartScreen целиком.
+raven v0.1.0 пока не подписан цифровой подписью. При запуске установщика Windows SmartScreen может показать предупреждение. Проверяйте, что файл загружен из официального выпуска; не отключайте SmartScreen целиком.
 
 Для Gmail дополнительно нужен локальный Google Desktop OAuth client JSON, который пользователь предоставляет сам: в installer он не включён. Перед добавлением аккаунта прочитайте [инструкцию по Gmail](docs/gmail-setup.md). Для других почтовых провайдеров может потребоваться пароль приложения и доступ к IMAP/SMTP.
 
@@ -46,10 +71,6 @@ Installer v0.1.0 не подписан цифровой подписью. При
 
 [Написать @dscripchenko в Telegram](https://t.me/dscripchenko).
 
-## Лицензия
-
-Проект распространяется по [лицензии MIT](LICENSE).
-
 ## Разработка
 
 Для сборки из исходников нужен .NET 10 SDK; для сборки Windows installer — Inno Setup 6. Из корня репозитория:
@@ -61,3 +82,7 @@ dotnet test UnifiedMessenger.sln --configuration Release
 ```
 
 Внутреннее имя исполняемого файла остаётся `UnifiedMessenger.App.exe`. Дополнительная документация: [архитектура](docs/architecture.md), [сборка для Windows](docs/windows-distribution.md), [конфигурация Gmail OAuth для разработки](docs/gmail-oauth-development.md).
+
+## Лицензия
+
+Проект распространяется по [лицензии MIT](LICENSE).
