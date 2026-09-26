@@ -64,6 +64,8 @@ Name: "{autoprograms}\raven"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app
 Name: "{autodesktop}\{#DesktopIconName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Branding\raven_desktop.ico"
 
 [InstallDelete]
+; The pre-rebrand installer created this exact per-user Start Menu shortcut.
+Type: files; Name: "{autoprograms}\Lantern.lnk"
 Type: files; Name: "{autodesktop}\UnifiedMessenger.lnk"
 Type: files; Name: "{autodesktop}\UnifiedMessenger.App.lnk"
 Type: files; Name: "{autodesktop}\Lantern.lnk"

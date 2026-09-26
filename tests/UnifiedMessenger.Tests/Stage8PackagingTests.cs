@@ -221,6 +221,24 @@ public sealed class Stage8PackagingTests
     }
 
     [Fact]
+    public void Installer_RemovesHistoricalLanternStartMenuShortcutWithoutChangingRavenIdentity()
+    {
+        string installer = ReadInstallerScript();
+
+        Assert.Contains("Type: files; Name: \"{autoprograms}\\Lantern.lnk\"", installer, StringComparison.Ordinal);
+        Assert.DoesNotContain("{autoprograms}\\*.lnk", installer, StringComparison.Ordinal);
+        Assert.Contains("DefaultGroupName=raven", installer, StringComparison.Ordinal);
+        Assert.Contains("UninstallDisplayName=raven", installer, StringComparison.Ordinal);
+        Assert.Contains("DefaultDirName={localappdata}\\Programs\\Lantern", installer, StringComparison.Ordinal);
+        Assert.Contains($"AppId={{{{{InstallerAppId}}}", installer, StringComparison.Ordinal);
+        Assert.Contains(
+            "Name: \"{autoprograms}\\raven\"; Filename: \"{app}\\{#AppExeName}\"; WorkingDir: \"{app}\"; IconFilename: \"{app}\\Assets\\Branding\\raven.ico\"",
+            installer,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("AppUserModelID:", installer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ShellIdentity_UsesStableAppIdAndPhysicalCompactRelaunchIcon()
     {
         string shellIdentity = File.ReadAllText(FindRepositoryFile(

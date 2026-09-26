@@ -359,6 +359,10 @@ foreach ($legacyShortcut in @('UnifiedMessenger.lnk', 'UnifiedMessenger.App.lnk'
     }
 }
 
+if (-not $installerScript.Contains('Type: files; Name: "{autoprograms}\Lantern.lnk"', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Installer должен удалить известный legacy Start Menu shortcut Lantern.lnk.'
+}
+
 if ($installerScript.Contains('AppUserModelID:', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Shortcut AppUserModelID перекрывает bracket relaunch icon в taskbar.'
 }
