@@ -1,33 +1,33 @@
-# Безопасность и конфиденциальность
+# Security and privacy
 
-Этот документ описывает обработку данных в текущем raven. Он не является независимым аудитом безопасности.
+This document describes how the current raven application handles data. It is not an independent security audit.
 
-## Веб-мессенджеры
+## Web messengers
 
-Telegram, WhatsApp, MAX и VK открываются в Microsoft Edge WebView2 на официальных веб-адресах. Вход, QR-коды и переписка обрабатываются самими сайтами внутри WebView2. raven не извлекает содержимое чатов из DOM и не читает cookies напрямую. При этом WebView2 сохраняет cookies и локальные данные сайтов в отдельных профилях аккаунтов, чтобы сессии переживали перезапуск.
+Telegram, WhatsApp, MAX, and VK open at their official web addresses in Microsoft Edge WebView2. Their websites handle sign-in, QR codes, and conversations within WebView2. raven does not extract chat contents from the DOM or read cookies directly. WebView2 nevertheless keeps cookies and other site data in separate account profiles so sessions survive a restart.
 
-raven получает от WebView2 технические события, заголовок страницы и, когда Runtime поддерживает это, заголовок и текст web-уведомления. Эти данные могут использоваться для счётчика активности и popup. Уведомления зависят от поведения сайта и работающей WebView2-сессии; это не гарантированный фоновый push.
+raven receives technical events, page titles, and, when supported by the Runtime, web-notification titles and bodies from WebView2. These can drive activity indicators and popups. Notifications depend on the website and an active WebView2 session; they are not guaranteed background push notifications.
 
-Верхнеуровневая навигация веб-мессенджеров ограничена HTTPS-доменами соответствующего сервиса. Внешние ссылки открываются системным браузером. Проверка origin применяется также к запросам разрешения web-уведомлений. Это правило не означает, что сторонний сайт или сам браузер не обрабатывает данные пользователя.
+Top-level web-messenger navigation is restricted to the corresponding service's HTTPS domains. External links open in the system browser. Origin checks also apply to web-notification permission requests. These rules do not mean that third-party websites or the browser itself cannot process user data.
 
-## Почта
+## Mail
 
-В отличие от веб-мессенджеров, почтовые функции выполняет само приложение. Gmail подключается через Gmail API и Google OAuth; Яндекс Почта, Mail.ru и другая поддерживаемая почта — через IMAP/SMTP. Для списка, поиска, чтения, вложений, черновиков, отправки и уведомлений raven получает и обрабатывает нужные адреса, темы, фрагменты и содержимое писем. Почтовый сервер продолжает хранить письма и серверные черновики по своим правилам.
+Unlike web messengers, mail features are performed by the application itself. Gmail connects through the Gmail API and Google OAuth; Yandex Mail, Mail.ru, and other supported accounts connect through IMAP/SMTP. To list, search, read, attach, draft, send, and notify, raven retrieves and processes the necessary addresses, subjects, snippets, and message contents. The mail provider continues to store messages and server drafts under its own policies.
 
-HTML писем очищается перед показом. Для его отображения используется ограничивающая CSP, JavaScript отключён. Загрузка внешних изображений управляется настройкой; запросы к внешним серверам могут раскрывать факт открытия письма и IP-адрес пользователя. Загрузчик изображений проверяет адреса, перенаправления, тип и размер ответа и не отправляет браузерные cookies или учётные данные Windows по умолчанию.
+Mail HTML is sanitized before display. A restrictive Content Security Policy is applied and JavaScript is disabled. A setting controls remote image loading; requests to remote hosts can reveal that a message was opened and disclose the user's IP address. The image loader checks URLs, redirects, response types, and sizes, and does not send browser cookies or Windows default credentials.
 
-## Локальные данные и секреты
+## Local data and secrets
 
-- `%APPDATA%\UnifiedMessenger\settings.json` содержит обычные настройки и сведения об аккаунтах, в том числе адреса почты. Пароли и OAuth refresh tokens не должны храниться в нём открытым текстом.
-- `%LOCALAPPDATA%\UnifiedMessenger\WebView2` содержит профили веб-мессенджеров и данные их сессий.
-- Почтовые пароли приложения и Gmail OAuth credential хранятся локально под защитой Windows DPAPI `CurrentUser`. Отдельное восстановление несохранённого IMAP-черновика также использует DPAPI.
-- Для Gmail пользователь предоставляет локальный Google Desktop OAuth client JSON по пути `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. Этот файл не входит в installer и не шифруется приложением; его нельзя коммитить.
-- Вложения, которые пользователь сохраняет явно, записываются в выбранное место. Данные обычных писем могут находиться в памяти и кэше во время работы приложения.
+- `%APPDATA%\UnifiedMessenger\settings.json` contains ordinary settings and account details, including mail addresses. Passwords and OAuth refresh tokens should not be stored there in plaintext.
+- `%LOCALAPPDATA%\UnifiedMessenger\WebView2` contains web-messenger profiles and their session data.
+- Mail app passwords and the Gmail OAuth credential are stored locally under Windows DPAPI `CurrentUser` protection. Separate recovery for an unsaved IMAP draft also uses DPAPI.
+- For Gmail, the user provides a local Google Desktop OAuth client JSON at `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. It is not in the installer, is not encrypted by the application, and must not be committed.
+- Attachments explicitly saved by a user are written to the chosen location. Ordinary message data may reside in memory and cache while the application runs.
 
-Исторические имена `UnifiedMessenger` в путях сохранены для совместимости существующих аккаунтов и профилей. Удаление приложения не удаляет эти пользовательские каталоги автоматически.
+The historical `UnifiedMessenger` directory names are retained for compatibility with existing accounts and profiles. Uninstalling the application does not automatically remove these user-data directories.
 
-## Уведомления и диагностика
+## Notifications and diagnostics
 
-Уведомления могут показывать отправителя, тему и короткий preview на рабочем столе. Preview, звук и уведомления аккаунта управляются настройками; режим «Не беспокоить» подавляет popup и звук. Тексты уведомлений не предназначены для сохранения в настройках или технических журналах. Диагностика должна исключать пароли, токены, cookies, тексты писем и сообщений, адресатов и чувствительные URL-параметры.
+Desktop notifications may display a sender, subject, and short preview. Preview, sound, and account notifications are configurable; Do Not Disturb suppresses popups and sound. Notification text is not intended to be stored in settings or technical logs. Diagnostics should exclude passwords, tokens, cookies, mail and chat text, recipients, and sensitive URL parameters.
 
-Перед публикацией диагностических файлов и снимков экрана проверяйте их отдельно: WebView2 и почтовые данные могут содержать личную информацию.
+Review diagnostic files and screenshots before sharing them: WebView2 and mail data may contain personal information.

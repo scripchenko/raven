@@ -4,8 +4,6 @@
 
 <p align="center">Messaging and email in one place for Windows.</p>
 
-<p align="center"><a href="README.ru.md">Русская версия</a></p>
-
 <p align="center">
   <a href="https://github.com/scripchenko/raven/releases/latest"><img src="https://img.shields.io/github/v/release/scripchenko/raven?label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D6" alt="Windows x64">

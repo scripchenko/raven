@@ -1,50 +1,50 @@
-# Выпуск для Windows
+# Windows distribution
 
-Пользовательский выпуск raven v0.1.0 доступен в [GitHub Releases](https://github.com/scripchenko/raven/releases/tag/v0.1.0) как `raven-Setup-0.1.0-win-x64.exe`. Installer создан Inno Setup 6 из многофайловой автономной публикации .NET 10 для `win-x64`. Внутреннее имя EXE — `UnifiedMessenger.App.exe`.
+The raven v0.1.0 installer is available in [GitHub Releases](https://github.com/scripchenko/raven/releases/tag/v0.1.0) as `raven-Setup-0.1.0-win-x64.exe`. Inno Setup 6 builds it from a multi-file, self-contained .NET 10 `win-x64` publish. The internal executable name is `UnifiedMessenger.App.exe`.
 
-## Требования для пользователя
+## User requirements
 
-- Windows 10 версии 1809 или новее либо Windows 11, x64;
+- Windows 10 version 1809 or newer, or Windows 11, on x64 hardware;
 - Microsoft Edge WebView2 Evergreen Runtime.
 
-.NET SDK и отдельный .NET runtime для установки не требуются. WebView2 Evergreen не входит в installer: если Runtime отсутствует, установка останавливается и предлагает открыть [официальную страницу Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/).
+Neither the .NET SDK nor a separate .NET runtime is required to install raven. WebView2 Evergreen is not bundled: if the Runtime is missing, installation stops and offers to open the [official Microsoft download page](https://developer.microsoft.com/microsoft-edge/webview2/).
 
-## Сборка из исходников
+## Building from source
 
-На машине разработчика нужны .NET 10 SDK и, для installer, Inno Setup 6. Из корня репозитория:
+The build machine needs the .NET 10 SDK and, for the installer, Inno Setup 6. Run from the repository root:
 
 ```powershell
 ./scripts/build-windows-package.ps1
 ```
 
-Нестандартный путь к .NET CLI передаётся параметром `-DotNetPath`. Сценарий восстанавливает зависимости, публикует через профиль `win-x64-self-contained`, проверяет содержимое и запускает Inno Setup. Для одной только публикации есть `./scripts/publish-win-x64.ps1`; для проверки готового payload — `./scripts/verify-windows-package.ps1`.
+Pass a non-default .NET CLI path with `-DotNetPath`. The script restores dependencies, publishes with the `win-x64-self-contained` profile, verifies the package contents, and runs Inno Setup. For publish only, use `./scripts/publish-win-x64.ps1`; to verify an existing payload, use `./scripts/verify-windows-package.ps1`.
 
 ```text
 artifacts\publish\win-x64\
 artifacts\installer\raven-Setup-0.1.0-win-x64.exe
 ```
 
-`artifacts` игнорируется Git. Публикация не использует trimming, single-file, ReadyToRun и Native AOT; PDB исключены из пользовательского payload.
+Git ignores `artifacts`. The publish does not use trimming, single-file, ReadyToRun, or Native AOT; PDB files are excluded from the user payload.
 
-## Установка, ярлыки и обновления
+## Installation, shortcuts, and updates
 
-Installer использует постоянный Inno `AppId` `{DFAA0CC1-B19F-4506-8124-750955F1C946}` и совместимый физический каталог `%LOCALAPPDATA%\Programs\Lantern`. Он создаёт ярлыки `raven` в Start Menu и на Desktop с Raven crow. Запущенное окно, taskbar, Alt+Tab и трей используют старую синюю скобку; это сознательная совместимая настройка shell identity `Scripchenko.Raven`.
+The installer keeps the Inno `AppId` `{DFAA0CC1-B19F-4506-8124-750955F1C946}` and compatible physical installation directory `%LOCALAPPDATA%\Programs\Lantern`. It creates `raven` Start Menu and Desktop shortcuts with the Raven crow icon. The running window, taskbar, Alt+Tab, and tray use the older blue bracket icon; this is an intentional shell-identity compatibility choice for `Scripchenko.Raven`.
 
-При upgrade Windows Restart Manager может предложить закрыть работающий raven перед заменой файлов. Автоматического перезапуска после установки нет. Приложение проверяет наличие новых стабильных выпусков, но не скачивает и не устанавливает их автоматически: пользователь запускает installer новой версии сам.
+During an upgrade, Windows Restart Manager may offer to close a running raven instance before files are replaced. Installation does not automatically restart the app. The app checks for newer stable releases but does not download or install them automatically; the user runs the new installer.
 
-Install, upgrade и uninstall **не переносят и не удаляют** пользовательские каталоги:
+Install, upgrade, and uninstall **do not migrate or delete** these user-data directories:
 
 ```text
 %APPDATA%\UnifiedMessenger\
 %LOCALAPPDATA%\UnifiedMessenger\
 ```
 
-В них остаются настройки, WebView2-профили, защищённые почтовые credentials и другие локальные данные. Каталоги не входят в installer payload.
+They retain settings, WebView2 profiles, protected mail credentials, and other local data. They are not part of the installer payload.
 
 ## Gmail OAuth
 
-Для Gmail нужен локальный Google Desktop OAuth client JSON по пути `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. Файл не включён в publish/installer и не отслеживается Git. Такая пользовательская локальная конфигурация **не является product-ready** централизованной выдачей OAuth-клиента; шаги описаны в [инструкции по Gmail](gmail-setup.md).
+Gmail requires a local Google Desktop OAuth client JSON at `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. The file is neither included in the publish or installer nor tracked by Git. This user-supplied local configuration is **not a product-ready centralized OAuth client distribution**. See the [Gmail setup guide](gmail-setup.md).
 
-## Подпись
+## Signing
 
-Installer и EXE v0.1.0 не подписаны цифровой подписью. При первом запуске Windows SmartScreen может показать предупреждение. Проверяйте источник загрузки; не отключайте SmartScreen глобально.
+The v0.1.0 installer and executable are unsigned. Windows SmartScreen may warn on first launch. Verify the download source; do not disable SmartScreen globally.

@@ -1,14 +1,14 @@
-# Подключение Gmail в raven
+# Connect Gmail to raven
 
-Gmail в raven работает через Gmail API. Вход Google открывается в системном браузере и возвращается в приложение через локальный loopback-адрес; пароль Google в raven не вводится.
+raven accesses Gmail through the Gmail API. Google sign-in opens in the system browser and returns to the application through a local loopback address. You do not enter your Google password in raven.
 
-В v0.1.0 Google Desktop OAuth client configuration **не включена** в installer. Для подключения Gmail пользователь должен предоставить собственный клиент:
+The Google Desktop OAuth client configuration is **not bundled** with the v0.1.0 installer. To connect Gmail, provide your own client configuration:
 
-1. Настроить проект Google Cloud с включённым Gmail API и OAuth consent screen.
-2. Создать OAuth client типа **Desktop application** и скачать его JSON-конфигурацию.
-3. Сохранить JSON как `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. Файл должен содержать объект `installed` с `client_id` и `client_secret`. Не добавляйте настоящий файл в Git или общедоступные отчёты.
-4. В raven выбрать добавление почтового аккаунта Gmail и завершить вход/согласие в системном браузере.
+1. Configure a Google Cloud project with the Gmail API enabled and an OAuth consent screen.
+2. Create an OAuth client of type **Desktop application** and download its JSON configuration.
+3. Save the JSON as `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. It must contain an `installed` object with `client_id` and `client_secret`. Do not add the real file to Git or public reports.
+4. In raven, choose to add a Gmail mail account and complete sign-in and consent in the system browser.
 
-При новом подключении текущий код запрашивает Gmail scope `gmail.modify` для поддерживаемых операций с письмами и черновиками. Существующему аккаунту с доступом только для чтения может потребоваться повторное согласие. Не предоставляйте доступ, если не согласны с отображаемыми Google разрешениями.
+For a new connection, the current code requests the Gmail `gmail.modify` scope for supported mail and draft operations. An existing account with read-only access may need renewed consent. Do not grant access unless you agree to the permissions shown by Google.
 
-Refresh credential хранится локально под защитой Windows DPAPI `CurrentUser`; access token используется во время работы приложения. Локальный JSON OAuth-клиента отдельно не шифруется raven и остаётся необходимым для последующей авторизации. Подробнее о техническом потоке — в [gmail-oauth-development.md](gmail-oauth-development.md).
+The refresh credential is stored locally under Windows DPAPI `CurrentUser` protection; the access token is used while the app runs. raven does not separately encrypt the local OAuth client JSON, which remains necessary for later authorization. For technical details, see [gmail-oauth-development.md](gmail-oauth-development.md).

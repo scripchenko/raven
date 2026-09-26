@@ -1,11 +1,11 @@
-# Gmail OAuth: конфигурация для разработки
+# Gmail OAuth development configuration
 
-raven использует Google OAuth 2.0 authorization-code flow для Desktop application. Вход открывается в системном браузере, ответ принимается одноразовым локальным listener на `http://127.0.0.1:<random-port>/oauth2/callback/`.
+raven uses the Google OAuth 2.0 authorization-code flow for a Desktop application. Sign-in opens in the system browser, and a one-time local listener receives the response at `http://127.0.0.1:<random-port>/oauth2/callback/`.
 
-Конфигурация клиента читается из `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. Это локальный Google JSON с объектом `installed`, полями `client_id` и `client_secret`. Его, коды авторизации и токены нельзя коммитить. Исторический `credentials.example.json` в Git history был только placeholder; он не подходит для реального входа.
+The client configuration is read from `%LOCALAPPDATA%\UnifiedMessenger\GoogleOAuth\client_secret.json`. This local Google JSON must contain an `installed` object with `client_id` and `client_secret`. Never commit it, authorization codes, or tokens. The historical `credentials.example.json` in Git history was only a placeholder and cannot be used for real sign-in.
 
-Новое подключение Gmail в текущем коде запрашивает `https://www.googleapis.com/auth/gmail.modify`. Для старых credential с `gmail.readonly` предусмотрен запрос расширенного доступа, когда операция этого требует. Scope `gmail.send` отдельно не запрашивается текущим потоком. Фактический запрос и согласие всегда нужно сверять с текущим кодом и экраном Google перед выпуском новой версии.
+New Gmail connections in the current code request `https://www.googleapis.com/auth/gmail.modify`. Older credentials with `gmail.readonly` are prompted for broader access when an operation requires it. The current flow does not request `gmail.send` separately. Check the actual request, current code, and Google consent screen before shipping a new version.
 
-Refresh credential и метаданные, нужные для его обновления, хранятся как типизированная запись под защитой Windows DPAPI `CurrentUser`. Access token остаётся в памяти. Конфигурация Desktop OAuth client не входит в installer и не шифруется приложением.
+The refresh credential and metadata needed to renew it are stored as a typed record protected by Windows DPAPI `CurrentUser`. The access token remains in memory. The Desktop OAuth client configuration is not included in the installer and is not encrypted by the application.
 
-Пользовательские шаги описаны в [gmail-setup.md](gmail-setup.md).
+User-facing setup steps are in [gmail-setup.md](gmail-setup.md).

@@ -1,31 +1,31 @@
-# Архитектура raven
+# raven architecture
 
-raven — приложение WPF на .NET 10 с отдельным проектом xUnit-тестов. Публичное имя — `raven`; внутреннее имя сборки и EXE остаётся `UnifiedMessenger.App` для совместимости с уже установленными версиями.
+raven is a WPF application built on .NET 10, with a separate xUnit test project. Its public name is `raven`; the internal assembly and executable name remain `UnifiedMessenger.App` for compatibility with existing installations.
 
-## Состояние и оболочка
+## Application state and shell
 
-`AppSettings` хранит обычные настройки и список аккаунтов. `JsonSettingsService` записывает их в `%APPDATA%\UnifiedMessenger\settings.json` с атомарной заменой. Главное окно и ViewModel управляют выбором аккаунта, экраном Home, настройками и почтой. Один запущенный экземпляр координируется именованным mutex и локальным каналом активации; повторный запуск поднимает существующее окно. Значок в трее остаётся доступным при скрытом главном окне.
+`AppSettings` holds general settings and the account list. `JsonSettingsService` writes them to `%APPDATA%\UnifiedMessenger\settings.json` using atomic replacement. The main window and its ViewModel manage account selection, the Home page, Settings, and mail. A named mutex and local activation channel coordinate a single running instance; a second launch activates the existing window. The tray icon remains available while the main window is hidden.
 
-Имя папки установки `%LOCALAPPDATA%\Programs\Lantern`, каталоги данных `UnifiedMessenger` и постоянный Inno Setup `AppId` являются совместимыми техническими идентификаторами. Их смена потребовала бы отдельной миграции пользовательских данных и сессий.
+The installation directory `%LOCALAPPDATA%\Programs\Lantern`, `UnifiedMessenger` data directories, and stable Inno Setup `AppId` are compatibility identifiers. Changing them would require a separate migration of user data and sessions.
 
-## Веб-мессенджеры
+## Web messengers
 
-`BuiltInServiceCatalog` задаёт адреса и допустимые домены Telegram, WhatsApp, MAX и VK. `WebViewSessionManager` управляет WebView2-контроллерами и отдельным стабильным профилем для каждого `ServiceInstance`. Переключение аккаунта не должно удалять его профиль или требовать нового входа. Внешние ссылки передаются системному браузеру после проверки политики навигации.
+`BuiltInServiceCatalog` defines the URLs and allowed domains for Telegram, WhatsApp, MAX, and VK. `WebViewSessionManager` manages WebView2 controllers and a separate, stable profile for each `ServiceInstance`. Switching accounts must not delete a profile or require another sign-in. External links are handed to the system browser after navigation-policy checks.
 
-WebView2 сообщает о заголовках страниц и web-уведомлениях. Координаторы уведомлений учитывают выбранный аккаунт, разрешения, mute, DND, preview и режим звука. Поддержка уведомлений зависит от сайта и установленного WebView2 Runtime.
+WebView2 provides page titles and web-notification events. Notification coordinators account for the selected account, permissions, mute, Do Not Disturb, preview, and sound settings. Notification support depends on the site and the installed WebView2 Runtime.
 
-## Почта
+## Mail
 
-`Services/Mail` содержит общие модели списка, detail, compose, вложений, поиска, уведомлений и контрактов провайдеров.
+`Services/Mail` contains shared contracts and models for message lists, detail views, compose, attachments, search, and notifications.
 
-- Gmail использует Gmail API и Desktop OAuth в системном браузере. Доступ может требовать повторного согласия Google; refresh credential защищён DPAPI `CurrentUser`.
-- Яндекс Почта и Mail.ru используют управляемый IMAP/SMTP-путь с UID/UIDVALIDITY для идентичности писем, серверным поиском, безопасной пагинацией, действиями с письмами и серверными черновиками. Возможности и системные папки определяются по ответам сервера; неподдерживаемые действия не должны выдаваться за работающие.
-- Другая IMAP/SMTP-почта использует задаваемые пользователем параметры подключения. Набор доступных действий зависит от возможностей конкретного сервера.
+- Gmail uses the Gmail API and Desktop OAuth in the system browser. Access may require renewed Google consent; the refresh credential is protected with DPAPI `CurrentUser`.
+- Yandex Mail and Mail.ru use the managed IMAP/SMTP path. It uses UID/UIDVALIDITY for message identity, server-side search, safe pagination, mailbox actions, and server drafts. Capabilities and system folders are discovered from server responses; unsupported actions are not presented as working features.
+- Other IMAP/SMTP accounts use user-provided connection settings. Available actions depend on each server's capabilities.
 
-Почтовые учётные данные хранятся отдельно от JSON-настроек в DPAPI-хранилище. Для несохранённых IMAP-черновиков предусмотрено локальное защищённое восстановление на случай неудачного завершения работы. Обычные письма обрабатываются приложением для чтения и отправки; граница конфиденциальности описана в [security.md](security.md).
+Mail credentials are held separately from JSON settings in DPAPI-protected storage. A protected local recovery mechanism handles unsaved IMAP drafts when shutdown cannot save them. The application processes ordinary messages for reading and sending; the privacy boundary is described in [security.md](security.md).
 
-## Уведомления и обновления
+## Notifications and updates
 
-Веб-мессенджеры используют события WebView2; Gmail и IMAP-провайдеры — отдельные почтовые механизмы обнаружения новых писем. Они сходятся в общем показе popup и настройках звука/режима «Не беспокоить». Локальные перемещения писем в Inbox не должны считаться новым входящим письмом.
+Web messengers use WebView2 events; Gmail and IMAP providers use separate new-mail detection mechanisms. They share popup presentation and sound/Do Not Disturb settings. Local moves into the Inbox must not be treated as new incoming mail.
 
-Проверка обновлений запрашивает последний стабильный GitHub Release репозитория `scripchenko/raven` и сообщает пользователю о новой версии. Приложение не скачивает и не устанавливает обновление автоматически. В уже выпущенном бинарном `v0.1.0` остаётся прежний URL `scripchenko/Lantern`; текущий исходный код использует новое имя репозитория.
+The update check requests the latest stable GitHub Release from `scripchenko/raven` and informs the user when a newer version is available. The app does not automatically download or install an update. The already-published `v0.1.0` binary retains the earlier `scripchenko/Lantern` URL; current source code uses the renamed repository.
