@@ -12,7 +12,7 @@ public sealed class WpfMailAttachmentDialogService : IMailAttachmentDialogServic
             CheckFileExists = true,
             CheckPathExists = true,
             Multiselect = true,
-            Title = "Прикрепить файлы"
+            Title = L.Instance.Get("Attach files")
         };
         if (dialog.ShowDialog() != true)
         {
@@ -36,7 +36,7 @@ public sealed class WpfMailAttachmentDialogService : IMailAttachmentDialogServic
             CheckPathExists = true,
             FileName = MailAttachmentFileName.Sanitize(attachment.FileName),
             OverwritePrompt = true,
-            Title = "Сохранить вложение"
+            Title = L.Instance.Get("Save attachment")
         };
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }

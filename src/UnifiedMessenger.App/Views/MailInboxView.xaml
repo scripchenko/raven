@@ -1,6 +1,7 @@
 <UserControl x:Class="UnifiedMessenger.App.Views.MailInboxView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:UnifiedMessenger.App.Services.Localization"
              xmlns:models="clr-namespace:UnifiedMessenger.App.Models"
              Background="{DynamicResource WindowBackgroundBrush}">
     <UserControl.Resources>
@@ -46,7 +47,7 @@
                                        FontSize="12"
                                        FontWeight="SemiBold"
                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="Ярлыки"
+                                       Text="{loc:Text Key='Labels'}"
                                        Visibility="{Binding ShowsUserLabelSectionHeader, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Border x:Name="FolderBackground"
                                     Grid.Row="1"
@@ -341,7 +342,7 @@
                 <Button
                         HorizontalAlignment="Stretch"
                         Command="{Binding Compose.NewMessageCommand}"
-                        Content="Написать"
+                        Content="{loc:Text Key='Compose'}"
                         FontSize="14"
                         FontWeight="SemiBold"
                         Style="{StaticResource MailComposeButtonStyle}" />
@@ -467,10 +468,10 @@
                                     Width="32"
                                     Height="32"
                                     VerticalAlignment="Center"
-                                    AutomationProperties.Name="Выполнить поиск"
+                                    AutomationProperties.Name="{loc:Text Key='Search'}"
                                     Command="{Binding SearchCommand}"
                                     Style="{StaticResource MailActionToolbarButtonStyle}"
-                                    ToolTip="Выполнить поиск">
+                                    ToolTip="{loc:Text Key='Search'}">
                                 <Viewbox Width="18" Height="18">
                                     <Path Data="{StaticResource MailSearchGeometry}"
                                           Fill="Transparent"
@@ -483,7 +484,8 @@
                                      Grid.Column="1"
                                      Padding="2,0"
                                      VerticalContentAlignment="Center"
-                                     AutomationProperties.Name="Поиск в почте"
+                                     AutomationProperties.Name="{loc:Text Key='Search mail'}"
+                                     ToolTip="{loc:Text Key='Search mail'}"
                                      Background="Transparent"
                                      BorderThickness="0"
                                      FontSize="14.5"
@@ -492,18 +494,13 @@
                                     <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
                                     <KeyBinding Key="Escape" Command="{Binding ClearSearchCommand}" />
                                 </TextBox.InputBindings>
-                                <TextBox.Style>
-                                    <Style TargetType="TextBox">
-                                        <Setter Property="ToolTip" Value="Поиск в почте" />
-                                    </Style>
-                                </TextBox.Style>
                             </TextBox>
                             <TextBlock Grid.Column="1"
                                        Margin="4,0,0,0"
                                        VerticalAlignment="Center"
                                        IsHitTestVisible="False"
                                        Foreground="#FF78879A"
-                                       Text="Поиск в почте">
+                                       Text="{loc:Text Key='Search mail'}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Collapsed" />
@@ -519,12 +516,12 @@
                                     Width="32"
                                     Height="32"
                                     VerticalAlignment="Center"
-                                    AutomationProperties.Name="Очистить поиск"
+                                    AutomationProperties.Name="{loc:Text Key='Clear search'}"
                                     Command="{Binding ClearSearchCommand}"
                                     Content="×"
                                     FontSize="20"
                                     Style="{StaticResource MailActionToolbarButtonStyle}"
-                                    ToolTip="Очистить поиск"
+                                    ToolTip="{loc:Text Key='Clear search'}"
                                     Visibility="{Binding CanClearSearch, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </Grid>
                     </Border>
@@ -560,17 +557,17 @@
                                 Orientation="Horizontal">
                         <CheckBox Margin="0,0,8,0"
                                   VerticalAlignment="Center"
-                                  AutomationProperties.Name="Выбрать все загруженные письма"
+                                  AutomationProperties.Name="{loc:Text Key='Select all loaded messages'}"
                                   Command="{Binding SelectAllLoadedCommand}"
                                   IsChecked="{Binding LoadedSelectionState, Mode=OneWay}"
                                   IsThreeState="True"
-                                  ToolTip="Выбрать все загруженные письма"
+                                  ToolTip="{loc:Text Key='Select all loaded messages'}"
                                   Visibility="{Binding IsMailboxManagementAvailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Button Margin="0,0,4,0"
-                                AutomationProperties.Name="Обновить"
+                                AutomationProperties.Name="{loc:Text Key='Refresh'}"
                                 Command="{Binding RefreshCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Обновить">
+                                ToolTip="{loc:Text Key='Refresh'}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
                                     <Path Data="{StaticResource MailActionRefreshGeometry}"
@@ -604,10 +601,10 @@
                             <Button Width="32"
                                     Height="32"
                                     Margin="0,0,2,0"
-                                    AutomationProperties.Name="Предыдущая страница"
+                                    AutomationProperties.Name="{loc:Text Key='Previous page'}"
                                     Command="{Binding PreviousPageCommand}"
                                     Style="{StaticResource MailActionToolbarButtonStyle}"
-                                    ToolTip="Предыдущая страница">
+                                    ToolTip="{loc:Text Key='Previous page'}">
                                 <TextBlock FontSize="22" Text="‹">
                                     <TextBlock.RenderTransform>
                                         <TranslateTransform Y="-3" />
@@ -616,10 +613,10 @@
                             </Button>
                             <Button Width="32"
                                     Height="32"
-                                    AutomationProperties.Name="Следующая страница"
+                                    AutomationProperties.Name="{loc:Text Key='Next page'}"
                                     Command="{Binding NextPageCommand}"
                                     Style="{StaticResource MailActionToolbarButtonStyle}"
-                                    ToolTip="Следующая страница">
+                                    ToolTip="{loc:Text Key='Next page'}">
                                 <TextBlock FontSize="22" Text="›">
                                     <TextBlock.RenderTransform>
                                         <TranslateTransform Y="-3" />
@@ -630,11 +627,11 @@
                         <StackPanel Orientation="Horizontal"
                                     Visibility="{Binding HasSelectedMessages, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="Архивировать"
+                                    AutomationProperties.Name="{loc:Text Key='Archive'}"
                                     Command="{Binding ArchiveSelectedCommand}"
                                     Visibility="{Binding ShowArchiveAction, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="Архивировать">
+                                    ToolTip="{loc:Text Key='Archive'}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
                                         <Path Data="{StaticResource MailActionArchiveGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.6" />
@@ -642,10 +639,10 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="В спам"
+                                    AutomationProperties.Name="{loc:Text Key='Move to spam'}"
                                     Command="{Binding ReportSelectedSpamCommand}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="В спам"
+                                    ToolTip="{loc:Text Key='Move to spam'}"
                                     Visibility="{Binding ShowReportSpamAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
@@ -654,10 +651,10 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="Восстановить"
+                                    AutomationProperties.Name="{loc:Text Key='Restore'}"
                                     Command="{Binding RestoreSelectedCommand}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="Восстановить"
+                                    ToolTip="{loc:Text Key='Restore'}"
                                     Visibility="{Binding ShowRestoreAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
@@ -666,10 +663,10 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="Не спам"
+                                    AutomationProperties.Name="{loc:Text Key='Not spam'}"
                                     Command="{Binding MarkSelectedNotSpamCommand}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="Не спам"
+                                    ToolTip="{loc:Text Key='Not spam'}"
                                     Visibility="{Binding ShowNotSpamAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
@@ -678,10 +675,10 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="Удалить"
+                                    AutomationProperties.Name="{loc:Text Key='Delete'}"
                                     Command="{Binding DeleteSelectedCommand}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="Удалить">
+                                    ToolTip="{loc:Text Key='Delete'}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
                                         <Path Data="{StaticResource MailActionTrashGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.6" />
@@ -689,11 +686,11 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="Пометить как прочитанное"
+                                    AutomationProperties.Name="{loc:Text Key='Mark as read'}"
                                     Command="{Binding MarkSelectedReadCommand}"
                                     Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="Пометить как прочитанное">
+                                    ToolTip="{loc:Text Key='Mark as read'}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
                                         <Path Data="{StaticResource MailActionMarkReadGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.65" />
@@ -701,11 +698,11 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="Пометить как непрочитанное"
+                                    AutomationProperties.Name="{loc:Text Key='Mark as unread'}"
                                     Command="{Binding MarkSelectedUnreadCommand}"
                                     Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="Пометить как непрочитанное">
+                                    ToolTip="{loc:Text Key='Mark as unread'}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
                                         <Path Data="{StaticResource MailActionMarkUnreadGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.65" />
@@ -763,11 +760,11 @@
                                 </TextBlock>
                             </Button>
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="Ярлыки"
+                                    AutomationProperties.Name="{loc:Text Key='Labels'}"
                                     Command="{Binding OpenLabelsForSelectionCommand}"
                                     Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="Ярлыки">
+                                    ToolTip="{loc:Text Key='Labels'}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
                                         <Path Data="{StaticResource MailActionLabelGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" StrokeThickness="1.7" />
@@ -775,10 +772,10 @@
                                 </Viewbox>
                             </Button>
                             <Button Margin="4,0,0,0"
-                                    AutomationProperties.Name="Снять выделение"
+                                    AutomationProperties.Name="{loc:Text Key='Clear selection'}"
                                     Command="{Binding ClearSelectionCommand}"
                                     Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                    ToolTip="Снять выделение">
+                                    ToolTip="{loc:Text Key='Clear selection'}">
                                 <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                     <Canvas Width="24" Height="24">
                                         <Path Data="{StaticResource MailActionClearSelectionGeometry}" Fill="Transparent" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeThickness="1.7" />
@@ -822,7 +819,7 @@
                                 <CheckBox Margin="8,0"
                                           HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
-                                          AutomationProperties.Name="Выбрать письмо"
+                                          AutomationProperties.Name="{loc:Text Key='Select message'}"
                                           Command="{Binding DataContext.ToggleMessageSelectionCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                           CommandParameter="{Binding}"
                                           IsChecked="{Binding IsSelected, Mode=OneWay}"
@@ -1134,7 +1131,7 @@
                     <TextBlock MaxWidth="560"
                                Margin="0,0,0,8"
                                Foreground="#FFB42318"
-                               Text="{Binding MailboxActionErrorMessage}"
+                               Text="{Binding LocalizedMailboxActionErrorMessage}"
                                TextAlignment="Center"
                                TextWrapping="Wrap"
                                Visibility="{Binding HasMailboxActionError, Converter={StaticResource BooleanToVisibilityConverter}}" />
@@ -1162,18 +1159,18 @@
                     <TextBlock MaxWidth="560"
                                Margin="0,0,0,8"
                                Foreground="#FFB42318"
-                               Text="{Binding GmailReauthenticationErrorMessage}"
+                               Text="{Binding LocalizedGmailReauthenticationErrorMessage}"
                                TextAlignment="Center"
                                TextWrapping="Wrap"
                                Visibility="{Binding HasGmailReauthenticationError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Margin="0,0,0,8"
                             Command="{Binding ReauthenticateGmailCommand}"
-                            Content="Войти в Google"
+                            Content="{loc:Text Key='Sign in to Google'}"
                             Style="{StaticResource PrimaryButtonStyle}"
                             Visibility="{Binding RequiresGmailReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Margin="0,0,0,8"
                             Command="{Binding AuthorizeGmailCommand}"
-                            Content="Разрешить управление почтой"
+                            Content="{loc:Text Key='Allow mail management'}"
                             Style="{StaticResource PrimaryButtonStyle}"
                             Visibility="{Binding RequiresGmailAuthorization, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ProgressBar Width="180"
@@ -1190,7 +1187,7 @@
                         <ProgressBar Width="180" Height="4" IsIndeterminate="True" />
                         <TextBlock Margin="0,14,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Загружаем почту…" />
+                                   Text="{loc:Text Key='Loading mail…'}" />
                     </StackPanel>
                 </Grid>
 
@@ -1214,21 +1211,21 @@
                                    TextAlignment="Center" />
                         <TextBlock Margin="0,9,0,16"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="{Binding ListErrorDescription}"
+                                   Text="{Binding LocalizedListErrorDescription}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap" />
                         <TextBlock Margin="0,0,0,16"
                                    Foreground="#FFB42318"
-                                   Text="{Binding GmailReauthenticationErrorMessage}"
+                                   Text="{Binding LocalizedGmailReauthenticationErrorMessage}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    Visibility="{Binding HasGmailReauthenticationError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Button Command="{Binding ReauthenticateGmailCommand}"
-                                Content="Войти в Google"
+                                Content="{loc:Text Key='Sign in to Google'}"
                                 Style="{StaticResource PrimaryButtonStyle}"
                                 Visibility="{Binding RequiresGmailReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Button Command="{Binding RetryCommand}"
-                                Content="Повторить"
+                                Content="{loc:Text Key='Retry'}"
                                 Style="{StaticResource PrimaryButtonStyle}"
                                 Visibility="{Binding ShowTransientRetryAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
@@ -1263,10 +1260,10 @@
                     </Border.Style>
                     <StackPanel HorizontalAlignment="Left" Orientation="Horizontal">
                         <Button HorizontalAlignment="Left"
-                                AutomationProperties.Name="Назад к списку"
+                                AutomationProperties.Name="{loc:Text Key='Back to list'}"
                                 Command="{Binding BackToMessageListCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Назад к списку">
+                                ToolTip="{loc:Text Key='Back to list'}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
                                     <Path Data="M20,12 L5,12 M11,6 L5,12 L11,18"
@@ -1280,10 +1277,10 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Архивировать"
+                                AutomationProperties.Name="{loc:Text Key='Archive'}"
                                 Command="{Binding ArchiveDetailCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Архивировать"
+                                ToolTip="{loc:Text Key='Archive'}"
                                 Visibility="{Binding ShowArchiveAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
@@ -1298,10 +1295,10 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="В спам"
+                                AutomationProperties.Name="{loc:Text Key='Move to spam'}"
                                 Command="{Binding ReportDetailSpamCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="В спам"
+                                ToolTip="{loc:Text Key='Move to spam'}"
                                 Visibility="{Binding ShowReportSpamAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
@@ -1316,10 +1313,10 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Восстановить"
+                                AutomationProperties.Name="{loc:Text Key='Restore'}"
                                 Command="{Binding RestoreDetailCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Восстановить"
+                                ToolTip="{loc:Text Key='Restore'}"
                                 Visibility="{Binding ShowRestoreAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
@@ -1334,10 +1331,10 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Не спам"
+                                AutomationProperties.Name="{loc:Text Key='Not spam'}"
                                 Command="{Binding MarkDetailNotSpamCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Не спам"
+                                ToolTip="{loc:Text Key='Not spam'}"
                                 Visibility="{Binding ShowNotSpamAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
@@ -1352,10 +1349,10 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Удалить"
+                                AutomationProperties.Name="{loc:Text Key='Delete'}"
                                 Command="{Binding DeleteDetailCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Удалить"
+                                ToolTip="{loc:Text Key='Delete'}"
                                 Visibility="{Binding IsMailboxManagementAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
@@ -1393,10 +1390,10 @@
                             </TextBlock>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Ярлыки"
+                                AutomationProperties.Name="{loc:Text Key='Labels'}"
                                 Command="{Binding OpenLabelsForDetailCommand}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Ярлыки"
+                                ToolTip="{loc:Text Key='Labels'}"
                                 Visibility="{Binding IsGmailMailboxAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
@@ -1469,11 +1466,11 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Ответить"
+                                AutomationProperties.Name="{loc:Text Key='Reply'}"
                                 Command="{Binding Compose.ReplyCommand}"
                                 CommandParameter="{Binding SelectedMessageContent}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Ответить">
+                                ToolTip="{loc:Text Key='Reply'}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
                                     <Path Data="M10,6.5 L4,12 L10,17.5 M5,12 L13,12 C17.5,12 20,14.5 20,19"
@@ -1487,11 +1484,11 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Ответить всем"
+                                AutomationProperties.Name="{loc:Text Key='Reply all'}"
                                 Command="{Binding Compose.ReplyAllCommand}"
                                 CommandParameter="{Binding SelectedMessageContent}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Ответить всем"
+                                ToolTip="{loc:Text Key='Reply all'}"
                                 Visibility="{Binding Compose.IsReplyAllAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
@@ -1506,11 +1503,11 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Переслать"
+                                AutomationProperties.Name="{loc:Text Key='Forward'}"
                                 Command="{Binding Compose.ForwardCommand}"
                                 CommandParameter="{Binding SelectedMessageContent}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Переслать">
+                                ToolTip="{loc:Text Key='Forward'}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
                                     <Path Data="M14,6.5 L20,12 L14,17.5 M19,12 L11,12 C6.5,12 4,14.5 4,19"
@@ -1524,11 +1521,11 @@
                             </Viewbox>
                         </Button>
                         <Button Margin="4,0,0,0"
-                                AutomationProperties.Name="Распечатать письмо"
+                                AutomationProperties.Name="{loc:Text Key='Print message'}"
                                 Click="Print_Click"
                                 IsEnabled="{Binding CanPrintMessage}"
                                 Style="{StaticResource MailDetailToolbarButtonStyle}"
-                                ToolTip="Распечатать письмо"
+                                ToolTip="{loc:Text Key='Print message'}"
                                 Visibility="{Binding ShowPrintAction, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Viewbox Style="{StaticResource MailToolbarIconViewboxStyle}">
                                 <Canvas Width="24" Height="24">
@@ -1601,7 +1598,7 @@
                                            Margin="0,3,0,0"
                                            FontSize="13"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="{Binding SelectedMessageContent.To, StringFormat=Кому: {0}}"
+                                           Text="{Binding SelectedMessageRecipientText}"
                                            TextWrapping="Wrap" />
                             </StackPanel>
                             <TextBlock x:Name="MessageDetailDate"
@@ -1629,7 +1626,7 @@
                             <TextBlock Margin="0,0,0,7"
                                        FontSize="14"
                                        FontWeight="SemiBold"
-                                       Text="Вложения" />
+                                       Text="{loc:Text Key='Attachments'}" />
                             <ItemsControl ItemsSource="{Binding SelectedMessageContent.Attachments}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
@@ -1658,7 +1655,7 @@
                                                         Margin="12,0,0,0"
                                                         Command="{Binding DataContext.SaveAttachmentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                         CommandParameter="{Binding}"
-                                                        Content="Сохранить"
+                                                        Content="{loc:Text Key='Save'}"
                                                         Style="{StaticResource MailSecondaryButtonStyle}" />
                                             </Grid>
                                         </Border>
@@ -1668,7 +1665,7 @@
                             <TextBlock Margin="0,2,0,0"
                                        FontSize="12"
                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="{Binding AttachmentStatusMessage}"
+                                       Text="{Binding LocalizedAttachmentStatusMessage}"
                                        TextWrapping="Wrap"
                                        Visibility="{Binding HasAttachmentStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
@@ -1683,29 +1680,29 @@
                                 <Button Margin="0,8,0,0"
                                         HorizontalAlignment="Left"
                                         Command="{Binding AuthorizeGmailCommand}"
-                                        Content="Разрешить"
+                                        Content="{loc:Text Key='Allow'}"
                                         Style="{StaticResource PrimaryButtonStyle}" />
                             </StackPanel>
                             <TextBlock Margin="0,8,0,0"
                                        Foreground="#FFB42318"
-                                       Text="{Binding ReadStateErrorMessage}"
+                                       Text="{Binding LocalizedReadStateErrorMessage}"
                                        TextWrapping="Wrap"
                                        Visibility="{Binding HasReadStateError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <TextBlock Margin="0,8,0,0"
                                        Foreground="#FFB42318"
-                                       Text="{Binding MailboxActionErrorMessage}"
+                                       Text="{Binding LocalizedMailboxActionErrorMessage}"
                                        TextWrapping="Wrap"
                                        Visibility="{Binding HasMailboxActionError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,8,0,0"
                                     HorizontalAlignment="Left"
                                     Command="{Binding ReauthenticateGmailCommand}"
-                                    Content="Войти в Google"
+                                    Content="{loc:Text Key='Sign in to Google'}"
                                     Style="{StaticResource PrimaryButtonStyle}"
                                     Visibility="{Binding RequiresGmailReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,8,0,0"
                                     HorizontalAlignment="Left"
                                     Command="{Binding ReauthenticateGmailCommand}"
-                                    Content="Войти в Google"
+                                    Content="{loc:Text Key='Sign in to Google'}"
                                     Style="{StaticResource PrimaryButtonStyle}"
                                     Visibility="{Binding RequiresGmailReadStateReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
@@ -1737,14 +1734,14 @@
                             <Button Margin="0,0,8,4"
                                     Padding="14,8"
                                     Click="AlwaysShowRemoteImagesFromSender_Click"
-                                    Content="Всегда показывать от этого отправителя"
+                                    Content="{loc:Text Key='Always show images from this sender'}"
                                     IsEnabled="{Binding CanAlwaysShowRemoteImagesFromSender}"
                                     Style="{StaticResource MailSecondaryButtonStyle}"
                                     Visibility="{Binding ShowAlwaysRemoteImagesFromSenderAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,0,8,4"
                                     Padding="14,8"
                                     Click="RevokeRemoteImagesFromSender_Click"
-                                    Content="Не показывать автоматически от этого отправителя"
+                                    Content="{loc:Text Key='Do not automatically show images from this sender'}"
                                     Style="{StaticResource MailSecondaryButtonStyle}"
                                     Visibility="{Binding ShowRevokeRemoteImagesFromSenderAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </WrapPanel>
@@ -1773,7 +1770,7 @@
                         <ProgressBar Width="180" Height="4" IsIndeterminate="True" />
                         <TextBlock Margin="0,14,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Загружаем письмо…" />
+                                   Text="{loc:Text Key='Loading message…'}" />
                     </StackPanel>
 
                     <StackPanel MaxWidth="380"
@@ -1782,25 +1779,25 @@
                                 Visibility="{Binding HasMessageError, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <TextBlock FontSize="19"
                                    FontWeight="SemiBold"
-                                   Text="Не удалось открыть письмо"
+                                   Text="{loc:Text Key='Could not open message'}"
                                    TextAlignment="Center" />
                         <TextBlock Margin="0,9,0,16"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="{Binding MessageErrorMessage}"
+                                   Text="{Binding LocalizedMessageErrorMessage}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap" />
                         <TextBlock Margin="0,0,0,16"
                                    Foreground="#FFB42318"
-                                   Text="{Binding GmailReauthenticationErrorMessage}"
+                                   Text="{Binding LocalizedGmailReauthenticationErrorMessage}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    Visibility="{Binding HasGmailReauthenticationError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Button Command="{Binding ReauthenticateGmailCommand}"
-                                Content="Войти в Google"
+                                Content="{loc:Text Key='Sign in to Google'}"
                                 Style="{StaticResource PrimaryButtonStyle}"
                                 Visibility="{Binding RequiresGmailMessageReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Button Command="{Binding RetryMessageCommand}"
-                                Content="Повторить"
+                                Content="{loc:Text Key='Retry'}"
                                 Style="{StaticResource PrimaryButtonStyle}"
                                 Visibility="{Binding ShowMessageRetryAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
@@ -1839,12 +1836,12 @@
                                    Margin="0,0,0,18"
                                    FontSize="24"
                                    FontWeight="SemiBold"
-                                   Text="Новое письмо" />
+                                   Text="{loc:Text Key='New message'}" />
 
                         <TextBlock Grid.Row="1"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="От:" />
+                                   Text="{loc:Text Key='From:'}" />
                         <TextBox Grid.Row="1"
                                  Grid.Column="1"
                                  Grid.ColumnSpan="2"
@@ -1857,7 +1854,7 @@
                                    Margin="0,12,0,0"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Кому:" />
+                                   Text="{loc:Text Key='To:'}" />
                         <TextBox x:Name="ComposeToTextBox"
                                  Grid.Row="2"
                                  Grid.Column="1"
@@ -1870,7 +1867,7 @@
                                 Grid.Column="2"
                                 Margin="10,12,0,0"
                                 Command="{Binding Compose.RevealCopyFieldsCommand}"
-                                Content="Копия / Скрытая"
+                                Content="{loc:Text Key='Cc / Bcc'}"
                                 IsTabStop="False"
                                 Style="{StaticResource MailSecondaryButtonStyle}" />
 
@@ -1888,7 +1885,7 @@
                             </Grid.ColumnDefinitions>
                             <TextBlock VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="Копия:" />
+                                       Text="{loc:Text Key='Cc:'}" />
                             <TextBox Grid.Column="1"
                                      Padding="10,7"
                                      IsEnabled="{Binding Compose.CanEdit}"
@@ -1898,7 +1895,7 @@
                                        Margin="0,8,0,0"
                                        VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="Скрытая:" />
+                                       Text="{loc:Text Key='Bcc:'}" />
                             <TextBox Grid.Row="1"
                                      Grid.Column="1"
                                      Margin="0,8,0,0"
@@ -1924,7 +1921,7 @@
                             <TextBlock Grid.Column="0"
                                        VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="Тема:" />
+                                       Text="{loc:Text Key='Subject:'}" />
                             <TextBox x:Name="ComposeSubjectTextBox"
                                      Grid.Column="1"
                                      Grid.ColumnSpan="2"
@@ -1932,7 +1929,7 @@
                                      IsEnabled="{Binding Compose.CanEdit}"
                                      TabIndex="4"
                                      Text="{Binding Compose.Draft.Subject, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     ToolTip="Тема" />
+                                     ToolTip="{loc:Text Key='Subject'}" />
                             <TextBox x:Name="ComposeBodyTextBox"
                                      Grid.Row="1"
                                      Grid.ColumnSpan="3"
@@ -1952,7 +1949,7 @@
                                         Margin="0,12,0,0">
                                 <Button HorizontalAlignment="Left"
                                         Command="{Binding Compose.AttachFilesCommand}"
-                                        Content="Прикрепить файл"
+                                        Content="{loc:Text Key='Attach file'}"
                                         Style="{StaticResource MailSecondaryButtonStyle}" />
                                 <ScrollViewer MaxHeight="130"
                                               Margin="0,8,0,0"
@@ -1990,7 +1987,7 @@
                                                                 Command="{Binding DataContext.Compose.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                                 CommandParameter="{Binding}"
                                                                 Content="×"
-                                                                ToolTip="Удалить вложение" />
+                                                                ToolTip="{loc:Text Key='Remove attachment'}" />
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>
@@ -2004,7 +2001,7 @@
                                    Grid.ColumnSpan="3"
                                    Margin="0,12,0,0"
                                    Foreground="#FFB42318"
-                                   Text="{Binding Compose.ErrorMessage}"
+                                   Text="{Binding Compose.LocalizedErrorMessage}"
                                    TextWrapping="Wrap"
                                    Visibility="{Binding Compose.HasError, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
@@ -2014,13 +2011,13 @@
                                     HorizontalAlignment="Left"
                                     Visibility="{Binding RequiresGmailComposeReauthentication, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <TextBlock Foreground="#FFB42318"
-                                       Text="{Binding GmailReauthenticationErrorMessage}"
+                                       Text="{Binding LocalizedGmailReauthenticationErrorMessage}"
                                        TextWrapping="Wrap"
                                        Visibility="{Binding HasGmailReauthenticationError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,8,0,0"
                                     HorizontalAlignment="Left"
                                     Command="{Binding ReauthenticateGmailCommand}"
-                                    Content="Войти в Google"
+                                    Content="{loc:Text Key='Sign in to Google'}"
                                     Style="{StaticResource PrimaryButtonStyle}" />
                         </StackPanel>
 
@@ -2032,16 +2029,16 @@
                             <TextBlock Margin="0,0,12,0"
                                        VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Text="{Binding Compose.DraftSaveStatusText}"
+                                       Text="{Binding Compose.DraftSaveStatusDisplayText}"
                                        Visibility="{Binding Compose.HasDraftSaveStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,0,10,0"
                                     Command="{Binding Compose.RetryDraftSaveCommand}"
-                                    Content="Повторить сохранение"
+                                    Content="{loc:Text Key='Retry save'}"
                                     Style="{StaticResource MailSecondaryButtonStyle}"
                                     Visibility="{Binding Compose.HasDraftSaveError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,0,10,0"
                                     Command="{Binding Compose.DiscardDraftCommand}"
-                                    Content="Удалить черновик"
+                                    Content="{loc:Text Key='Delete draft'}"
                                     Style="{StaticResource MailSecondaryButtonStyle}"
                                     Visibility="{Binding Compose.IsServerDraft, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Margin="0,0,10,0"
@@ -2114,7 +2111,7 @@
                     <TextBlock Grid.Row="1"
                                Margin="0,12"
                                Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="Пользовательских ярлыков нет.">
+                               Text="{loc:Text Key='No custom labels'}">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Visibility" Value="Visible" />
@@ -2129,7 +2126,7 @@
                     <Button Grid.Row="2"
                             HorizontalAlignment="Right"
                             Command="{Binding CloseLabelsCommand}"
-                            Content="Готово"
+                            Content="{loc:Text Key='Done'}"
                             Style="{StaticResource MailSecondaryButtonStyle}" />
                 </Grid>
             </Border>

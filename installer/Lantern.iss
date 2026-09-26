@@ -14,7 +14,7 @@ AppId={{DFAA0CC1-B19F-4506-8124-750955F1C946}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppComments=Windows-приложение для мессенджеров и почты.
+AppComments=Windows application for messaging and email.
 DefaultDirName={localappdata}\Programs\Lantern
 DefaultGroupName=raven
 DisableProgramGroupPage=yes
@@ -39,11 +39,21 @@ CloseApplicationsFilter={#AppExeName}
 RestartApplications=no
 UsePreviousAppDir=yes
 UsePreviousGroup=yes
+UsePreviousLanguage=no
+ShowLanguageDialog=yes
+LanguageDetectionMethod=none
 ChangesAssociations=no
 ChangesEnvironment=no
 
 [Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+
+[CustomMessages]
+english.WebView2Required=Microsoft Edge WebView2 Evergreen Runtime is required to use raven.%n%nInstall the Runtime from the official Microsoft site, then run raven Setup again.%n%nOpen the official page now?
+russian.WebView2Required=Для работы raven требуется Microsoft Edge WebView2 Evergreen Runtime.%n%nУстановите Runtime с официальной страницы Microsoft, затем снова запустите установку raven.%n%nОткрыть официальную страницу сейчас?
+english.WebView2OpenFailed=Could not open the Microsoft page. Error code:
+russian.WebView2OpenFailed=Не удалось открыть страницу Microsoft. Код ошибки:
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -90,13 +100,11 @@ begin
     Exit;
 
   if MsgBox(
-    'Для работы raven требуется Microsoft Edge WebView2 Evergreen Runtime.' + #13#10 + #13#10 +
-    'Установите Runtime с официальной страницы Microsoft, затем снова запустите установку raven.' + #13#10 + #13#10 +
-    'Открыть официальную страницу сейчас?',
+    CustomMessage('WebView2Required'),
     mbConfirmation,
     MB_YESNO) = IDYES then
   begin
     if not ShellExec('open', WebView2DownloadUrl, '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
-      MsgBox('Не удалось открыть страницу Microsoft. Код ошибки: ' + IntToStr(ErrorCode), mbError, MB_OK);
+      MsgBox(CustomMessage('WebView2OpenFailed') + ' ' + IntToStr(ErrorCode), mbError, MB_OK);
   end;
 end;

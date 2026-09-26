@@ -1,5 +1,6 @@
 using System.Windows;
 using UnifiedMessenger.App.Services.Notifications;
+using UnifiedMessenger.App.Services.Localization;
 
 namespace UnifiedMessenger.App.Views;
 
@@ -9,7 +10,7 @@ public partial class NotificationPermissionWindow : Window
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(accountDisplayName);
         InitializeComponent();
-        PromptText.Text = $"{accountDisplayName} запрашивает разрешение показывать уведомления";
+        PromptText.Text = Localizer.Instance.Format("{0} is requesting permission to show notifications", accountDisplayName);
     }
 
     private void Allow_Click(object sender, RoutedEventArgs eventArgs) => DialogResult = true;

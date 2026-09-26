@@ -1,7 +1,8 @@
 <Window x:Class="UnifiedMessenger.App.Views.WebViewRuntimeRequiredWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Требуется WebView2 Runtime"
+             xmlns:loc="clr-namespace:UnifiedMessenger.App.Services.Localization"
+        Title="{loc:Text Key='WebView2 Runtime required'}"
         Width="480"
         Height="260"
         MinWidth="480"
@@ -20,11 +21,11 @@
         <StackPanel VerticalAlignment="Center">
             <TextBlock FontSize="21"
                        FontWeight="SemiBold"
-                       Text="Для работы приложения требуется Microsoft Edge WebView2 Runtime."
+                       Text="{loc:Text Key='Microsoft Edge WebView2 Runtime is required to run this application.'}"
                        TextWrapping="Wrap" />
             <TextBlock Margin="0,14,0,0"
                        Foreground="{DynamicResource TextSecondaryBrush}"
-                       Text="Откройте официальную страницу Microsoft, установите Evergreen Runtime и снова запустите raven."
+                       Text="{loc:Text Key='Open the official Microsoft page, install Evergreen Runtime, and restart raven.'}"
                        TextWrapping="Wrap" />
         </StackPanel>
 
@@ -33,10 +34,10 @@
                     Height="40"
                     Margin="0,0,10,0"
                     Click="OnCloseClicked"
-                    Content="Закрыть" />
+                    Content="{loc:Text Key='Close'}" />
             <Button Style="{StaticResource PrimaryButtonStyle}"
                     Click="OnInstallClicked"
-                    Content="Установить" />
+                    Content="{loc:Text Key='Install'}" />
         </StackPanel>
     </Grid>
 </Window>

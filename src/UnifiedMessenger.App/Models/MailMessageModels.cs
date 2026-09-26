@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using UnifiedMessenger.App.Services.Localization;
 
 namespace UnifiedMessenger.App.Models;
 
@@ -45,8 +46,11 @@ public sealed record MailMessageSummary(
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    internal void RefreshLocalizedPresentation() =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StarActionText)));
+
     public bool HasAttachments => AttachmentSummary.Count > 0;
-    public string StarActionText => IsStarred ? "Снять пометку" : "Пометить";
+    public string StarActionText => IsStarred ? Localizer.Instance.Get("Remove star") : Localizer.Instance.Get("Add star");
     public int AttachmentCount => AttachmentSummary.Count;
     public IReadOnlyList<MailAttachmentPreviewItem> AttachmentPreviewItems => AttachmentSummary.PreviewItems;
     public bool HasMoreAttachments => AttachmentSummary.RemainingCount > 0;
@@ -297,7 +301,8 @@ public static class MailAttachmentSizeFormatter
             return "—";
         }
 
-        string[] units = ["Б", "КБ", "МБ", "ГБ"];
+        string[] units = [Localizer.Instance.Get("B"), Localizer.Instance.Get("KB"),
+            Localizer.Instance.Get("MB"), Localizer.Instance.Get("GB")];
         double value = bytes;
         int unit = 0;
         while (value >= 1024 && unit < units.Length - 1)

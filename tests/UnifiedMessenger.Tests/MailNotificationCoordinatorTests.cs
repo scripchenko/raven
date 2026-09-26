@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Localization;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Tray;
@@ -30,8 +31,8 @@ public sealed class MailNotificationCoordinatorTests
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
         Assert.Equal("Gmail • first@example.test", popup.ServiceName);
-        Assert.Equal("Новое письмо", popup.Title);
-        Assert.Equal("Получено новое письмо", popup.Body);
+        Assert.Equal("New mail", popup.Title);
+        Assert.Equal("A new message was received", popup.Body);
         Assert.Equal(NotificationPopupBrand.Gmail, popup.Brand);
         Assert.Null(popup.PreviewText);
         Assert.Null(popup.SenderAvatarInitials);
@@ -86,7 +87,7 @@ public sealed class MailNotificationCoordinatorTests
             new MailNotificationPreview("Иван Петров", "ivan@yandex.test", "Важное письмо", "Короткий preview"));
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Яндекс Почта", popup.ServiceName);
+        Assert.Equal(Localizer.Instance.Get("Yandex Mail"), popup.ServiceName);
         Assert.Equal("Иван Петров", popup.Title);
         Assert.Equal("Важное письмо", popup.Body);
         Assert.Equal("Короткий preview", popup.PreviewText);
@@ -105,7 +106,7 @@ public sealed class MailNotificationCoordinatorTests
             new MailNotificationPreview("Sender", "sender@yandex.test", "Subject", string.Empty));
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Яндекс Почта • first@example.test", popup.ServiceName);
+        Assert.Equal($"{Localizer.Instance.Get("Yandex Mail")} • first@example.test", popup.ServiceName);
         Assert.Equal(NotificationPopupBrand.Yandex, popup.Brand);
     }
 
@@ -117,8 +118,8 @@ public sealed class MailNotificationCoordinatorTests
             new MailNotificationPreview(string.Empty, string.Empty, string.Empty, string.Empty));
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Неизвестный отправитель", popup.Title);
-        Assert.Equal("(без темы)", popup.Body);
+        Assert.Equal("Unknown sender", popup.Title);
+        Assert.Equal("(no subject)", popup.Body);
         Assert.Null(popup.PreviewText);
         Assert.Null(popup.SenderAvatarInitials);
         Assert.Equal(NotificationPopupBrand.Yandex, popup.Brand);
@@ -144,7 +145,7 @@ public sealed class MailNotificationCoordinatorTests
             new MailNotificationPreview("Иван Петров", "ivan@mail.test", "Важное письмо", "Короткий preview"));
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Почта Mail.ru", popup.ServiceName);
+        Assert.Equal(Localizer.Instance.Get("Mail.ru Mail"), popup.ServiceName);
         Assert.Equal("Иван Петров", popup.Title);
         Assert.Equal("Важное письмо", popup.Body);
         Assert.Equal("Короткий preview", popup.PreviewText);
@@ -164,7 +165,7 @@ public sealed class MailNotificationCoordinatorTests
             new MailNotificationPreview("Sender", "sender@mail.test", "Subject", string.Empty));
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Почта Mail.ru • first@example.test", popup.ServiceName);
+        Assert.Equal($"{Localizer.Instance.Get("Mail.ru Mail")} • first@example.test", popup.ServiceName);
         Assert.Equal(NotificationPopupBrand.MailRu, popup.Brand);
     }
 
@@ -178,9 +179,9 @@ public sealed class MailNotificationCoordinatorTests
             new MailNotificationPreview("Sender", "sender@mail.test", "Subject", "Snippet"));
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Почта Mail.ru", popup.ServiceName);
-        Assert.Equal("Новое письмо", popup.Title);
-        Assert.Equal("Получено новое письмо", popup.Body);
+        Assert.Equal(Localizer.Instance.Get("Mail.ru Mail"), popup.ServiceName);
+        Assert.Equal(Localizer.Instance.Get("New mail"), popup.Title);
+        Assert.Equal(Localizer.Instance.Get("A new message was received"), popup.Body);
         Assert.Null(popup.PreviewText);
         Assert.Null(popup.SenderAvatarInitials);
         Assert.Equal(NotificationPopupBrand.MailRu, popup.Brand);
@@ -218,8 +219,8 @@ public sealed class MailNotificationCoordinatorTests
             new MailNotificationPreview(string.Empty, string.Empty, string.Empty, string.Empty));
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Неизвестный отправитель", popup.Title);
-        Assert.Equal("(без темы)", popup.Body);
+        Assert.Equal("Unknown sender", popup.Title);
+        Assert.Equal("(no subject)", popup.Body);
         Assert.Null(popup.PreviewText);
         Assert.Null(popup.SenderAvatarInitials);
         Assert.True(popup.ShowContentSourceIcon);
@@ -238,8 +239,8 @@ public sealed class MailNotificationCoordinatorTests
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
         Assert.Equal("Gmail", popup.ServiceName);
-        Assert.Equal("Новое письмо", popup.Title);
-        Assert.Equal("Получено новое письмо", popup.Body);
+        Assert.Equal("New mail", popup.Title);
+        Assert.Equal("A new message was received", popup.Body);
         Assert.Null(popup.PreviewText);
         Assert.Null(popup.SenderAvatarInitials);
         Assert.Equal(NotificationPopupBrand.Gmail, popup.Brand);
@@ -288,8 +289,8 @@ public sealed class MailNotificationCoordinatorTests
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
         Assert.Equal("Gmail • first@example.test", popup.ServiceName);
-        Assert.Equal("Новые письма", popup.Title);
-        Assert.Equal("Получено новых писем: 4", popup.Body);
+        Assert.Equal("New messages", popup.Title);
+        Assert.Equal("New messages received: 4", popup.Body);
         Assert.Null(popup.PreviewText);
         Assert.Single(fixture.Sound.ServiceTypes);
     }

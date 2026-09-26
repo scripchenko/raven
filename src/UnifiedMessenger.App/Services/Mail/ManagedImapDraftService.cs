@@ -98,8 +98,8 @@ internal sealed class ManagedImapDraftService(
     IMailMimeMessageFactory mimeMessageFactory) : IManagedImapDraftService
 {
     internal const string LogicalIdHeader = "X-Lantern-Draft-Id";
-    private const string RichDraftWarning =
-        "Этот черновик содержит HTML-форматирование, которое raven не может сохранить без потерь.";
+    private static string RichDraftWarning =>
+        L.Instance.Get("This draft contains HTML formatting raven cannot save without losing it.");
 
     public async Task<ManagedImapDraftLoadResult> LoadAsync(
         MailAccount account,
@@ -112,7 +112,7 @@ internal sealed class ManagedImapDraftService(
         {
             throw new ManagedImapDraftException(
                 MailSendFailureKind.InvalidRequest,
-                "Почтовый аккаунт недоступен.");
+                L.Instance.Get("Mail account unavailable."));
         }
 
         (uint expectedValidity, uint uid) identity;
@@ -124,7 +124,7 @@ internal sealed class ManagedImapDraftService(
         {
             throw new ManagedImapDraftException(
                 MailSendFailureKind.InvalidRequest,
-                "Идентификатор черновика некорректен.",
+                L.Instance.Get("Invalid draft identifier."),
                 exception);
         }
 
@@ -138,13 +138,13 @@ internal sealed class ManagedImapDraftService(
             {
                 throw new ManagedImapDraftException(
                     MailSendFailureKind.InvalidRequest,
-                    "Список черновиков изменился. Обновите папку и повторите попытку.");
+                    L.Instance.Get("Draft list changed. Refresh the folder and retry."));
             }
             if (!await session.ExistsAsync(identity.uid, cancellationToken))
             {
                 throw new ManagedImapDraftException(
                     MailSendFailureKind.InvalidRequest,
-                    "Черновик больше недоступен.");
+                    L.Instance.Get("Draft no longer available."));
             }
 
             MimeMessage message = await session.GetMessageAsync(identity.uid, cancellationToken);
@@ -191,21 +191,21 @@ internal sealed class ManagedImapDraftService(
         {
             throw new ManagedImapDraftException(
                 MailSendFailureKind.AuthenticationFailed,
-                "Не удалось войти в почтовый аккаунт. Проверьте пароль приложения.",
+                L.Instance.Get("Could not sign in to the mail account. Check your app password."),
                 exception);
         }
         catch (Exception exception) when (exception is FolderNotFoundException or NotSupportedException)
         {
             throw new ManagedImapDraftException(
                 MailSendFailureKind.CapabilityUnavailable,
-                "Сервер не предоставил системную папку «Черновики».",
+                L.Instance.Get("The server did not provide a Drafts system folder."),
                 exception);
         }
         catch (Exception exception) when (IsTransportFailure(exception) || exception is CommandException)
         {
             throw new ManagedImapDraftException(
                 MailSendFailureKind.ConnectionFailed,
-                "Не удалось открыть черновик. Проверьте подключение.",
+                L.Instance.Get("Could not open the draft. Check your connection."),
                 exception);
         }
         finally
@@ -229,24 +229,24 @@ internal sealed class ManagedImapDraftService(
         if (!Guid.TryParseExact(token, "N", out _)
             || identity is not null && !string.Equals(identity.LogicalId, token, StringComparison.Ordinal))
         {
-            return Failed(token, MailSendFailureKind.InvalidRequest, "Идентификатор черновика некорректен.");
+            return Failed(token, MailSendFailureKind.InvalidRequest, L.Instance.Get("Invalid draft identifier."));
         }
         if (!MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap
             || !account.IsEnabled
             || request.AccountId != account.Id)
         {
-            return Failed(token, MailSendFailureKind.InvalidRequest, "Параметры черновика некорректны.");
+            return Failed(token, MailSendFailureKind.InvalidRequest, L.Instance.Get("Invalid draft settings."));
         }
 
         MailCredential? credential = await credentialStore.LoadAsync(account.CredentialKey, cancellationToken);
         if (credential is not { Kind: MailCredentialKind.Password } || !credential.IsValid())
         {
-            return Failed(token, MailSendFailureKind.AuthenticationFailed, "Не удалось войти в почтовый аккаунт. Проверьте пароль приложения.");
+            return Failed(token, MailSendFailureKind.AuthenticationFailed, L.Instance.Get("Could not sign in to the mail account. Check your app password."));
         }
 
         if (providerFactory.Get(account.Provider) is not PasswordMailProvider provider)
         {
-            return Failed(token, MailSendFailureKind.CapabilityUnavailable, "Черновики для этого аккаунта недоступны.");
+            return Failed(token, MailSendFailureKind.CapabilityUnavailable, L.Instance.Get("Drafts are unavailable for this account."));
         }
 
         MailConnectionSettings? settings = provider.CreateConnectionSettings(
@@ -254,7 +254,7 @@ internal sealed class ManagedImapDraftService(
             account.EmailAddress.Trim());
         if (settings is null)
         {
-            return Failed(token, MailSendFailureKind.CapabilityUnavailable, "Черновики для этого аккаунта недоступны.");
+            return Failed(token, MailSendFailureKind.CapabilityUnavailable, L.Instance.Get("Drafts are unavailable for this account."));
         }
 
         MimeMessage message;
@@ -337,7 +337,7 @@ internal sealed class ManagedImapDraftService(
                 return Failed(
                     token,
                     MailSendFailureKind.CapabilityUnavailable,
-                    "Сервер не поддерживает безопасное обновление черновика.");
+                    L.Instance.Get("The server does not support safely updating the draft."));
             }
 
             mutationAttempted = true;
@@ -370,27 +370,27 @@ internal sealed class ManagedImapDraftService(
         {
             return mutationAttempted
                 ? Ambiguous(latestConfirmedIdentity, token)
-                : Failed(token, MailSendFailureKind.CanceledBeforeSubmission, "Сохранение черновика отменено.");
+                : Failed(token, MailSendFailureKind.CanceledBeforeSubmission, L.Instance.Get("Draft save canceled."));
         }
         catch (MailKit.Security.AuthenticationException)
         {
-            return Failed(token, MailSendFailureKind.AuthenticationFailed, "Не удалось войти в почтовый аккаунт. Проверьте пароль приложения.");
+            return Failed(token, MailSendFailureKind.AuthenticationFailed, L.Instance.Get("Could not sign in to the mail account. Check your app password."));
         }
         catch (Exception exception) when (exception is FolderNotFoundException or NotSupportedException)
         {
-            return Failed(token, MailSendFailureKind.CapabilityUnavailable, "Сервер не предоставил системную папку «Черновики».");
+            return Failed(token, MailSendFailureKind.CapabilityUnavailable, L.Instance.Get("The server did not provide a Drafts system folder."));
         }
         catch (Exception exception) when (IsTransportFailure(exception))
         {
             return mutationAttempted
                 ? Ambiguous(latestConfirmedIdentity, token)
-                : Failed(token, MailSendFailureKind.ConnectionFailed, "Не удалось сохранить черновик. Проверьте подключение.");
+                : Failed(token, MailSendFailureKind.ConnectionFailed, L.Instance.Get("Could not save the draft. Check your connection."));
         }
         catch (CommandException)
         {
             return mutationAttempted
                 ? Ambiguous(latestConfirmedIdentity, token)
-                : Failed(token, MailSendFailureKind.ProtocolRejected, "Сервер отклонил сохранение черновика.");
+                : Failed(token, MailSendFailureKind.ProtocolRejected, L.Instance.Get("The server rejected saving the draft."));
         }
         finally
         {
@@ -461,7 +461,7 @@ internal sealed class ManagedImapDraftService(
         {
             throw new ManagedImapDraftException(
                 MailSendFailureKind.CredentialMissing,
-                "Не удалось прочитать защищённые данные почтового аккаунта.",
+                L.Instance.Get("Could not read protected mail account credentials."),
                 exception);
         }
 
@@ -469,21 +469,21 @@ internal sealed class ManagedImapDraftService(
         {
             throw new ManagedImapDraftException(
                 MailSendFailureKind.AuthenticationFailed,
-                "Не удалось войти в почтовый аккаунт. Проверьте пароль приложения.");
+                L.Instance.Get("Could not sign in to the mail account. Check your app password."));
         }
 
         if (providerFactory.Get(account.Provider) is not PasswordMailProvider provider)
         {
             throw new ManagedImapDraftException(
                 MailSendFailureKind.CapabilityUnavailable,
-                "Черновики для этого аккаунта недоступны.");
+                L.Instance.Get("Drafts are unavailable for this account."));
         }
 
         MailConnectionSettings settings = provider.CreateConnectionSettings(
             new(account.Provider, account.EmailAddress, account.DisplayName, account.GenericConnectionSettings),
             account.EmailAddress.Trim()) ?? throw new ManagedImapDraftException(
                 MailSendFailureKind.CapabilityUnavailable,
-                "Черновики для этого аккаунта недоступны.");
+                L.Instance.Get("Drafts are unavailable for this account."));
         return (settings.Imap, credential.Secret);
     }
 
@@ -545,7 +545,7 @@ internal sealed class ManagedImapDraftService(
             identity,
             token,
             MailSendFailureKind.Ambiguous,
-            "raven не может подтвердить состояние черновика. Проверьте папку «Черновики» перед повтором.");
+            L.Instance.Get("raven cannot confirm the draft state. Check Drafts before retrying."));
 
     private static bool IsTransportFailure(Exception exception) =>
         exception is IOException

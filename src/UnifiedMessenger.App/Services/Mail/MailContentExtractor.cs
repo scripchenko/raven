@@ -7,7 +7,7 @@ namespace UnifiedMessenger.App.Services.Mail;
 
 public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMailContentExtractor
 {
-    private const string EmptyBodyText = "В письме нет текстового содержимого.";
+    private static string EmptyBodyText => L.Instance.Get("This message has no text content.");
 
     public MailMessageContent Extract(string messageKey, MimeMessage message, bool isUnread)
     {
@@ -88,7 +88,7 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
         MailboxAddress? mailbox = addresses?.Mailboxes.FirstOrDefault();
         if (mailbox is null)
         {
-            return ("Неизвестный отправитель", string.Empty);
+            return (L.Instance.Get("Unknown sender"), string.Empty);
         }
 
         string address = mailbox.Address?.Trim() ?? string.Empty;
@@ -121,7 +121,7 @@ public sealed class MailContentExtractor(IMailHtmlSanitizer htmlSanitizer) : IMa
         ?? [];
 
     internal static string NormalizeSubject(string? subject) =>
-        string.IsNullOrWhiteSpace(subject) ? "(без темы)" : subject.Trim();
+        string.IsNullOrWhiteSpace(subject) ? L.Instance.Get("(no subject)") : subject.Trim();
 
     internal static string NormalizePreview(string? preview)
     {

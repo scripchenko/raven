@@ -3,6 +3,7 @@ using System.IO;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
 using UnifiedMessenger.App.Services.Notifications;
+using UnifiedMessenger.App.Services.Localization;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
 using UnifiedMessenger.App.Services.WebView;
@@ -10,6 +11,7 @@ using UnifiedMessenger.App.ViewModels;
 
 namespace UnifiedMessenger.Tests;
 
+[Collection("Localization state")]
 public sealed class Stage3MultiServiceTests
 {
     private readonly BuiltInServiceCatalog _catalog = new();
@@ -169,6 +171,49 @@ public sealed class Stage3MultiServiceTests
         Assert.True(viewModel.HasSelectedAccount);
         Assert.True(viewModel.HasActiveWebView);
         Assert.Equal(0, sessions.ReleaseSessionCount);
+    }
+
+    [Fact]
+    public async Task LanguageSwitchKeepsSelectedServiceProfileAndSessionInfrastructure()
+    {
+        string previousLanguage = Localizer.Instance.Language;
+        AppSettings settings = AppSettings.CreateDefault();
+        settings.Language = "ru";
+        ServiceInstance telegram = ServiceInstanceManager.Add(settings, _catalog.Get(ServiceType.Telegram));
+        settings.LastServiceId = telegram.Id;
+        StubSessionManager sessions = new();
+        StubSettingsService settingsService = new();
+        using MainWindowViewModel viewModel = new(
+            _catalog,
+            sessions,
+            new ApplicationSettingsStore(settingsService),
+            new ServiceActivityCoordinator(),
+            new StubWebNotificationCoordinator());
+        viewModel.Initialize(settings);
+        Localizer.Instance.SetLanguage("ru");
+        NavigationAccountItem navigationItem = Assert.Single(viewModel.NavigationItems);
+        string profileName = telegram.ProfileName;
+        try
+        {
+            await viewModel.SetLanguageAsync("en");
+            Assert.Equal("en", settings.Language);
+            Assert.Same(telegram, viewModel.SelectedService);
+            Assert.Same(navigationItem, viewModel.SelectedNavigationItem);
+            Assert.Equal(profileName, Assert.IsType<ServiceInstance>(viewModel.SelectedService).ProfileName);
+            Assert.Equal(0, sessions.ReleaseSessionCount);
+            Assert.False(sessions.IsShutdownStarted);
+
+            await viewModel.SetLanguageAsync("ru");
+            Assert.Equal("ru", settings.Language);
+            Assert.Same(telegram, viewModel.SelectedService);
+            Assert.Same(navigationItem, viewModel.SelectedNavigationItem);
+            Assert.Equal(0, sessions.ReleaseSessionCount);
+            Assert.Equal(2, settingsService.SaveCount);
+        }
+        finally
+        {
+            Localizer.Instance.SetLanguage(previousLanguage);
+        }
     }
 
     [Fact]
@@ -532,10 +577,16 @@ public sealed class Stage3MultiServiceTests
 
     private sealed class StubSettingsService : ISettingsService
     {
+        public int SaveCount { get; private set; }
+
         public Task<SettingsLoadResult> LoadAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(new SettingsLoadResult(AppSettings.CreateDefault()));
 
-        public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+        {
+            SaveCount++;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class StubWebNotificationCoordinator : IWebNotificationCoordinator

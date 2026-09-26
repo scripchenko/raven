@@ -115,8 +115,8 @@ internal sealed class GmailDraftService(
     IMailOutgoingAttachmentMaterializer attachmentMaterializer,
     IMailMimeMessageFactory mimeMessageFactory) : IGmailDraftService
 {
-    private const string RichDraftWarning =
-        "Этот черновик содержит форматирование, которое raven не может сохранить без потерь. Откройте его в Gmail.";
+    private static string RichDraftWarning =>
+        L.Instance.Get("This draft contains formatting raven cannot save without losing it. Open it in Gmail.");
 
     public async Task<GmailDraftLoadResult> LoadAsync(
         MailAccount account,
@@ -169,7 +169,7 @@ internal sealed class GmailDraftService(
         {
             throw new GmailDraftException(
                 MailSendFailureKind.InvalidRequest,
-                "Не удалось безопасно открыть черновик Gmail.",
+                L.Instance.Get("Could not safely open the Gmail draft."),
                 exception);
         }
     }
@@ -186,7 +186,7 @@ internal sealed class GmailDraftService(
         {
             throw new GmailDraftException(
                 MailSendFailureKind.InvalidRequest,
-                "Параметры черновика Gmail некорректны.");
+                L.Instance.Get("Invalid Gmail draft settings."));
         }
 
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
@@ -249,7 +249,7 @@ internal sealed class GmailDraftService(
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.CanceledBeforeSubmission,
-                "Отправка отменена до передачи письма.");
+                L.Instance.Get("Sending was canceled before the message was transmitted."));
         }
         catch (GmailDraftException exception)
         {
@@ -325,7 +325,7 @@ internal sealed class GmailDraftService(
         {
             throw new GmailDraftException(
                 MailSendFailureKind.CredentialMissing,
-                "Не удалось прочитать защищённые данные Gmail.",
+                L.Instance.Get("Could not read protected Gmail credentials."),
                 exception);
         }
 
@@ -333,14 +333,14 @@ internal sealed class GmailDraftService(
         {
             throw new GmailDraftException(
                 MailSendFailureKind.ReauthorizationRequired,
-                "Требуется вход в Google. Войдите снова, чтобы продолжить работу с черновиком.");
+                L.Instance.Get("Google sign-in is required. Sign in again to continue working with this draft."));
         }
 
         if (!credential.HasGmailModifyScope)
         {
             throw new GmailDraftException(
                 MailSendFailureKind.CapabilityUnavailable,
-                "Текущий доступ Google не разрешает работу с черновиками. Подключите Gmail повторно с разрешением gmail.modify.");
+                L.Instance.Get("Your current Google access does not allow drafts. Reconnect Gmail with gmail.modify permission."));
         }
 
         return credential;
@@ -361,7 +361,7 @@ internal sealed class GmailDraftService(
         {
             throw new GmailDraftException(
                 MailSendFailureKind.InvalidRequest,
-                "Почтовый аккаунт Gmail недоступен.");
+                L.Instance.Get("Gmail account unavailable."));
         }
     }
 }
@@ -386,7 +386,7 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
             {
                 throw new GmailDraftException(
                     MailSendFailureKind.InvalidRequest,
-                    "Черновик Gmail больше недоступен.");
+                    L.Instance.Get("Gmail draft no longer available."));
             }
 
             return new GmailApiDraftContent(
@@ -403,7 +403,7 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
         }
         catch (Exception exception)
         {
-            throw MapFailure(exception, "Не удалось открыть черновик Gmail.");
+            throw MapFailure(exception, L.Instance.Get("Could not open the Gmail draft."));
         }
     }
 
@@ -445,7 +445,7 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
         {
             throw submissionStarted ? Ambiguous(exception) : new GmailDraftException(
                 MailSendFailureKind.CanceledBeforeSubmission,
-                "Отправка отменена до передачи письма.",
+                L.Instance.Get("Sending was canceled before the message was transmitted."),
                 exception);
         }
         catch (Exception exception) when (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
@@ -460,14 +460,14 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
         {
             throw new GmailDraftException(
                 MailSendFailureKind.MessageRejected,
-                "Gmail отклонил отправку черновика. Проверьте письмо и повторите попытку.",
+                L.Instance.Get("Gmail rejected sending the draft. Check the message and retry."),
                 exception);
         }
         catch (Exception exception)
         {
             throw new GmailDraftException(
                 MailSendFailureKind.ConnectionFailed,
-                "Не удалось подключиться к Gmail. Проверьте сеть и повторите попытку.",
+                L.Instance.Get("Could not connect to Gmail. Check your network and retry."),
                 exception);
         }
     }
@@ -489,7 +489,7 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
         }
         catch (Exception exception)
         {
-            throw MapFailure(exception, "Не удалось удалить черновик Gmail.");
+            throw MapFailure(exception, L.Instance.Get("Could not delete the Gmail draft."));
         }
     }
 
@@ -522,7 +522,7 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
             {
                 throw new GmailDraftException(
                     MailSendFailureKind.ConnectionFailed,
-                    "Gmail не подтвердил сохранение черновика.");
+                    L.Instance.Get("Gmail did not confirm saving the draft."));
             }
 
             return ToIdentity(saved);
@@ -537,7 +537,7 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
             {
                 throw new GmailDraftException(
                     MailSendFailureKind.Ambiguous,
-                    "Не удалось подтвердить создание черновика. Проверьте папку «Черновики» перед повтором.",
+                    L.Instance.Get("Could not confirm the draft was created. Check Drafts before retrying."),
                     exception);
             }
 
@@ -550,12 +550,12 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
         {
             throw new GmailDraftException(
                 MailSendFailureKind.Ambiguous,
-                "Не удалось подтвердить создание черновика. Проверьте папку «Черновики» перед повтором.",
+                L.Instance.Get("Could not confirm the draft was created. Check Drafts before retrying."),
                 exception);
         }
         catch (Exception exception)
         {
-            throw MapFailure(exception, "Не удалось сохранить черновик Gmail.");
+            throw MapFailure(exception, L.Instance.Get("Could not save the Gmail draft."));
         }
     }
 
@@ -619,7 +619,7 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
         {
             return new GmailDraftException(
                 MailSendFailureKind.InvalidRequest,
-                "Черновик Gmail больше недоступен.",
+                L.Instance.Get("Gmail draft no longer available."),
                 exception);
         }
 
@@ -639,13 +639,13 @@ internal sealed class GmailDraftApiClient : IGmailDraftApiClient
     private static GmailDraftException Reauthorization(Exception? exception = null) =>
         new(
             MailSendFailureKind.ReauthorizationRequired,
-            "Требуется вход в Google. Войдите снова, чтобы продолжить работу с черновиком.",
+            L.Instance.Get("Google sign-in is required. Sign in again to continue working with this draft."),
             exception);
 
     private static GmailDraftException Ambiguous(Exception exception) =>
         new(
             MailSendFailureKind.Ambiguous,
-            "Не удалось подтвердить отправку. Перед повторной отправкой проверьте папку «Отправленные».",
+            L.Instance.Get("Could not confirm sending. Check Sent before sending again."),
             exception);
 
     private sealed class AuthorizedDraftSession(

@@ -135,7 +135,7 @@ internal interface IGmailApiReadClient
     {
         if (!string.Equals(labelId, GmailSystemFolders.Inbox, StringComparison.Ordinal))
         {
-            throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка Gmail недоступна.");
+            throw new MailReadException(MailReadFailureKind.FolderUnavailable, L.Instance.Get("This Gmail folder is unavailable."));
         }
 
         return GetInboxPageAsync(credential, accountId, pageToken, pageSize, cancellationToken);
@@ -150,7 +150,7 @@ internal interface IGmailApiReadClient
         Task.FromException(
             new MailReadException(
                 MailReadFailureKind.MutationFailed,
-                "Не удалось изменить статус письма Gmail."));
+                L.Instance.Get("Could not change the Gmail message read status.")));
 
 }
 
@@ -366,7 +366,7 @@ internal sealed class GmailMailReadProvider(
         {
             throw new MailReadException(
                 MailReadFailureKind.InvalidSearchQuery,
-                "Не удалось выполнить поиск. Проверьте запрос.");
+                L.Instance.Get("Could not search mail. Check your query."));
         }
 
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
@@ -437,7 +437,7 @@ internal sealed class GmailMailReadProvider(
         {
             throw new MailReadException(
                 MailReadFailureKind.InvalidMessage,
-                "Не удалось безопасно прочитать содержимое письма.");
+                L.Instance.Get("Could not safely read the message content."));
         }
     }
 
@@ -479,7 +479,7 @@ internal sealed class GmailMailReadProvider(
         {
             throw new MailAttachmentException(
                 MailAttachmentFailureKind.ProviderFailure,
-                "Не удалось загрузить вложение.",
+                L.Instance.Get("Could not load the attachment."),
                 exception);
         }
     }
@@ -500,7 +500,7 @@ internal sealed class GmailMailReadProvider(
             : new MailReadStateCapability(
                 false,
                 true,
-                "Чтобы менять статус писем, нужно снова разрешить доступ Google.");
+                L.Instance.Get("Allow Google access again to change message read status."));
     }
 
     public async Task SetReadStateAsync(
@@ -514,7 +514,7 @@ internal sealed class GmailMailReadProvider(
         ValidateFolder(folder);
         if (!folder.SupportsReadState)
         {
-            throw new MailReadException(MailReadFailureKind.MutationFailed, "Для этой папки действие недоступно.");
+            throw new MailReadException(MailReadFailureKind.MutationFailed, L.Instance.Get("This action is unavailable for this folder."));
         }
 
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
@@ -522,7 +522,7 @@ internal sealed class GmailMailReadProvider(
         {
             throw new MailReadException(
                 MailReadFailureKind.MutationNotAuthorized,
-                "Чтобы менять статус писем, нужно снова разрешить доступ Google.");
+                L.Instance.Get("Allow Google access again to change message read status."));
         }
 
         await apiClient.SetReadStateAsync(
@@ -576,7 +576,7 @@ internal sealed class GmailMailReadProvider(
         MailCredential? credential = await credentialStore.LoadAsync(account.CredentialKey, cancellationToken);
         if (credential is not { Kind: MailCredentialKind.GmailOAuthRefreshToken } || !credential.IsValid())
         {
-            throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
+            throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, L.Instance.Get("Google sign-in is required again."));
         }
 
         return credential;
@@ -587,7 +587,7 @@ internal sealed class GmailMailReadProvider(
         ArgumentNullException.ThrowIfNull(account);
         if (account.Provider != MailProviderType.Gmail || pageSize is < 1 or > 100)
         {
-            throw new MailReadException(MailReadFailureKind.InvalidConfiguration, "Почтовый аккаунт настроен некорректно.");
+            throw new MailReadException(MailReadFailureKind.InvalidConfiguration, L.Instance.Get("Mail account configuration is invalid."));
         }
     }
 
@@ -601,7 +601,7 @@ internal sealed class GmailMailReadProvider(
                 : GmailSystemFolders.LabelIds.Contains(folder.ProviderLocator, StringComparer.Ordinal);
         if (!isValid)
         {
-            throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка Gmail недоступна.");
+            throw new MailReadException(MailReadFailureKind.FolderUnavailable, L.Instance.Get("This Gmail folder is unavailable."));
         }
     }
 
@@ -611,7 +611,7 @@ internal sealed class GmailMailReadProvider(
             || !messageKey.StartsWith(MessageKeyPrefix, StringComparison.Ordinal)
             || messageKey.Length == MessageKeyPrefix.Length)
         {
-            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Письмо больше недоступно.");
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, L.Instance.Get("Message no longer available."));
         }
 
         return messageKey[MessageKeyPrefix.Length..];
@@ -848,7 +848,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
                 : response.NextPageToken;
             if (pageToken is not null && !visitedPageTokens.Add(pageToken))
             {
-                throw new InvalidOperationException("Gmail вернул повторяющийся маркер страницы истории.");
+                throw new InvalidOperationException(L.Instance.Get("Gmail returned a repeated history page token."));
             }
         }
         while (pageToken is not null);
@@ -866,7 +866,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         Profile profile = await service.Users.GetProfile("me").ExecuteAsync(cancellationToken);
         if (profile.HistoryId is not ulong historyId)
         {
-            throw new InvalidOperationException("Gmail не вернул идентификатор истории.");
+            throw new InvalidOperationException(L.Instance.Get("Gmail did not return a history ID."));
         }
 
         int unreadCount = await ReadInboxUnreadCountAsync(service, cancellationToken);
@@ -961,7 +961,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         {
             throw new MailReadException(
                 MailReadFailureKind.FolderUnavailable,
-                "Этот ярлык Gmail больше недоступен.");
+                L.Instance.Get("This Gmail label is no longer available."));
         }
         catch (Exception exception)
         {
@@ -1051,7 +1051,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
             GmailMessage response = await request.ExecuteAsync(cancellationToken);
             if (string.IsNullOrWhiteSpace(response.Raw))
             {
-                throw new MailReadException(MailReadFailureKind.InvalidMessage, "Не удалось безопасно прочитать содержимое письма.");
+                throw new MailReadException(MailReadFailureKind.InvalidMessage, L.Instance.Get("Could not safely read the message content."));
             }
 
             return new GmailApiRawMessage(
@@ -1069,11 +1069,11 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         }
         catch (Exception exception) when (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
-            throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
+            throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, L.Instance.Get("Google sign-in is required again."));
         }
         catch (Exception exception) when (IsExpectedApiException(exception))
         {
-            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Не удалось загрузить выбранное письмо.");
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, L.Instance.Get("Could not load the selected message."));
         }
     }
 
@@ -1100,11 +1100,11 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         }
         catch (Exception exception) when (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
-            throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
+            throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, L.Instance.Get("Google sign-in is required again."));
         }
         catch (Exception exception) when (IsExpectedApiException(exception))
         {
-            throw new MailReadException(MailReadFailureKind.MutationFailed, "Не удалось изменить статус письма Gmail.");
+            throw new MailReadException(MailReadFailureKind.MutationFailed, L.Instance.Get("Could not change the Gmail message read status."));
         }
     }
 
@@ -1403,7 +1403,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
                 : response.NextPageToken;
             if (pageToken is not null && !visitedPageTokens.Add(pageToken))
             {
-                throw new InvalidOperationException("Gmail вернул повторяющийся маркер страницы черновиков.");
+                throw new InvalidOperationException(L.Instance.Get("Gmail returned a repeated draft page token."));
             }
         }
         while (pageToken is not null && pendingMessageIds.Count > 0);
@@ -1759,7 +1759,7 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
         if (!await credential.RefreshTokenAsync(cancellationToken)
             || string.IsNullOrWhiteSpace(credential.Token.AccessToken))
         {
-            throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
+            throw new MailReadException(MailReadFailureKind.ReauthorizationRequired, L.Instance.Get("Google sign-in is required again."));
         }
     }
 
@@ -1772,23 +1772,23 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
 
         if (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
-            return new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
+            return new MailReadException(MailReadFailureKind.ReauthorizationRequired, L.Instance.Get("Google sign-in is required again."));
         }
 
         if (IsRateLimitFailure(exception))
         {
             return new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Gmail временно ограничил частоту запросов. Попробуйте ещё раз.");
+                L.Instance.Get("Gmail is temporarily rate-limiting requests. Please retry."));
         }
 
         return IsNetworkFailure(exception)
             ? new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Не удалось загрузить почту. Проверьте подключение к сети.")
+                L.Instance.Get("Could not load mail. Check your network connection."))
             : new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Не удалось загрузить почту. Попробуйте ещё раз.");
+                L.Instance.Get("Could not load mail. Please retry."));
     }
 
     internal static MailReadException MapSearchException(Exception exception)
@@ -1800,23 +1800,23 @@ internal sealed class GmailApiReadClient : IGmailApiReadClient, IGmailMailboxApi
 
         if (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
-            return new MailReadException(MailReadFailureKind.ReauthorizationRequired, "Требуется повторный вход в Google.");
+            return new MailReadException(MailReadFailureKind.ReauthorizationRequired, L.Instance.Get("Google sign-in is required again."));
         }
 
         return exception switch
         {
             GoogleApiException { HttpStatusCode: HttpStatusCode.BadRequest } => new MailReadException(
                 MailReadFailureKind.InvalidSearchQuery,
-                "Не удалось выполнить поиск. Проверьте запрос."),
+                L.Instance.Get("Could not search mail. Check your query.")),
             GoogleApiException => new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Gmail временно не может выполнить поиск. Попробуйте ещё раз позже."),
+                L.Instance.Get("Gmail search is temporarily unavailable. Please retry later.")),
             _ when IsNetworkFailure(exception) => new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Не удалось выполнить поиск. Проверьте подключение к сети."),
+                L.Instance.Get("Could not search mail. Check your network connection.")),
             _ => new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Не удалось выполнить поиск. Попробуйте ещё раз.")
+                L.Instance.Get("Could not search mail. Please retry."))
         };
     }
 

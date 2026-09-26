@@ -47,11 +47,11 @@ public sealed class RavenUpdateTests
         string welcome = File.ReadAllText(FindRepositoryFile("src", "UnifiedMessenger.App", "Views", "WelcomeView.xaml"));
         string welcomeCode = File.ReadAllText(FindRepositoryFile("src", "UnifiedMessenger.App", "Views", "WelcomeView.xaml.cs"));
         string about = File.ReadAllText(FindRepositoryFile("src", "UnifiedMessenger.App", "Views", "SettingsView.xaml"));
-        Assert.Contains("raven — мессенджеры и почта в одном окне", welcome, StringComparison.Ordinal);
-        Assert.Contains("Чтобы начать, откройте Настройки и добавьте нужные аккаунты.", welcome, StringComparison.Ordinal);
-        Assert.Contains("Поддержка: @dscripchenko", welcome, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='raven — messaging and email in one place.'}", welcome, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='To get started, open Settings and add the accounts you need.'}", welcome, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Support: @dscripchenko'}", welcome, StringComparison.Ordinal);
         Assert.Contains("https://t.me/dscripchenko", welcomeCode, StringComparison.Ordinal);
-        Assert.Contains("Проверить обновления", about, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Check for updates'}", about, StringComparison.Ordinal);
         Assert.Contains("OpenSupportCommand", about, StringComparison.Ordinal);
     }
 

@@ -375,7 +375,7 @@ internal sealed class GmailMailboxManagementService(
         {
             throw new MailReadException(
                 MailReadFailureKind.InvalidConfiguration,
-                "Действие доступно только для Gmail.");
+                L.Instance.Get("This action is only available for Gmail."));
         }
 
         MailCredential? credential = await credentialStore.LoadAsync(account.CredentialKey, cancellationToken);
@@ -383,14 +383,14 @@ internal sealed class GmailMailboxManagementService(
         {
             throw new MailReadException(
                 MailReadFailureKind.ReauthorizationRequired,
-                "Требуется повторный вход в Google.");
+                L.Instance.Get("Google sign-in is required again."));
         }
 
         if (!credential.HasGmailModifyScope)
         {
             throw new MailReadException(
                 MailReadFailureKind.MutationNotAuthorized,
-                "Чтобы управлять письмами, нужно снова разрешить доступ Google.");
+                L.Instance.Get("Allow Google access again to manage messages."));
         }
 
         return credential;

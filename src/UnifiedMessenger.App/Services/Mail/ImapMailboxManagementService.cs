@@ -55,7 +55,7 @@ internal sealed class ImapMailboxManagementService(
         if (!Supports(account.Provider) || !account.IsEnabled || !CanApply(source.Kind, action)
             || keys.Length is 0 or > 1000)
         {
-            return Failure(keys, destination, "Действие недоступно для этой папки.");
+            return Failure(keys, destination, L.Instance.Get("Action unavailable for this folder."));
         }
 
         using IDisposable lease = await changes.EnterAsync(account.Id, cancellationToken);
@@ -67,18 +67,18 @@ internal sealed class ImapMailboxManagementService(
             if (validity == 0 || identities.Any(item => item.Identity.UidValidity != validity))
             {
                 return Failure(keys, destination,
-                    "Список папки изменился. Обновите её и повторите действие.", requiresRefresh: true);
+                    L.Instance.Get("Folder contents changed. Refresh and retry."), requiresRefresh: true);
             }
 
             MailCredential? credential = await credentials.LoadAsync(account.CredentialKey, cancellationToken);
             if (credential is not { Kind: MailCredentialKind.Password } || !credential.IsValid())
             {
-                return Failure(keys, destination, "Не удалось войти в почту. Проверьте пароль приложения.");
+                return Failure(keys, destination, L.Instance.Get("Could not sign in to mail. Check your app password."));
             }
 
             if (providers.Get(account.Provider) is not PasswordMailProvider provider)
             {
-                return Failure(keys, destination, "Почтовый аккаунт настроен некорректно.");
+                return Failure(keys, destination, L.Instance.Get("Mail account configuration is invalid."));
             }
 
             MailServerSettings server = provider.CreateConnectionSettings(
@@ -92,23 +92,23 @@ internal sealed class ImapMailboxManagementService(
             }
             if (destination is not null && !session.SupportsMove && !session.SupportsUidPlus)
             {
-                return Failure(keys, destination, "Сервер не поддерживает безопасное перемещение этих писем.");
+                return Failure(keys, destination, L.Instance.Get("The server does not support safely moving these messages."));
             }
 
             ImapMailboxSourceState opened = await session.OpenSourceAsync(source, cancellationToken);
             if (opened.UidValidity != validity)
             {
                 return Failure(keys, destination,
-                    "Список папки изменился. Обновите её и повторите действие.", requiresRefresh: true);
+                    L.Instance.Get("Folder contents changed. Refresh and retry."), requiresRefresh: true);
             }
 
             if (destination is null && !opened.PermanentFlags.HasFlag(MessageFlags.Seen))
             {
-                return Failure(keys, destination, "Сервер не разрешил изменить эту пометку.");
+                return Failure(keys, destination, L.Instance.Get("The server did not allow changing this flag."));
             }
             if (destination is not null && !session.SupportsMove && !opened.PermanentFlags.HasFlag(MessageFlags.Deleted))
             {
-                return Failure(keys, destination, "Сервер не разрешил безопасное перемещение.");
+                return Failure(keys, destination, L.Instance.Get("The server did not allow a safe move."));
             }
 
             // One UID at a time gives an exact partial-success contract and prevents
@@ -199,7 +199,7 @@ internal sealed class ImapMailboxManagementService(
             }
 
             return new(succeeded, failed, destination,
-                failed.Count > 0 ? "Некоторые письма уже отсутствуют. Список обновлён." : null,
+                failed.Count > 0 ? L.Instance.Get("Some messages are already missing. The list has been refreshed.") : null,
                 true,
                 itemResults);
         }
@@ -231,12 +231,12 @@ internal sealed class ImapMailboxManagementService(
                     new MailMailboxMutationItemResult(key, MailMailboxMutationItemStatus.NotAttempted)));
             }
             string message = exception is MailKit.Security.AuthenticationException
-                ? "Не удалось войти в почту. Проверьте пароль приложения."
+                ? L.Instance.Get("Could not sign in to mail. Check your app password.")
                 : exception is FolderNotFoundException or NotSupportedException
-                    ? "Сервер не предоставил нужную системную папку или возможность."
+                    ? L.Instance.Get("The server did not provide the required system folder or capability.")
                     : attempted
-                        ? "Не удалось подтвердить все изменения. Проверьте исходную и целевую папки перед повтором."
-                        : "Не удалось изменить письма. Проверьте подключение и доступ к папке.";
+                        ? L.Instance.Get("Could not confirm all changes. Check source and destination folders before retrying.")
+                        : L.Instance.Get("Could not modify messages. Check the connection and folder access.");
             return new(
                 succeeded,
                 keys.Except(succeeded, StringComparer.Ordinal).ToArray(),

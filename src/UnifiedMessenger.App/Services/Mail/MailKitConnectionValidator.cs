@@ -20,7 +20,7 @@ public sealed class MailKitConnectionValidator : IMailConnectionValidator
         {
             return MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.InvalidConfiguration,
-                "Проверьте адрес, пароль приложения и параметры серверов.");
+                L.Instance.Get("Check your address, app password, and server settings."));
         }
 
         using ImapClient imap = new();
@@ -41,13 +41,13 @@ public sealed class MailKitConnectionValidator : IMailConnectionValidator
         {
             return MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.AuthenticationFailed,
-                "IMAP отклонил учётные данные. Проверьте адрес и пароль приложения.");
+                L.Instance.Get("IMAP rejected the credentials. Check your address and app password."));
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
             return MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.ConnectionFailed,
-                "Не удалось безопасно подключиться к IMAP-серверу.");
+                L.Instance.Get("Could not connect securely to the IMAP server."));
         }
         finally
         {
@@ -72,13 +72,13 @@ public sealed class MailKitConnectionValidator : IMailConnectionValidator
         {
             return MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.AuthenticationFailed,
-                "SMTP отклонил учётные данные. Проверьте адрес и пароль приложения.");
+                L.Instance.Get("SMTP rejected the credentials. Check your address and app password."));
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
             return MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.SmtpValidationFailed,
-                "IMAP доступен, но не удалось безопасно проверить SMTP-сервер.");
+                L.Instance.Get("IMAP is available, but the SMTP server could not be verified securely."));
         }
         finally
         {

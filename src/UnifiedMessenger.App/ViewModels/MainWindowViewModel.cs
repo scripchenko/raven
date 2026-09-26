@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
 using UnifiedMessenger.App.Services.Branding;
+using UnifiedMessenger.App.Services.Localization;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.WebView;
@@ -144,6 +145,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsWebViewInitializing => HasActiveWebView
         && WebViewStatus is WebViewSessionStatus.Uninitialized or WebViewSessionStatus.Initializing;
     public bool CloseToTray => _settings.CloseToTray;
+    public string Language => _settings.Language;
     public bool HasShownTrayHint => _settings.HasShownTrayHint;
     public bool NotificationsEnabled => _settings.Notifications.IsEnabled;
     public bool DoNotDisturb => _settings.Notifications.DoNotDisturb;
@@ -161,11 +163,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsSelectedServiceMuted => SelectedService?.IsMuted == true;
     public string MuteButtonText => IsSelectedServiceMuted ? "🔕" : "🔔";
     public string MuteButtonToolTip => IsSelectedServiceMuted
-        ? "Включить уведомления аккаунта"
-        : "Отключить уведомления аккаунта";
+        ? Localizer.Instance.Get("Enable account notifications")
+        : Localizer.Instance.Get("Disable account notifications");
 
     public string WindowTitle => IsSettingsOpen
-        ? BrandIdentity.CreateWindowTitle("Настройки")
+        ? BrandIdentity.CreateWindowTitle(Localizer.Instance.Get("Settings"))
         : BrandIdentity.CreateWindowTitle(SelectedNavigationItem?.DisplayName);
 
     public string SelectedAccountDisplayName => IsHomeSelected
@@ -174,7 +176,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public NavigationAccountItem? HeaderNavigationItem => IsHomeSelected ? null : SelectedNavigationItem;
 
     public string SelectedAccountLabel => SelectedMailAccount is MailAccount mailAccount
-        ? $"{GetMailProviderDisplayName(mailAccount.Provider)} · Почта"
+        ? $"{GetMailProviderDisplayName(mailAccount.Provider)} · {Localizer.Instance.Get("Mail")}"
         : SelectedServiceLabel;
 
     public string SelectedServiceLabel => SelectedService is null
@@ -530,6 +532,24 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         await SaveSettingsAsync();
     }
 
+    public async Task SetLanguageAsync(string language)
+    {
+        ThrowIfDisposed();
+        string normalized = AppLanguage.Normalize(language);
+        if (_settings.Language == normalized)
+        {
+            return;
+        }
+
+        _settings.Language = normalized;
+        Localizer.Instance.SetLanguage(normalized);
+        OnPropertyChanged(nameof(Language));
+        OnPropertyChanged(nameof(WindowTitle));
+        OnPropertyChanged(nameof(SelectedAccountLabel));
+        OnPropertyChanged(nameof(MuteButtonToolTip));
+        await SaveSettingsAsync();
+    }
+
     public async Task SetAutomaticallyShowRemoteImagesAsync(bool value)
     {
         ThrowIfDisposed();
@@ -567,7 +587,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ThrowIfDisposed();
         if (_lanternSoundFileService is null)
         {
-            return LanternSoundImportResult.Failed("Выбор пользовательского звука недоступен.");
+            return LanternSoundImportResult.Failed(Localizer.Instance.Get("Choose a custom sound is unavailable."));
         }
 
         LanternSoundImportResult result = await _lanternSoundFileService.ImportAsync(
@@ -910,10 +930,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private static string GetMailProviderDisplayName(MailProviderType provider) => provider switch
     {
         MailProviderType.Gmail => "Gmail",
-        MailProviderType.Yandex => "Яндекс Почта",
-        MailProviderType.MailRu => "Почта Mail.ru",
+        MailProviderType.Yandex => "Yandex Mail",
+        MailProviderType.MailRu => "Mail.ru",
         MailProviderType.GenericImap => "IMAP/SMTP",
-        _ => "Почта"
+        _ => Localizer.Instance.Get("Mail")
     };
 
     private void OnWebViewSessionStateChanged(object? sender, WebViewSessionStateChangedEventArgs eventArgs)

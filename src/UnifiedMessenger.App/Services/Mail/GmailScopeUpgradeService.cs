@@ -14,7 +14,7 @@ public sealed class GmailScopeUpgradeService(
         ArgumentNullException.ThrowIfNull(account);
         if (account.Provider is not MailProviderType.Gmail)
         {
-            return GmailScopeUpgradeResult.Failure("Изменение разрешений доступно только для Gmail.");
+            return GmailScopeUpgradeResult.Failure(L.Instance.Get("Permission changes are only available for Gmail."));
         }
 
         GmailOAuthAuthorizationResult authorization = await oauthService.AuthorizeAsync(
@@ -36,12 +36,12 @@ public sealed class GmailScopeUpgradeService(
                 NormalizeEmail(profile.EmailAddress),
                 StringComparison.OrdinalIgnoreCase))
         {
-            return GmailScopeUpgradeResult.Failure("Вы вошли в другой Google-аккаунт.");
+            return GmailScopeUpgradeResult.Failure(L.Instance.Get("You signed in to a different Google account."));
         }
 
         if (!session.PersistentCredential.HasGmailModifyScope)
         {
-            return GmailScopeUpgradeResult.Failure("Google не предоставил разрешение на изменение статуса писем.");
+            return GmailScopeUpgradeResult.Failure(L.Instance.Get("Google did not grant permission to change message read status."));
         }
 
         try
@@ -61,7 +61,7 @@ public sealed class GmailScopeUpgradeService(
                 or System.Text.Json.JsonException)
         {
             return GmailScopeUpgradeResult.Failure(
-                "Не удалось безопасно сохранить новое разрешение Google.");
+                L.Instance.Get("Could not safely save the new Google permission."));
         }
     }
 

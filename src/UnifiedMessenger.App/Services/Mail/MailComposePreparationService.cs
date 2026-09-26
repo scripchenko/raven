@@ -108,14 +108,14 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
     {
         string normalized = NormalizeOriginalSubject(subject);
         normalized = ReplyPrefix.Replace(normalized, string.Empty).Trim();
-        return "Re: " + (string.IsNullOrWhiteSpace(normalized) ? "(без темы)" : normalized);
+        return "Re: " + (string.IsNullOrWhiteSpace(normalized) ? L.Instance.Get("(no subject)") : normalized);
     }
 
     internal static string NormalizeForwardSubject(string? subject)
     {
         string normalized = NormalizeOriginalSubject(subject);
         normalized = ForwardPrefix.Replace(normalized, string.Empty).Trim();
-        return "Fwd: " + (string.IsNullOrWhiteSpace(normalized) ? "(без темы)" : normalized);
+        return "Fwd: " + (string.IsNullOrWhiteSpace(normalized) ? L.Instance.Get("(no subject)") : normalized);
     }
 
     private static string ResolveReplyRecipient(MailMessageContent source)
@@ -215,11 +215,11 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
     {
         StringBuilder body = new();
         body.AppendLine().AppendLine();
-        body.AppendLine("---------- Пересланное сообщение ----------");
-        body.Append("Отправитель — ").AppendLine(source.SenderDisplay);
-        body.Append("Дата отправки — ").AppendLine(source.ReceivedAtLocal.ToString("g", CultureInfo.CurrentCulture));
-        body.Append("Тема сообщения — ").AppendLine(source.Subject);
-        body.Append("Получатель — ").AppendLine(source.To);
+        body.AppendLine(L.Instance.Get("---------- Forwarded message ----------"));
+        body.Append(L.Instance.Get("Sender — ")).AppendLine(source.SenderDisplay);
+        body.Append(L.Instance.Get("Date sent — ")).AppendLine(source.ReceivedAtLocal.ToString("g", CultureInfo.CurrentCulture));
+        body.Append(L.Instance.Get("Subject — ")).AppendLine(source.Subject);
+        body.Append(L.Instance.Get("Recipient — ")).AppendLine(source.To);
         body.AppendLine();
         AppendQuoted(body, GetSafeBody(source));
         return body.ToString();
@@ -229,7 +229,7 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
         string.IsNullOrWhiteSpace(source.SafePlainTextContent)
             ? source.BodyKind is MailMessageBodyKind.PlainText
                 ? source.PlainTextContent
-                : "(текст письма недоступен)"
+                : L.Instance.Get("(message text unavailable)")
             : source.SafePlainTextContent;
 
     private static void AppendQuoted(StringBuilder body, string text)
@@ -242,7 +242,9 @@ public sealed class MailComposePreparationService : IMailComposePreparationServi
     }
 
     private static string NormalizeOriginalSubject(string? subject) =>
-        string.IsNullOrWhiteSpace(subject) || string.Equals(subject.Trim(), "(без темы)", StringComparison.Ordinal)
+        string.IsNullOrWhiteSpace(subject)
+        || string.Equals(subject.Trim(), "(без темы)", StringComparison.Ordinal)
+        || string.Equals(subject.Trim(), "(no subject)", StringComparison.Ordinal)
             ? string.Empty
             : subject.Trim();
 }

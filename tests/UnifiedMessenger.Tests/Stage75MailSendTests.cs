@@ -540,8 +540,8 @@ public sealed class Stage75MailSendTests
         Assert.False(result.SentCopySaved);
         Assert.Equal(MailSendFailureKind.None, result.FailureKind);
         Assert.Equal(copyFailure, result.SentCopyFailureKind);
-        Assert.Contains("Письмо отправлено", result.UserMessage, StringComparison.Ordinal);
-        Assert.Contains("не удалось сохранить копию", result.UserMessage, StringComparison.Ordinal);
+        Assert.Contains("Message sent", result.UserMessage, StringComparison.Ordinal);
+        Assert.Contains("Sent copy could not be saved", result.UserMessage, StringComparison.Ordinal);
         Assert.Equal(1, smtp.SendCount);
         Assert.Equal(1, sentCopy.AppendCount);
     }
@@ -731,7 +731,7 @@ public sealed class Stage75MailSendTests
         Assert.Equal(554, exception.SmtpFailure.StatusCode);
         Assert.Equal("5.7.1", exception.SmtpFailure.EnhancedStatusCode);
         Assert.Equal("security-or-antispam-policy-rejected", exception.SmtpFailure.SanitizedReasonCategory);
-        Assert.Contains("безопасности", exception.UserMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("security or spam rules", exception.UserMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(["connect", "authenticate", "send", "disconnect", "dispose"], session.Events);
     }
 
@@ -905,7 +905,7 @@ public sealed class Stage75MailSendTests
         Assert.False(compose.IsOpen);
         Assert.Null(compose.Draft);
         Assert.Equal(0, compose.DraftCount);
-        Assert.Equal("Письмо отправлено", compose.StatusMessage);
+        Assert.Equal("Message sent", compose.StatusMessage);
         Assert.Equal(1, sentCount);
         Assert.Equal(1, provider.SendCount);
     }
@@ -927,8 +927,8 @@ public sealed class Stage75MailSendTests
         Assert.False(compose.IsOpen);
         Assert.Null(compose.Draft);
         Assert.Equal(0, compose.DraftCount);
-        Assert.Contains("Письмо отправлено", compose.StatusMessage!, StringComparison.Ordinal);
-        Assert.Contains("не удалось сохранить копию", compose.StatusMessage!, StringComparison.Ordinal);
+        Assert.Contains("Message sent", compose.StatusMessage!, StringComparison.Ordinal);
+        Assert.Contains("Sent copy could not be saved", compose.StatusMessage!, StringComparison.Ordinal);
         Assert.NotNull(sent);
         Assert.False(sent!.SentCopySaved);
         Assert.Equal(1, provider.SendCount);
@@ -1196,10 +1196,10 @@ public sealed class Stage75MailSendTests
         Assert.Empty(forward.To);
         Assert.Empty(forward.Cc);
         Assert.Empty(forward.Bcc);
-        Assert.Contains("Отправитель —", forward.TextBody, StringComparison.Ordinal);
-        Assert.Contains("Дата отправки —", forward.TextBody, StringComparison.Ordinal);
-        Assert.Contains("Тема сообщения —", forward.TextBody, StringComparison.Ordinal);
-        Assert.Contains("Получатель —", forward.TextBody, StringComparison.Ordinal);
+        Assert.Contains("Sender —", forward.TextBody, StringComparison.Ordinal);
+        Assert.Contains("Date sent —", forward.TextBody, StringComparison.Ordinal);
+        Assert.Contains("Subject —", forward.TextBody, StringComparison.Ordinal);
+        Assert.Contains("Recipient —", forward.TextBody, StringComparison.Ordinal);
         Assert.Contains("> Plain source", forward.TextBody, StringComparison.Ordinal);
         Assert.DoesNotContain("\nОт:", forward.TextBody, StringComparison.Ordinal);
         Assert.DoesNotContain("\nДата:", forward.TextBody, StringComparison.Ordinal);
@@ -1405,7 +1405,7 @@ public sealed class Stage75MailSendTests
 
         Assert.False(inbox.IsFolderStateStale(account.Id, MailFolderKind.Sent));
         Assert.False(compose.IsOpen);
-        Assert.Contains("не удалось сохранить копию", compose.StatusMessage!, StringComparison.Ordinal);
+        Assert.Contains("Sent copy could not be saved", compose.StatusMessage!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1421,20 +1421,20 @@ public sealed class Stage75MailSendTests
             .Select(element => (string?)element.Attribute("Content") ?? string.Empty)
             .ToArray();
 
-        Assert.Contains("Написать", buttonContents);
+        Assert.Contains("{loc:Text Key='Compose'}", buttonContents);
         Assert.Contains(
             view.Descendants(presentation + "Button"),
             element => (string?)element.Attribute("Command") == "{Binding Compose.ReplyCommand}"
-                && (string?)element.Attribute("ToolTip") == "Ответить");
+                && (string?)element.Attribute("ToolTip") == "{loc:Text Key='Reply'}");
         Assert.Contains(
             view.Descendants(presentation + "Button"),
             element => (string?)element.Attribute("Command") == "{Binding Compose.ReplyAllCommand}"
-                && (string?)element.Attribute("ToolTip") == "Ответить всем"
-                && (string?)element.Attribute("AutomationProperties.Name") == "Ответить всем");
+                && (string?)element.Attribute("ToolTip") == "{loc:Text Key='Reply all'}"
+                && (string?)element.Attribute("AutomationProperties.Name") == "{loc:Text Key='Reply all'}");
         Assert.Contains(
             view.Descendants(presentation + "Button"),
             element => (string?)element.Attribute("Command") == "{Binding Compose.ForwardCommand}"
-                && (string?)element.Attribute("ToolTip") == "Переслать");
+                && (string?)element.Attribute("ToolTip") == "{loc:Text Key='Forward'}");
         Assert.Contains("{Binding Compose.SendButtonText}", buttonContents);
         Assert.DoesNotContain(view.Descendants(), element => element.Name.LocalName.Contains("WebView", StringComparison.Ordinal));
         Assert.Contains(

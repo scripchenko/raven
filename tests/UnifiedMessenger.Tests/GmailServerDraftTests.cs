@@ -39,7 +39,7 @@ public sealed class GmailServerDraftTests
         Assert.Null(drafts.SaveCalls[0].Identity);
         Assert.Equal(drafts.SaveCalls[0].ResultDraftId, drafts.SaveCalls[1].Identity?.DraftId);
         Assert.Equal("second", drafts.SaveCalls[1].Request.TextBody);
-        Assert.Equal("Сохранено", compose.DraftSaveStatusText);
+        Assert.Equal("Saved", compose.DraftSaveStatusText);
     }
 
     [Fact]
@@ -417,7 +417,7 @@ public sealed class GmailServerDraftTests
         GmailDraftLoadResult loaded = await service.LoadAsync(Account(), "rich-draft");
 
         Assert.True(loaded.IsReadOnly);
-        Assert.Contains("без потерь", loaded.RestrictionMessage, StringComparison.Ordinal);
+        Assert.Contains("cannot save without losing it", loaded.RestrictionMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -541,7 +541,7 @@ public sealed class GmailServerDraftTests
 
         Assert.Equal(2, drafts.SaveAttemptCount);
         Assert.Single(drafts.SaveCalls);
-        Assert.Equal("Сохранено", compose.DraftSaveStatusText);
+        Assert.Equal("Saved", compose.DraftSaveStatusText);
     }
 
     [Fact]
@@ -603,7 +603,7 @@ public sealed class GmailServerDraftTests
         await inbox.CurrentFolderLoadTask;
 
         Assert.False(inbox.IsFolderStateStale(account.Id, MailFolderKind.Drafts));
-        Assert.Equal("1–1 из 1", inbox.PageRangeText);
+        Assert.Equal("1–1 of 1", inbox.PageRangeText);
     }
 
     private static MailComposeViewModel CreateCompose(

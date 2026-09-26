@@ -10,8 +10,8 @@ public sealed class WpfMailComposeConfirmationService : IMailComposeConfirmation
     {
         cancellationToken.ThrowIfCancellationRequested();
         MessageBoxResult result = Show(
-            "Тема и текст письма пусты. Всё равно отправить?",
-            "Пустое письмо");
+            L.Instance.Get("Subject and body are empty. Send anyway?"),
+            L.Instance.Get("Empty message"));
         return Task.FromResult(result is MessageBoxResult.Yes);
     }
 
@@ -19,8 +19,8 @@ public sealed class WpfMailComposeConfirmationService : IMailComposeConfirmation
     {
         cancellationToken.ThrowIfCancellationRequested();
         MessageBoxResult result = Show(
-            "Удалить неотправленное письмо?",
-            "Отмена письма");
+            L.Instance.Get("Delete the unsent message?"),
+            L.Instance.Get("Cancel message"));
         return Task.FromResult(result is MessageBoxResult.Yes);
     }
 

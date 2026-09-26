@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using UnifiedMessenger.App.Services.WebView;
+using UnifiedMessenger.App.Services.Localization;
 
 namespace UnifiedMessenger.App.Views;
 
@@ -20,7 +21,7 @@ public partial class StartupWindow : Window
     public void UpdateProgress(StartupPrimeProgress progress)
     {
         ServiceNameText.Text = progress.DisplayName;
-        ProgressText.Text = $"{progress.Current} из {progress.Total}";
+        ProgressText.Text = Localizer.Instance.Format("{0} of {1}", progress.Current, progress.Total);
         StartupProgressBar.Maximum = Math.Max(1, progress.Total);
         StartupProgressBar.Value = progress.Current;
     }

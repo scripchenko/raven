@@ -24,10 +24,10 @@ public sealed partial class SettingsMailAccountViewModel : ObservableObject, IDi
     public string ProviderLabel => Account.Provider switch
     {
         MailProviderType.Gmail => "Gmail",
-        MailProviderType.Yandex => "Яндекс Почта",
-        MailProviderType.MailRu => "Почта Mail.ru",
+        MailProviderType.Yandex => "Yandex Mail",
+        MailProviderType.MailRu => "Mail.ru",
         MailProviderType.GenericImap => "IMAP/SMTP",
-        _ => "Почта"
+        _ => UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("Mail")
     };
     public string Glyph => Account.Provider switch
     {

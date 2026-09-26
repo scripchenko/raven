@@ -129,8 +129,8 @@ public sealed class GmailFolderReliabilityTests
     {
         MailReadException mapped = GmailApiReadClient.MapListException(new InvalidOperationException("synthetic"));
 
-        Assert.Equal("Не удалось загрузить почту. Попробуйте ещё раз.", mapped.UserMessage);
-        Assert.DoesNotContain("подключение", mapped.UserMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Could not load mail. Please retry.", mapped.UserMessage);
+        Assert.DoesNotContain("connection", mapped.UserMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -138,7 +138,7 @@ public sealed class GmailFolderReliabilityTests
     {
         MailReadException mapped = GmailApiReadClient.MapListException(new HttpRequestException("synthetic"));
 
-        Assert.Contains("подключение к сети", mapped.UserMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("network connection", mapped.UserMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -147,8 +147,8 @@ public sealed class GmailFolderReliabilityTests
         MailReadException mapped = GmailApiReadClient.MapListException(
             ApiError(HttpStatusCode.Forbidden, "rateLimitExceeded"));
 
-        Assert.Contains("ограничил частоту запросов", mapped.UserMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("подключение", mapped.UserMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("rate-limiting requests", mapped.UserMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("connection", mapped.UserMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task AssertNotRetriedAsync(Exception expected)

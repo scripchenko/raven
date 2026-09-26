@@ -25,7 +25,7 @@ public sealed class Stage76MailAttachmentTests
         Assert.True(attachment.IsDownloadable);
         Assert.False(attachment.IsInline);
         Assert.False(string.IsNullOrWhiteSpace(attachment.AttachmentKey));
-        Assert.Contains("Б", attachment.DisplaySize, StringComparison.Ordinal);
+        Assert.Contains("B", attachment.DisplaySize, StringComparison.Ordinal);
     }
 
     [Fact]

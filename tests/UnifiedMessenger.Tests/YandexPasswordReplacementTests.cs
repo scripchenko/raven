@@ -133,7 +133,7 @@ public sealed class MailPasswordReplacementTests
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
         XElement passwordBox = Assert.Single(dialog.Descendants(presentation + "PasswordBox"));
         XElement action = Assert.Single(settings.Descendants(presentation + "Button"), element =>
-            (string?)element.Attribute("Content") == "Изменить пароль приложения");
+            (string?)element.Attribute("Content") == "{loc:Text Key='Change app password'}");
 
         Assert.Null(passwordBox.Attribute("Password"));
         Assert.DoesNotContain("Binding", passwordBox.ToString(), StringComparison.Ordinal);

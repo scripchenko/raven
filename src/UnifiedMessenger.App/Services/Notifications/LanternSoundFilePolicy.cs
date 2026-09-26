@@ -41,6 +41,6 @@ public static class LanternSoundFilePolicy
             safe = safe[..128];
         }
 
-        return string.IsNullOrWhiteSpace(safe) ? "Пользовательский звук" : safe;
+        return string.IsNullOrWhiteSpace(safe) ? L.Instance.Get("Custom sound") : safe;
     }
 }

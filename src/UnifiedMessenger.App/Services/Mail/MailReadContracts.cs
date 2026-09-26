@@ -62,7 +62,7 @@ public interface IMailReadProvider
         {
             throw new MailReadException(
                 MailReadFailureKind.FolderUnavailable,
-                "Эта папка недоступна.");
+                L.Instance.Get("This folder is unavailable."));
         }
 
         return GetInboxPageAsync(account, continuationToken, pageSize, cancellationToken);
@@ -110,7 +110,7 @@ public interface IMailInboxUnreadCountProvider
 public sealed record GmailScopeUpgradeResult(bool IsSuccess, string UserMessage)
 {
     public static GmailScopeUpgradeResult Success() =>
-        new(true, "Доступ Google для изменения статуса писем предоставлен.");
+        new(true, L.Instance.Get("Google access to change message read status was granted."));
 
     public static GmailScopeUpgradeResult Failure(string message) => new(false, message);
 }
@@ -164,12 +164,12 @@ public sealed record GmailReauthenticationResult(
     public static GmailReauthenticationResult Failure() =>
         new(
             GmailReauthenticationOutcome.Failed,
-            "Не удалось войти в Google. Попробуйте ещё раз.");
+            L.Instance.Get("Could not sign in to Google. Please retry."));
 
     public static GmailReauthenticationResult WrongAccount(string expectedEmail) =>
         new(
             GmailReauthenticationOutcome.WrongAccount,
-            $"Вы вошли в другой аккаунт Google. Войдите как {expectedEmail}.");
+            L.Instance.Format("You signed in to another Google account. Sign in as {0}.", expectedEmail));
 }
 
 public interface IGmailReauthenticationService

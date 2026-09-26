@@ -14,11 +14,12 @@
     <Product>raven</Product>
     <Title>raven</Title>
     <AssemblyTitle>raven</AssemblyTitle>
-    <Description>Windows-приложение для мессенджеров и почты.</Description>
+    <Description>Windows application for messaging and email.</Description>
     <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Resources\Strings.*.json" WithCulture="false" />
     <Resource Include="Assets\Branding\lantern_system.ico" />
     <Resource Include="Assets\Branding\lantern_sidebar.png" />
     <Resource Include="Assets\Branding\raven_icon.png" />

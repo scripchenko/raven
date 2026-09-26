@@ -24,7 +24,7 @@ public sealed class MailAccountProvisioningService(
         {
             return MailAccountProvisioningResult.Failure(
                 MailConnectionFailureKind.InvalidConfiguration,
-                "Введите адрес электронной почты.");
+                L.Instance.Get("Enter an email address."));
         }
 
         IMailProvider provider = providerFactory.Get(request.Provider);
@@ -47,7 +47,7 @@ public sealed class MailAccountProvisioningService(
             {
                 return MailAccountProvisioningResult.Failure(
                     MailConnectionFailureKind.AlreadyExists,
-                    "Этот почтовый аккаунт уже добавлен.");
+                    L.Instance.Get("This mail account has already been added."));
             }
 
             string credentialKey = Guid.NewGuid().ToString("N");
@@ -80,7 +80,7 @@ public sealed class MailAccountProvisioningService(
             {
                 return MailAccountProvisioningResult.Failure(
                     MailConnectionFailureKind.CredentialStorageFailed,
-                    "Не удалось безопасно сохранить учётные данные Windows.");
+                    L.Instance.Get("Could not safely save Windows credentials."));
             }
 
             settings.MailAccounts.Add(account);
@@ -100,7 +100,7 @@ public sealed class MailAccountProvisioningService(
                 await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
                 return MailAccountProvisioningResult.Failure(
                     MailConnectionFailureKind.PersistenceFailed,
-                    "Не удалось сохранить настройки почтового аккаунта.");
+                    L.Instance.Get("Could not save mail account settings."));
             }
 
             return MailAccountProvisioningResult.Success(account);
@@ -140,7 +140,7 @@ public sealed class MailAccountProvisioningService(
         {
             return MailAccountProvisioningResult.Failure(
                 MailConnectionFailureKind.CredentialStorageFailed,
-                "Не удалось безопасно сохранить Gmail OAuth credential в Windows.");
+                L.Instance.Get("Could not safely save the Gmail OAuth credential in Windows."));
         }
 
         GmailProfileResult profileResult;
@@ -183,7 +183,7 @@ public sealed class MailAccountProvisioningService(
                 await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
                 return MailAccountProvisioningResult.Failure(
                     MailConnectionFailureKind.AlreadyExists,
-                    "Этот аккаунт Gmail уже подключён.");
+                    L.Instance.Get("This Gmail account is already connected."));
             }
 
             MailAccount account = new()
@@ -215,7 +215,7 @@ public sealed class MailAccountProvisioningService(
                 await credentialStore.DeleteAsync(credentialKey, CancellationToken.None);
                 return MailAccountProvisioningResult.Failure(
                     MailConnectionFailureKind.PersistenceFailed,
-                    "Не удалось сохранить настройки Gmail аккаунта.");
+                    L.Instance.Get("Could not save Gmail account settings."));
             }
 
             return MailAccountProvisioningResult.Success(account);
@@ -238,14 +238,14 @@ public sealed class MailAccountProvisioningService(
         {
             return MailAccountPasswordReplacementResult.Failure(
                 MailConnectionFailureKind.InvalidConfiguration,
-                "Изменение пароля приложения для этого аккаунта недоступно.");
+                L.Instance.Get("App password changes are unavailable for this account."));
         }
 
         if (string.IsNullOrWhiteSpace(newPassword))
         {
             return MailAccountPasswordReplacementResult.Failure(
                 MailConnectionFailureKind.InvalidConfiguration,
-                "Введите новый пароль приложения.");
+                L.Instance.Get("Enter a new app password."));
         }
 
         IMailProvider provider = providerFactory.Get(account.Provider);
@@ -276,7 +276,7 @@ public sealed class MailAccountProvisioningService(
             {
                 return MailAccountPasswordReplacementResult.Failure(
                     MailConnectionFailureKind.InvalidConfiguration,
-                    "Почтовый аккаунт больше недоступен в настройках raven.");
+                    L.Instance.Get("Mail account no longer available in raven settings."));
             }
 
             try
@@ -294,7 +294,7 @@ public sealed class MailAccountProvisioningService(
             {
                 return MailAccountPasswordReplacementResult.Failure(
                     MailConnectionFailureKind.CredentialStorageFailed,
-                    "Не удалось безопасно сохранить новый пароль приложения в Windows.");
+                    L.Instance.Get("Could not safely save the new app password in Windows."));
             }
 
             return MailAccountPasswordReplacementResult.Success();

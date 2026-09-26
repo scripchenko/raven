@@ -1,4 +1,5 @@
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Localization;
 using UnifiedMessenger.App.Services.Mail;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Tray;
@@ -227,7 +228,7 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
                 ? CreateYandexServiceName(account, hasMultipleEnabledYandexAccounts)
                 : isMailRu
                     ? CreateMailRuServiceName(account, hasMultipleEnabledMailRuAccounts)
-                : "Почта";
+                : Localizer.Instance.Get("Mail");
         if ((isGmail || isYandex || isMailRu)
             && isSingle
             && pending.Preview is not null
@@ -239,7 +240,7 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
                 ? senderName
                 : !string.IsNullOrWhiteSpace(senderAddress)
                     ? senderAddress
-                    : "Неизвестный отправитель";
+                    : Localizer.Instance.Get("Unknown sender");
             string subject = MailContentExtractor.NormalizeSubject(pending.Preview.Subject);
             string snippet = MailContentExtractor.NormalizePreview(pending.Preview.Snippet);
             return new NotificationPopupDisplayModel(
@@ -262,10 +263,10 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
             notificationId,
             pending.MailAccountId,
             serviceName,
-            isSingle ? "Новое письмо" : "Новые письма",
+            isSingle ? Localizer.Instance.Get("New mail") : Localizer.Instance.Get("New messages"),
             isSingle
-                ? "Получено новое письмо"
-                : $"Получено новых писем: {pending.NewMessageCount}",
+                ? Localizer.Instance.Get("A new message was received")
+                : Localizer.Instance.Format("New messages received: {0}", pending.NewMessageCount),
             Brand: isGmail
                 ? NotificationPopupBrand.Gmail
                 : isYandex
@@ -328,9 +329,10 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         bool hasMultipleEnabledYandexAccounts)
     {
         string identity = account.DisplayLabel.Trim();
+        string provider = Localizer.Instance.Get("Yandex Mail");
         return hasMultipleEnabledYandexAccounts && !string.IsNullOrWhiteSpace(identity)
-            ? $"Яндекс Почта • {identity}"
-            : "Яндекс Почта";
+            ? $"{provider} • {identity}"
+            : provider;
     }
 
     private static string CreateMailRuServiceName(
@@ -338,9 +340,10 @@ public sealed class MailNotificationCoordinator : IMailNotificationCoordinator
         bool hasMultipleEnabledMailRuAccounts)
     {
         string identity = account.DisplayLabel.Trim();
+        string provider = Localizer.Instance.Get("Mail.ru Mail");
         return hasMultipleEnabledMailRuAccounts && !string.IsNullOrWhiteSpace(identity)
-            ? $"Почта Mail.ru • {identity}"
-            : "Почта Mail.ru";
+            ? $"{provider} • {identity}"
+            : provider;
     }
 
     private void OnPopupClicked(object? sender, NotificationPopupEventArgs eventArgs)

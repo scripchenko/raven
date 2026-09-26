@@ -17,7 +17,7 @@ public sealed class LanternSoundFileService(
     {
         if (string.IsNullOrWhiteSpace(sourceFilePath))
         {
-            return LanternSoundImportResult.Failed("Файл звука не выбран.");
+            return LanternSoundImportResult.Failed(L.Instance.Get("No sound file selected."));
         }
 
         string fullSourcePath;
@@ -27,13 +27,13 @@ public sealed class LanternSoundFileService(
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
-            return LanternSoundImportResult.Failed("Путь к файлу звука некорректен.");
+            return LanternSoundImportResult.Failed(L.Instance.Get("Invalid sound file path."));
         }
 
         string extension = Path.GetExtension(fullSourcePath);
         if (!LanternSoundFilePolicy.IsSupportedExtension(extension))
         {
-            return LanternSoundImportResult.Failed("Этот формат звука не поддерживается.");
+            return LanternSoundImportResult.Failed(L.Instance.Get("This sound format is not supported."));
         }
 
         try
@@ -41,17 +41,17 @@ public sealed class LanternSoundFileService(
             FileInfo source = new(fullSourcePath);
             if (!source.Exists)
             {
-                return LanternSoundImportResult.Failed("Выбранный файл не найден.");
+                return LanternSoundImportResult.Failed(L.Instance.Get("Selected file not found."));
             }
 
             if (source.Length <= 0)
             {
-                return LanternSoundImportResult.Failed("Выбранный файл пуст.");
+                return LanternSoundImportResult.Failed(L.Instance.Get("Selected file is empty."));
             }
 
             if (source.Length > LanternSoundFilePolicy.MaximumFileSizeBytes)
             {
-                return LanternSoundImportResult.Failed("Файл звука превышает допустимый размер 10 МБ.");
+                return LanternSoundImportResult.Failed(L.Instance.Get("Sound file exceeds the 10 MB limit."));
             }
 
             await using (FileStream readable = new(
@@ -67,7 +67,7 @@ public sealed class LanternSoundFileService(
 
             if (!await audioFileValidator.CanOpenAsync(fullSourcePath, cancellationToken))
             {
-                return LanternSoundImportResult.Failed("Windows не смог открыть выбранный аудиофайл.");
+                return LanternSoundImportResult.Failed(L.Instance.Get("Windows could not open the selected audio file."));
             }
 
             Directory.CreateDirectory(appPaths.NotificationSoundsFolder);
@@ -81,7 +81,7 @@ public sealed class LanternSoundFileService(
                 File.Copy(fullSourcePath, temporaryPath, overwrite: false);
                 if (!await audioFileValidator.CanOpenAsync(temporaryPath, cancellationToken))
                 {
-                    return LanternSoundImportResult.Failed("Внутренняя копия аудиофайла не прошла проверку.");
+                    return LanternSoundImportResult.Failed(L.Instance.Get("The internal audio copy failed verification."));
                 }
 
                 File.Move(temporaryPath, destinationPath, overwrite: true);
@@ -105,7 +105,7 @@ public sealed class LanternSoundFileService(
                 or UnauthorizedAccessException
                 or OperationCanceledException)
         {
-            return LanternSoundImportResult.Failed("Не удалось безопасно сохранить выбранный звук.");
+            return LanternSoundImportResult.Failed(L.Instance.Get("Could not safely save the selected sound."));
         }
     }
 

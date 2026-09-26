@@ -1,4 +1,5 @@
 using System.Windows;
+using UnifiedMessenger.App.Services.Localization;
 using WpfMessageBox = System.Windows.MessageBox;
 
 namespace UnifiedMessenger.App.Views;
@@ -22,8 +23,8 @@ public partial class RenameAccountWindow : Window
         {
             WpfMessageBox.Show(
                 this,
-                "Название аккаунта должно содержать от 1 до 80 символов.",
-                "Некорректное название",
+                Localizer.Instance.Get("Account name must be 1 to 80 characters."),
+                Localizer.Instance.Get("Invalid name"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;

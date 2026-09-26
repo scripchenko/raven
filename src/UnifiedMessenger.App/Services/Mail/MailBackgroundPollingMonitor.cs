@@ -362,7 +362,7 @@ public sealed class MailBackgroundPollingMonitor(
         {
             throw new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Gmail вернул некорректный идентификатор истории.");
+                L.Instance.Get("Gmail returned an invalid history ID."));
         }
 
         if (hasCursor
@@ -372,7 +372,7 @@ public sealed class MailBackgroundPollingMonitor(
         {
             throw new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Gmail не продвинул идентификатор истории.");
+                L.Instance.Get("Gmail did not advance the history ID."));
         }
 
         if (!await IsAccountStillEnabledAsync(account.Id))

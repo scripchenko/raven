@@ -23,7 +23,7 @@ public sealed class Stage8PackagingTests
         Assert.Equal("raven", GetProperty(project, "Product"));
         Assert.Equal("raven", GetProperty(project, "Title"));
         Assert.Equal("raven", GetProperty(project, "AssemblyTitle"));
-        Assert.Equal("Windows-приложение для мессенджеров и почты.", GetProperty(project, "Description"));
+        Assert.Equal("Windows application for messaging and email.", GetProperty(project, "Description"));
         Assert.Equal("false", GetProperty(project, "GenerateAssemblyCompanyAttribute"));
         Assert.Equal("UnifiedMessenger.App", GetProperty(project, "AssemblyName"));
         Assert.Equal("UnifiedMessenger.App", GetProperty(project, "RootNamespace"));
@@ -197,6 +197,19 @@ public sealed class Stage8PackagingTests
     }
 
     [Fact]
+    public void InstallerDefaultsToEnglishAndOffersRussianIndependentlyOfWindowsCulture()
+    {
+        string installer = ReadInstallerScript();
+        int english = installer.IndexOf("Name: \"english\"; MessagesFile: \"compiler:Default.isl\"", StringComparison.Ordinal);
+        int russian = installer.IndexOf("Name: \"russian\"; MessagesFile: \"compiler:Languages\\Russian.isl\"", StringComparison.Ordinal);
+
+        Assert.True(english >= 0 && russian > english);
+        Assert.Contains("LanguageDetectionMethod=none", installer, StringComparison.Ordinal);
+        Assert.Contains("ShowLanguageDialog=yes", installer, StringComparison.Ordinal);
+        Assert.Contains("UsePreviousLanguage=no", installer, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Installer_RemovesOnlyKnownLegacyDesktopShortcutsBeforeCreatingRavenShortcut()
     {
         string installer = ReadInstallerScript();
@@ -340,9 +353,9 @@ public sealed class Stage8PackagingTests
 
         Assert.Contains("%APPDATA%\\UnifiedMessenger", documentation, StringComparison.Ordinal);
         Assert.Contains("%LOCALAPPDATA%\\UnifiedMessenger", documentation, StringComparison.Ordinal);
-        Assert.Contains("не переносят и не удаляют", documentation, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("do not migrate or delete", documentation, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("client_secret.json", documentation, StringComparison.Ordinal);
-        Assert.Contains("не является product-ready", documentation, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not a product-ready", documentation, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("SmartScreen", documentation, StringComparison.Ordinal);
     }
 

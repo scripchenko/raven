@@ -154,7 +154,7 @@ public sealed class MailReadDwellTests
 
         Assert.Empty(scheduler.Requests);
         Assert.Empty(provider.Mutations);
-        Assert.Equal("Отметить как непрочитанное", viewModel.ReadStateActionText);
+        Assert.Equal("Mark message as unread", viewModel.ReadStateActionText);
     }
 
     [Fact]

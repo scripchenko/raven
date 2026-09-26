@@ -54,7 +54,7 @@ public sealed record MailConnectionValidationResult(
     string UserMessage)
 {
     public static MailConnectionValidationResult Success(MailIdentity identity) =>
-        new(true, identity, MailConnectionFailureKind.None, "Подключение проверено.");
+        new(true, identity, MailConnectionFailureKind.None, L.Instance.Get("Connection verified."));
 
     public static MailConnectionValidationResult Failure(
         MailConnectionFailureKind kind,
@@ -75,7 +75,7 @@ public sealed record MailAccountProvisioningResult(
     string UserMessage)
 {
     public static MailAccountProvisioningResult Success(MailAccount account) =>
-        new(true, account, MailConnectionFailureKind.None, "Почтовый аккаунт подключён.");
+        new(true, account, MailConnectionFailureKind.None, L.Instance.Get("Mail account connected."));
 
     public static MailAccountProvisioningResult Failure(
         MailConnectionFailureKind kind,
@@ -89,7 +89,7 @@ public sealed record MailAccountPasswordReplacementResult(
     string UserMessage)
 {
     public static MailAccountPasswordReplacementResult Success() =>
-        new(true, MailConnectionFailureKind.None, "Пароль приложения обновлён.");
+        new(true, MailConnectionFailureKind.None, L.Instance.Get("App password updated."));
 
     public static MailAccountPasswordReplacementResult Failure(
         MailConnectionFailureKind kind,
@@ -166,7 +166,7 @@ public interface IMailAccountProvisioningService
         CancellationToken cancellationToken = default) =>
         Task.FromResult(MailAccountPasswordReplacementResult.Failure(
             MailConnectionFailureKind.InvalidConfiguration,
-            "Изменение пароля приложения недоступно."));
+            L.Instance.Get("App password changes are unavailable.")));
 
     Task DeleteAsync(Guid accountId, CancellationToken cancellationToken = default);
 }

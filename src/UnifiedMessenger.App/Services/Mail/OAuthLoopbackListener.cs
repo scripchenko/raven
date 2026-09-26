@@ -42,7 +42,7 @@ internal sealed class TcpOAuthLoopbackListener : IOAuthLoopbackListener
         Uri requestUri = await ReadRequestUriAsync(stream, cancellationToken);
         if (!string.Equals(requestUri.AbsolutePath, GmailOAuthConstants.CallbackPath, StringComparison.Ordinal))
         {
-            await WriteResponseAsync(stream, HttpStatusCode.NotFound, "Страница не найдена.");
+            await WriteResponseAsync(stream, HttpStatusCode.NotFound, L.Instance.Get("Page not found."));
             throw new InvalidDataException("Unexpected OAuth callback path.");
         }
 
@@ -50,7 +50,7 @@ internal sealed class TcpOAuthLoopbackListener : IOAuthLoopbackListener
         await WriteResponseAsync(
             stream,
             HttpStatusCode.OK,
-            "Авторизация завершена. Можно вернуться в raven.");
+            L.Instance.Get("Authorization complete. You can return to raven."));
         return new OAuthLoopbackResponse(
             query.GetValueOrDefault("code"),
             query.GetValueOrDefault("state"),

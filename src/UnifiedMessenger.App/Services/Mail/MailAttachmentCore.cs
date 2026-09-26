@@ -121,7 +121,7 @@ public sealed class MailAttachmentException(
     public string UserMessage { get; } = userMessage;
 
     public static MailAttachmentException MessageTooLarge() =>
-        new(MailAttachmentFailureKind.MessageTooLarge, "Размер письма превышает допустимый.");
+        new(MailAttachmentFailureKind.MessageTooLarge, L.Instance.Get("Message exceeds the allowed size."));
 }
 
 public sealed record MailAttachmentContent(
@@ -239,7 +239,7 @@ internal static class MailMimeAttachmentCatalog
         {
             throw new MailAttachmentException(
                 MailAttachmentFailureKind.Unavailable,
-                "Вложение больше недоступно.",
+                L.Instance.Get("Attachment no longer available."),
                 exception);
         }
 
@@ -339,7 +339,7 @@ internal static class MailMimeAttachmentCatalog
     }
 
     private static MailAttachmentException Unavailable() =>
-        new(MailAttachmentFailureKind.Unavailable, "Вложение больше недоступно.");
+        new(MailAttachmentFailureKind.Unavailable, L.Instance.Get("Attachment no longer available."));
 
     private sealed class CountingStream(long maximumBytes) : Stream
     {
@@ -518,7 +518,7 @@ public sealed record OutgoingMailAttachment(
             {
                 throw new MailAttachmentException(
                     MailAttachmentFailureKind.LocalReadFailure,
-                    "Не удалось прочитать вложение.");
+                    L.Instance.Get("Could not read the attachment."));
             }
 
             string fileName = MailAttachmentFileName.Sanitize(file.Name);
@@ -547,7 +547,7 @@ public sealed record OutgoingMailAttachment(
         {
             throw new MailAttachmentException(
                 MailAttachmentFailureKind.LocalReadFailure,
-                "Не удалось прочитать вложение.",
+                L.Instance.Get("Could not read the attachment."),
                 exception);
         }
     }
@@ -616,7 +616,7 @@ public sealed class MailOutgoingAttachmentMaterializer(
                     memory.Bytes),
                 _ => throw new MailAttachmentException(
                     MailAttachmentFailureKind.Unavailable,
-                    "Вложение больше недоступно.")
+                    L.Instance.Get("Attachment no longer available."))
             };
             aggregate = checked(aggregate + content.Bytes.Length);
             if (aggregate > MailAttachmentLimits.ClientMaximumAggregateAttachmentBytes)
@@ -643,7 +643,7 @@ public sealed class MailOutgoingAttachmentMaterializer(
         {
             throw new MailAttachmentException(
                 MailAttachmentFailureKind.Unavailable,
-                "Вложение больше недоступно.");
+                L.Instance.Get("Attachment no longer available."));
         }
 
         try
@@ -667,7 +667,7 @@ public sealed class MailOutgoingAttachmentMaterializer(
         {
             throw new MailAttachmentException(
                 MailAttachmentFailureKind.ProviderFailure,
-                "Не удалось загрузить вложение.",
+                L.Instance.Get("Could not load the attachment."),
                 exception);
         }
     }
@@ -712,7 +712,7 @@ public sealed class MailOutgoingAttachmentMaterializer(
         {
             throw new MailAttachmentException(
                 MailAttachmentFailureKind.LocalReadFailure,
-                $"Не удалось прочитать вложение «{attachment.FileName}».",
+                L.Instance.Format("Could not read attachment “{0}”.", attachment.FileName),
                 exception);
         }
     }
@@ -800,7 +800,7 @@ public sealed class MailAttachmentSaveService(
             }
 
             File.Move(temporary, destination, overwrite: true);
-            return new MailAttachmentSaveResult(MailAttachmentSaveOutcome.Saved, "Файл сохранён");
+            return new MailAttachmentSaveResult(MailAttachmentSaveOutcome.Saved, L.Instance.Get("File saved"));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -822,7 +822,7 @@ public sealed class MailAttachmentSaveService(
             DeletePartial(temporary);
             return new MailAttachmentSaveResult(
                 MailAttachmentSaveOutcome.Failed,
-                "Не удалось сохранить файл в выбранное место.");
+                L.Instance.Get("Could not save the file to the selected location."));
         }
     }
 

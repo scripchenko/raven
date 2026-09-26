@@ -11,7 +11,7 @@ public sealed class BuiltInServiceCatalog : IBuiltInServiceCatalog
         new(ServiceType.Max, "MAX", "M", new Uri("https://web.max.ru/"), true, CreateHosts("web.max.ru", "max.ru")),
         new(
             ServiceType.VkMessenger,
-            "VK Мессенджер",
+            "VK",
             "VK",
             new Uri("https://web.vk.me/"),
             true,

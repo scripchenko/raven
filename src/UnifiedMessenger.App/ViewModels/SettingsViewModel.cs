@@ -7,6 +7,7 @@ using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Updates;
+using UnifiedMessenger.App.Services.Localization;
 using UnifiedMessenger.App.Services.WebView;
 
 namespace UnifiedMessenger.App.ViewModels;
@@ -18,6 +19,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly INotificationSoundFilePicker? _notificationSoundFilePicker;
     private readonly IUpdateCheckService? _updateCheckService;
     private readonly IExternalBrowserService? _externalBrowserService;
+    private UpdateCheckResult? _lastUpdateCheckResult;
     private bool _disposed;
 
     public SettingsViewModel(
@@ -32,14 +34,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         _notificationSoundFilePicker = notificationSoundFilePicker;
         _updateCheckService = updateCheckService;
         _externalBrowserService = externalBrowserService;
-        Sections =
-        [
-            new(SettingsSection.General, "Общие", "⚙"),
-            new(SettingsSection.Notifications, "Уведомления", "●"),
-            new(SettingsSection.Accounts, "Аккаунты", "☰"),
-            new(SettingsSection.About, "О программе", "i")
-        ];
+        Sections = [];
+        RebuildSections(SettingsSection.General);
         _selectedSection = Sections[0];
+        Localizer.Instance.PropertyChanged += OnLanguageChanged;
         SynchronizeAccounts();
         _mainWindowViewModel.Services.CollectionChanged += OnServicesCollectionChanged;
         _mainWindowViewModel.MailAccounts.CollectionChanged += OnMailAccountsCollectionChanged;
@@ -55,7 +53,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public event EventHandler<SettingsMailAccountEnabledEventArgs>? MailAccountEnabledChangeRequested;
     public event EventHandler<SettingsMailAccountEventArgs>? DeleteMailAccountRequested;
 
-    public IReadOnlyList<SettingsSectionItem> Sections { get; }
+    public ObservableCollection<SettingsSectionItem> Sections { get; }
     public ObservableCollection<SettingsAccountViewModel> Accounts { get; } = [];
     public ObservableCollection<SettingsMailAccountViewModel> MailAccounts { get; } = [];
 
@@ -72,6 +70,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public bool IsAboutSelected => SelectedSection.Section is SettingsSection.About;
 
     public bool CloseToTray => _mainWindowViewModel.CloseToTray;
+    public string Language => _mainWindowViewModel.Language;
     public bool HasShownTrayHint => _mainWindowViewModel.HasShownTrayHint;
     public bool NotificationsEnabled => _mainWindowViewModel.NotificationsEnabled;
     public bool DoNotDisturb => _mainWindowViewModel.DoNotDisturb;
@@ -91,11 +90,12 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         _mainWindowViewModel.LanternSoundSource is LanternSoundSource.Default;
     public bool IsCustomLanternSound => !IsDefaultLanternSound;
     public string LanternCustomSoundDisplayName =>
-        _mainWindowViewModel.LanternCustomSoundDisplayName ?? "Файл не выбран";
+        _mainWindowViewModel.LanternCustomSoundDisplayName ?? Localizer.Instance.Get("No file selected");
     public string ApplicationVersion => $"raven {(_updateCheckService?.CurrentVersion ?? new Version(0, 1, 0)).ToString(3)}";
+    public string ApplicationVersionDisplay => Localizer.Instance.Format("Version {0}", ApplicationVersion);
     public string? UpdateStatusMessage { get; private set; }
     public bool HasUpdateAvailable { get; private set; }
-    public string SupportLabel => "Поддержка: @dscripchenko";
+    public string SupportLabel => Localizer.Instance.Get("Support: @dscripchenko");
     public Uri SupportUri => new("https://t.me/dscripchenko");
 
     [ObservableProperty]
@@ -105,24 +105,30 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private void Close() => _mainWindowViewModel.CloseSettingsCommand.Execute(null);
 
     [RelayCommand]
+    private Task SetLanguage(string? value) => value is "en" or "ru"
+        ? _mainWindowViewModel.SetLanguageAsync(value)
+        : Task.CompletedTask;
+
+    [RelayCommand]
     private async Task CheckForUpdates()
     {
         if (_updateCheckService is null)
         {
-            UpdateStatusMessage = "Не удалось проверить обновления.";
+            UpdateStatusMessage = Localizer.Instance.Get("Unable to check for updates.");
             OnPropertyChanged(nameof(UpdateStatusMessage));
             return;
         }
 
         UpdateCheckResult result = await _updateCheckService.CheckAsync(manual: true);
+        _lastUpdateCheckResult = result;
         HasUpdateAvailable = result.Status is UpdateCheckStatus.UpdateAvailable;
         UpdateStatusMessage = result.Status switch
         {
             UpdateCheckStatus.UpdateAvailable when result.Release is not null
-                => $"Доступна новая версия raven {result.Release.Version}",
-            UpdateCheckStatus.Current => "Установлена актуальная версия raven.",
-            UpdateCheckStatus.NoRelease => "Публичный релиз пока не опубликован.",
-            _ => "Не удалось проверить обновления."
+                => Localizer.Instance.Format("A new version of raven {0} is available.", result.Release.Version),
+            UpdateCheckStatus.Current => Localizer.Instance.Get("You are using the latest version of raven."),
+            UpdateCheckStatus.NoRelease => Localizer.Instance.Get("No public release is available yet."),
+            _ => Localizer.Instance.Get("Unable to check for updates.")
         };
         OnPropertyChanged(nameof(HasUpdateAvailable));
         OnPropertyChanged(nameof(UpdateStatusMessage));
@@ -227,7 +233,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private async Task SelectDefaultLanternSound()
     {
         await _mainWindowViewModel.RestoreDefaultLanternSoundAsync();
-        SoundStatusMessage = "Используется стандартный звук raven.";
+        SoundStatusMessage = Localizer.Instance.Get("Using the default raven sound.");
     }
 
     [RelayCommand]
@@ -235,7 +241,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     {
         if (await _mainWindowViewModel.UseExistingCustomLanternSoundAsync())
         {
-            SoundStatusMessage = "Используется выбранный пользовательский звук.";
+            SoundStatusMessage = Localizer.Instance.Get("Using the selected custom sound.");
             return;
         }
 
@@ -255,7 +261,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         LanternSoundImportResult result = await _mainWindowViewModel.ImportCustomLanternSoundAsync(
             selectedPath);
         SoundStatusMessage = result.Success
-            ? "Пользовательский звук сохранён внутри raven."
+            ? Localizer.Instance.Get("The custom sound is saved inside raven.")
             : result.ErrorMessage;
         RefreshLanternSoundBindings();
     }
@@ -264,15 +270,15 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private void PreviewLanternSound()
     {
         SoundStatusMessage = _mainWindowViewModel.PreviewLanternSound()
-            ? "Воспроизводится текущий звук raven."
-            : "Не удалось воспроизвести звук; будет использован безопасный fallback.";
+            ? Localizer.Instance.Get("Playing the current raven sound.")
+            : Localizer.Instance.Get("Could not play the sound; a safe fallback will be used.");
     }
 
     [RelayCommand]
     private async Task RestoreDefaultLanternSound()
     {
         await _mainWindowViewModel.RestoreDefaultLanternSoundAsync();
-        SoundStatusMessage = "Стандартный звук raven восстановлен.";
+        SoundStatusMessage = Localizer.Instance.Get("The default raven sound has been restored.");
     }
 
     internal void OpenAccount(ServiceInstance service) => _mainWindowViewModel.SelectService(service.Id);
@@ -329,6 +335,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         _mainWindowViewModel.Services.CollectionChanged -= OnServicesCollectionChanged;
         _mainWindowViewModel.MailAccounts.CollectionChanged -= OnMailAccountsCollectionChanged;
         _mainWindowViewModel.PropertyChanged -= OnMainWindowPropertyChanged;
+        Localizer.Instance.PropertyChanged -= OnLanguageChanged;
         foreach (SettingsAccountViewModel account in Accounts)
         {
             account.Dispose();
@@ -351,7 +358,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
     private void OnMainWindowPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
-        if (eventArgs.PropertyName is nameof(MainWindowViewModel.CloseToTray))
+        if (eventArgs.PropertyName is nameof(MainWindowViewModel.Language))
+        {
+            OnPropertyChanged(nameof(Language));
+        }
+        else if (eventArgs.PropertyName is nameof(MainWindowViewModel.CloseToTray))
         {
             OnPropertyChanged(nameof(CloseToTray));
         }
@@ -398,6 +409,44 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
                  or nameof(MainWindowViewModel.LanternCustomSoundDisplayName))
         {
             RefreshLanternSoundBindings();
+        }
+    }
+
+    private void OnLanguageChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName != "Item[]")
+        {
+            return;
+        }
+
+        RebuildSections(SelectedSection.Section);
+        OnPropertyChanged(nameof(SupportLabel));
+        OnPropertyChanged(nameof(ApplicationVersionDisplay));
+        OnPropertyChanged(nameof(LanternCustomSoundDisplayName));
+        if (_lastUpdateCheckResult is UpdateCheckResult result)
+        {
+            UpdateStatusMessage = result.Status switch
+            {
+                UpdateCheckStatus.UpdateAvailable when result.Release is not null
+                    => Localizer.Instance.Format("A new version of raven {0} is available.", result.Release.Version),
+                UpdateCheckStatus.Current => Localizer.Instance.Get("You are using the latest version of raven."),
+                UpdateCheckStatus.NoRelease => Localizer.Instance.Get("No public release is available yet."),
+                _ => Localizer.Instance.Get("Unable to check for updates.")
+            };
+            OnPropertyChanged(nameof(UpdateStatusMessage));
+        }
+    }
+
+    private void RebuildSections(SettingsSection selected)
+    {
+        Sections.Clear();
+        Sections.Add(new(SettingsSection.General, Localizer.Instance.Get("General"), "⚙"));
+        Sections.Add(new(SettingsSection.Notifications, Localizer.Instance.Get("Notifications"), "●"));
+        Sections.Add(new(SettingsSection.Accounts, Localizer.Instance.Get("Accounts"), "☰"));
+        Sections.Add(new(SettingsSection.About, Localizer.Instance.Get("About"), "i"));
+        if (Sections.FirstOrDefault(section => section.Section == selected) is { } item)
+        {
+            SelectedSection = item;
         }
     }
 

@@ -1,6 +1,7 @@
 <UserControl x:Class="UnifiedMessenger.App.Views.WelcomeView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:UnifiedMessenger.App.Services.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              AutomationProperties.AutomationId="WelcomeView"
@@ -22,17 +23,17 @@
                                HorizontalAlignment="Center"
                                FontSize="26"
                                FontWeight="SemiBold"
-                               Text="raven — мессенджеры и почта в одном окне." />
+                               Text="{loc:Text Key='raven — messaging and email in one place.'}" />
                     <TextBlock MaxWidth="620"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="Чтобы начать, откройте Настройки и добавьте нужные аккаунты."
+                               Text="{loc:Text Key='To get started, open Settings and add the accounts you need.'}"
                                TextAlignment="Center"
                                TextWrapping="Wrap" />
 
                     <Button Margin="0,18,0,0"
                             HorizontalAlignment="Center"
-                            Content="Поддержка: @dscripchenko"
+                            Content="{loc:Text Key='Support: @dscripchenko'}"
                             Click="Support_Click"
                             Padding="16,8" />
 

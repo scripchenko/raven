@@ -1,6 +1,7 @@
 using System.Windows;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Localization;
 
 namespace UnifiedMessenger.App.Views;
 
@@ -22,11 +23,11 @@ public partial class ChangeMailAppPasswordWindow : Window
         PasswordGuidance = account.Provider switch
         {
             MailProviderType.MailRu =>
-                "Используйте новый пароль для внешнего приложения Mail.ru с полным доступом к Почте. Доступ по IMAP/SMTP должен быть включён.",
+                Localizer.Instance.Get("Use a new Mail.ru external-app password with full Mail access. IMAP/SMTP access must be enabled."),
             MailProviderType.Yandex =>
-                "Используйте новый пароль приложения Яндекса. Он будет проверен через IMAP и SMTP до замены сохранённых учётных данных.",
+                Localizer.Instance.Get("Use a new Yandex app password. It will be verified through IMAP and SMTP before replacing the saved credentials."),
             _ =>
-                "Новый пароль будет проверен через IMAP и SMTP до замены сохранённых учётных данных."
+                Localizer.Instance.Get("The new password will be verified through IMAP and SMTP before replacing the saved credentials.")
         };
         InitializeComponent();
         DataContext = this;
@@ -45,7 +46,7 @@ public partial class ChangeMailAppPasswordWindow : Window
         string password = PasswordBox.Password;
         if (string.IsNullOrEmpty(password))
         {
-            StatusText.Text = "Введите новый пароль приложения.";
+            StatusText.Text = Localizer.Instance.Get("Enter a new app password.");
             PasswordBox.Focus();
             return;
         }
@@ -54,7 +55,7 @@ public partial class ChangeMailAppPasswordWindow : Window
         _operationCancellation = new CancellationTokenSource();
         SaveButton.IsEnabled = false;
         StatusText.Foreground = System.Windows.Media.Brushes.DimGray;
-        StatusText.Text = "Проверяем IMAP и SMTP…";
+        StatusText.Text = Localizer.Instance.Get("Checking IMAP and SMTP…");
         try
         {
             MailAccountPasswordReplacementResult result =
@@ -75,12 +76,12 @@ public partial class ChangeMailAppPasswordWindow : Window
         catch (OperationCanceledException)
         {
             StatusText.Foreground = System.Windows.Media.Brushes.Firebrick;
-            StatusText.Text = "Проверка нового пароля отменена.";
+            StatusText.Text = Localizer.Instance.Get("New password verification canceled.");
         }
         catch
         {
             StatusText.Foreground = System.Windows.Media.Brushes.Firebrick;
-            StatusText.Text = "Не удалось проверить и сохранить новый пароль приложения.";
+            StatusText.Text = Localizer.Instance.Get("Could not verify and save the new app password.");
         }
         finally
         {
@@ -99,7 +100,7 @@ public partial class ChangeMailAppPasswordWindow : Window
         if (_isBusy)
         {
             _operationCancellation?.Cancel();
-            StatusText.Text = "Отменяем проверку…";
+            StatusText.Text = Localizer.Instance.Get("Canceling verification…");
             return;
         }
 

@@ -66,14 +66,14 @@ public sealed class ServiceActivityCoordinator : IServiceActivityCoordinator
             service.HasUnreadActivity && service.UnreadCount is not > 0);
         if (hasUnknownActivity)
         {
-            return $"{BrandIdentity.DisplayName} — есть новые события";
+            return UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("raven — new activity");
         }
 
         long knownTotal = enabled
             .Where(service => service.UnreadCount is > 0)
             .Sum(service => (long)service.UnreadCount!.Value);
         return knownTotal > 0
-            ? $"{BrandIdentity.DisplayName} — {knownTotal.ToString(CultureInfo.InvariantCulture)} непрочитанных"
+            ? UnifiedMessenger.App.Services.Localization.Localizer.Instance.Format("raven — {0} unread", knownTotal.ToString(CultureInfo.InvariantCulture))
             : BrandIdentity.DisplayName;
     }
 }

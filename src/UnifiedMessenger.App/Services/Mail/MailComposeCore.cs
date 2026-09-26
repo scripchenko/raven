@@ -22,16 +22,16 @@ public sealed class MailComposeRequestFactory : IMailComposeRequestFactory
         ArgumentNullException.ThrowIfNull(input);
         if (account.Id == Guid.Empty || !account.IsEnabled)
         {
-            throw new MailComposeValidationException("Текущий почтовый аккаунт недоступен для отправки.");
+            throw new MailComposeValidationException(L.Instance.Get("The current mail account cannot send."));
         }
 
-        RejectHeaderBreaks(input.Subject, "Тема содержит недопустимые переводы строк.");
-        IReadOnlyList<MailAddress> to = ParseAddresses(input.To, "Проверьте адреса в поле «Кому».");
-        IReadOnlyList<MailAddress> cc = ParseAddresses(input.Cc, "Проверьте адреса в поле «Копия».");
-        IReadOnlyList<MailAddress> bcc = ParseAddresses(input.Bcc, "Проверьте адреса в поле «Скрытая копия».");
+        RejectHeaderBreaks(input.Subject, L.Instance.Get("Subject contains invalid line breaks."));
+        IReadOnlyList<MailAddress> to = ParseAddresses(input.To, L.Instance.Get("Check addresses in To."));
+        IReadOnlyList<MailAddress> cc = ParseAddresses(input.Cc, L.Instance.Get("Check addresses in Cc."));
+        IReadOnlyList<MailAddress> bcc = ParseAddresses(input.Bcc, L.Instance.Get("Check addresses in Bcc."));
         if (requireRecipient && to.Count + cc.Count + bcc.Count == 0)
         {
-            throw new MailComposeValidationException("Укажите хотя бы одного получателя.");
+            throw new MailComposeValidationException(L.Instance.Get("Specify at least one recipient."));
         }
 
         return new MailComposeRequest(
@@ -131,7 +131,7 @@ internal sealed class MailMimeMessageFactory(TimeProvider timeProvider) : IMailM
         ArgumentNullException.ThrowIfNull(request);
         if (account.Id != request.AccountId || (requireRecipient && request.RecipientCount == 0))
         {
-            throw new MailComposeValidationException("Параметры отправки письма некорректны.");
+            throw new MailComposeValidationException(L.Instance.Get("Invalid message send settings."));
         }
 
         MailProviderFeaturePolicy providerPolicy = MailProviderFeaturePolicies.Get(account.Provider);

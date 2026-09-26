@@ -351,7 +351,7 @@ public sealed class NotificationPopupPresentationTests
         Assert.Equal("CloseButton_Click", button.Attribute("Click")!.Value);
         Assert.Equal("Popup_MouseLeftButtonUp", FindNamed(document, "PopupCard").Attribute("MouseLeftButtonUp")!.Value);
         Assert.Contains(document.Descendants(Presentation + "TextBlock"),
-            element => element.Attribute("Text")?.Value == "• сейчас");
+            element => element.Attribute("Text")?.Value == "{loc:Text Key='• now'}");
         Assert.Equal("{Binding ServiceName}", FindNamed(document, "SourceLabel").Attribute("Text")!.Value);
         Assert.Equal("Normal", FindNamed(document, "SourceLabel").Attribute("FontWeight")!.Value);
     }

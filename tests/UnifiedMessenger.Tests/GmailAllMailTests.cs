@@ -16,7 +16,7 @@ public sealed class GmailAllMailTests
         MailFolder folder = MailFolderCatalog.Create(MailFolderKind.AllMail, GmailSystemFolders.AllMailView);
 
         Assert.Equal(MailFolderCatalog.AllMailKey, folder.Key);
-        Assert.Equal("Вся почта", folder.DisplayName);
+        Assert.Equal("All Mail", folder.DisplayName);
         Assert.True(folder.SupportsReadState);
         Assert.Equal(GmailSystemFolders.AllMailView, folder.ProviderLocator);
     }

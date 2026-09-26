@@ -10,6 +10,7 @@ using Microsoft.Web.WebView2.Core;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Branding;
 using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Localization;
 using UnifiedMessenger.App.Services.Tray;
 using UnifiedMessenger.App.Services.WebView;
 using UnifiedMessenger.App.ViewModels;
@@ -287,7 +288,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось переключить аккаунт", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not switch accounts"), exception);
         }
     }
 
@@ -411,7 +412,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось инициализировать аккаунт", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not initialize account"), exception);
         }
     }
 
@@ -621,7 +622,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось добавить сервис", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not add service"), exception);
         }
     }
 
@@ -671,7 +672,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось переименовать аккаунт", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not rename account"), exception);
         }
     }
 
@@ -694,7 +695,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось переименовать почтовый аккаунт", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not rename mail account"), exception);
         }
     }
 
@@ -731,8 +732,8 @@ public partial class MainWindow : Window
                 _lifetimeCancellation.Token);
             WpfMessageBox.Show(
                 this,
-                "Новый пароль приложения проверен и сохранён в защищённом хранилище Windows.",
-                "Пароль приложения обновлён",
+                Localizer.Instance.Get("Your new app password was verified and saved in protected Windows storage."),
+                Localizer.Instance.Get("App password updated"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -742,7 +743,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Пароль сохранён, но почту не удалось обновить", exception);
+            ShowOperationError(Localizer.Instance.Get("Password saved, but mail could not refresh"), exception);
         }
     }
 
@@ -786,7 +787,7 @@ public partial class MainWindow : Window
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
             ShowOperationError(
-                isEnabled ? "Не удалось включить почтовый аккаунт" : "Не удалось отключить почтовый аккаунт",
+                isEnabled ? Localizer.Instance.Get("Could not enable mail account") : Localizer.Instance.Get("Could not disable mail account"),
                 exception);
         }
     }
@@ -842,7 +843,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError(isEnabled ? "Не удалось включить аккаунт" : "Не удалось отключить аккаунт", exception);
+            ShowOperationError(isEnabled ? Localizer.Instance.Get("Could not enable account") : Localizer.Instance.Get("Could not disable account"), exception);
         }
     }
 
@@ -875,8 +876,8 @@ public partial class MainWindow : Window
     {
         MessageBoxResult confirmation = WpfMessageBox.Show(
             this,
-            $"Удалить почтовый аккаунт «{account.DisplayLabel}»?\n\nСохранённые учётные данные этого почтового аккаунта будут удалены из защищённого хранилища Windows.",
-            "Удаление почтового аккаунта",
+            Localizer.Instance.Format("Delete mail account “{0}”?\n\nIts saved credentials will be removed from protected Windows storage.", account.DisplayLabel),
+            Localizer.Instance.Get("Delete mail account"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -902,7 +903,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось удалить почтовый аккаунт", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not delete mail account"), exception);
         }
     }
 
@@ -910,8 +911,8 @@ public partial class MainWindow : Window
     {
         MessageBoxResult confirmation = WpfMessageBox.Show(
             this,
-            $"Удалить аккаунт «{service.DisplayName}»?\n\nДанные только этого профиля будут очищены. При повторном добавлении потребуется новая авторизация.",
-            "Удаление аккаунта",
+            Localizer.Instance.Format("Delete account “{0}”?\n\nOnly this profile's data will be cleared. Adding it again will require a new sign-in.", service.DisplayName),
+            Localizer.Instance.Get("Delete account"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -932,8 +933,8 @@ public partial class MainWindow : Window
             {
                 WpfMessageBox.Show(
                     this,
-                    "Профиль занят процессом WebView2 и будет безопасно удалён при следующем запуске.",
-                    "Удаление отложено",
+                    Localizer.Instance.Get("The profile is in use by WebView2 and will be safely deleted on the next launch."),
+                    Localizer.Instance.Get("Deletion postponed"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
             }
@@ -944,7 +945,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось удалить аккаунт", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not delete account"), exception);
         }
     }
 
@@ -967,7 +968,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось изменить порядок аккаунтов", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not change account order"), exception);
         }
     }
 
@@ -1147,7 +1148,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось сохранить доверие к отправителю", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not save sender trust"), exception);
         }
     }
 
@@ -1163,7 +1164,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception) when (IsRecoverableOperationException(exception))
         {
-            ShowOperationError("Не удалось отменить доверие к отправителю", exception);
+            ShowOperationError(Localizer.Instance.Get("Could not revoke sender trust"), exception);
         }
     }
 
@@ -1178,8 +1179,8 @@ public partial class MainWindow : Window
         {
             WpfMessageBox.Show(
                 this,
-                "Не удалось открыть окно печати.",
-                "Печать",
+                Localizer.Instance.Get("Could not open the print dialog."),
+                Localizer.Instance.Get("Print"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
@@ -1402,8 +1403,8 @@ public partial class MainWindow : Window
         {
             WpfMessageBox.Show(
                 this,
-                "Не удалось открыть официальную страницу WebView2 Runtime в системном браузере.",
-                "Не удалось открыть браузер",
+                Localizer.Instance.Get("Could not open the official WebView2 Runtime page in the system browser."),
+                Localizer.Instance.Get("Could not open browser"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }

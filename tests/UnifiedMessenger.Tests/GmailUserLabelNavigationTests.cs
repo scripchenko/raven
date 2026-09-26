@@ -179,7 +179,7 @@ public sealed class GmailUserLabelNavigationTests
         await SelectLabelAsync(viewModel, "empty");
 
         Assert.True(viewModel.IsEmpty);
-        Assert.Equal("В этом ярлыке нет писем.", viewModel.EmptyListMessage);
+        Assert.Equal("No messages with this label.", viewModel.EmptyListMessage);
     }
 
     [Fact]
@@ -440,7 +440,7 @@ public sealed class GmailUserLabelNavigationTests
 
         Assert.Equal(MailFolderKind.Inbox, viewModel.SelectedFolder?.Kind);
         Assert.DoesNotContain(viewModel.Folders, folder => folder.IsUserLabel);
-        Assert.Contains("больше недоступен", viewModel.MailboxActionErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no longer available", viewModel.MailboxActionErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -457,7 +457,7 @@ public sealed class GmailUserLabelNavigationTests
 
         Assert.Equal(MailFolderKind.Inbox, viewModel.SelectedFolder?.Kind);
         Assert.DoesNotContain(viewModel.Folders, folder => folder.IsUserLabel);
-        Assert.Contains("больше недоступен", viewModel.MailboxActionErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no longer available", viewModel.MailboxActionErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -535,7 +535,7 @@ public sealed class GmailUserLabelNavigationTests
         string xaml = File.ReadAllText(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
 
-        Assert.Contains("Text=\"Ярлыки\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{loc:Text Key='Labels'}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("MailFolderKind.UserLabel", xaml, StringComparison.Ordinal);
         Assert.Contains("MailFolderLabelGeometry", xaml, StringComparison.Ordinal);
         Assert.Contains("ToolTip=\"{Binding DisplayName}\"", xaml, StringComparison.Ordinal);

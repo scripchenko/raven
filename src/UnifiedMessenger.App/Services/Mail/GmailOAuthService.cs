@@ -26,7 +26,7 @@ public sealed class GmailOAuthService(
         {
             return GmailOAuthAuthorizationResult.Failure(
                 MailConnectionFailureKind.InvalidConfiguration,
-                "Запрошено неподдерживаемое разрешение Gmail.");
+                L.Instance.Get("Unsupported Gmail permission requested."));
         }
         GoogleOAuthClientConfiguration? configuration;
         try
@@ -42,14 +42,14 @@ public sealed class GmailOAuthService(
         {
             return GmailOAuthAuthorizationResult.Failure(
                 MailConnectionFailureKind.OAuthConfigurationInvalid,
-                "Локальная конфигурация Google OAuth повреждена или недоступна.");
+                L.Instance.Get("Local Google OAuth configuration is damaged or unavailable."));
         }
 
         if (configuration is null)
         {
             return GmailOAuthAuthorizationResult.Failure(
                 MailConnectionFailureKind.OAuthConfigurationMissing,
-                $"Не найден OAuth Client типа Desktop app. Поместите загруженный файл в {configurationSource.ConfigurationPath}");
+                L.Instance.Format("No Desktop app OAuth client was found. Put the downloaded file at {0}", configurationSource.ConfigurationPath));
         }
 
         IOAuthLoopbackListener listener;
@@ -61,7 +61,7 @@ public sealed class GmailOAuthService(
         {
             return GmailOAuthAuthorizationResult.Failure(
                 MailConnectionFailureKind.ConnectionFailed,
-                "Не удалось запустить локальный OAuth callback на 127.0.0.1.");
+                L.Instance.Get("Could not start the local OAuth callback on 127.0.0.1."));
         }
 
         await using (listener)
@@ -81,14 +81,14 @@ public sealed class GmailOAuthService(
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.OAuthConfigurationInvalid,
-                    "Не удалось подготовить безопасный запрос Google OAuth.");
+                    L.Instance.Get("Could not prepare a secure Google OAuth request."));
             }
 
             if (!browserLauncher.TryOpen(request.AuthorizationUri))
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.OAuthBrowserLaunchFailed,
-                    "Не удалось открыть системный браузер для входа в Google.");
+                    L.Instance.Get("Could not open the system browser for Google sign-in."));
             }
 
             using CancellationTokenSource timeout = new(options.AuthorizationTimeout);
@@ -108,35 +108,35 @@ public sealed class GmailOAuthService(
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.OAuthTimeout,
-                    "Время ожидания входа в Google истекло. Попробуйте ещё раз.");
+                    L.Instance.Get("Google sign-in timed out. Please retry."));
             }
             catch (Exception exception) when (
                 exception is IOException or SocketException or InvalidDataException or InvalidOperationException)
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.ConnectionFailed,
-                    "Не удалось получить безопасный ответ Google OAuth.");
+                    L.Instance.Get("Could not obtain a secure Google OAuth response."));
             }
 
             if (!FixedTimeEquals(state, callback.State))
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.OAuthStateMismatch,
-                    "Ответ Google OAuth не прошёл проверку state.");
+                    L.Instance.Get("Google OAuth response failed state validation."));
             }
 
             if (!string.IsNullOrWhiteSpace(callback.Error))
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.OAuthDenied,
-                    "Доступ к Gmail не был предоставлен.");
+                    L.Instance.Get("Gmail access was not granted."));
             }
 
             if (string.IsNullOrWhiteSpace(callback.Code))
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.ConnectionFailed,
-                    "Google OAuth не вернул authorization code.");
+                    L.Instance.Get("Google OAuth did not return an authorization code."));
             }
 
             GoogleOAuthTokenResult tokens;
@@ -158,21 +158,21 @@ public sealed class GmailOAuthService(
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.OAuthTokenExchangeFailed,
-                    "Google не смог обменять authorization code на токены.");
+                    L.Instance.Get("Google could not exchange the authorization code for tokens."));
             }
 
             if (string.IsNullOrWhiteSpace(tokens.AccessToken))
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.OAuthTokenExchangeFailed,
-                    "Google OAuth не вернул access token.");
+                    L.Instance.Get("Google OAuth did not return an access token."));
             }
 
             if (string.IsNullOrWhiteSpace(tokens.RefreshToken))
             {
                 return GmailOAuthAuthorizationResult.Failure(
                     MailConnectionFailureKind.OAuthRefreshTokenMissing,
-                    "Google OAuth не вернул refresh token для автономного доступа.");
+                    L.Instance.Get("Google OAuth did not return a refresh token for offline access."));
             }
 
             MailCredential persistentCredential = MailCredential.CreateGmailOAuth(
@@ -199,19 +199,19 @@ public sealed class GmailOAuthService(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return GmailProfileResult.Failure("Получение профиля Gmail отменено.");
+            return GmailProfileResult.Failure(L.Instance.Get("Retrieving the Gmail profile was canceled."));
         }
         catch (GoogleOAuthProtocolException)
         {
             return GmailProfileResult.Failure(
-                "Не удалось получить профиль Gmail. Проверьте доступность Gmail API и разрешение аккаунта.");
+                L.Instance.Get("Could not retrieve the Gmail profile. Check Gmail API availability and account permission."));
         }
     }
 
     private static GmailOAuthAuthorizationResult Canceled() =>
         GmailOAuthAuthorizationResult.Failure(
             MailConnectionFailureKind.OperationCanceled,
-            "Подключение Gmail отменено.");
+            L.Instance.Get("Connecting Gmail was canceled."));
 
     private static bool FixedTimeEquals(string expected, string? actual)
     {

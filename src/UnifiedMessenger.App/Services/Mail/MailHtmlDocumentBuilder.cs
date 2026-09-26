@@ -84,16 +84,17 @@ public sealed class MailHtmlDocumentBuilder : IMailHtmlDocumentBuilder
             .Append("<h1 class=\"um-print-subject\">")
             .Append(Escape(content.Subject))
             .Append("</h1><dl class=\"um-print-meta\">")
-            .Append("<dt>От:</dt><dd>")
+            .Append("<dt>").Append(Escape(L.Instance.Get("From:"))).Append("</dt><dd>")
             .Append(Escape(sender))
-            .Append("</dd><dt>Кому:</dt><dd>")
+            .Append("</dd><dt>").Append(Escape(L.Instance.Get("To:"))).Append("</dt><dd>")
             .Append(Escape(content.To))
-            .Append("</dd><dt>Дата:</dt><dd>")
+            .Append("</dd><dt>").Append(Escape(L.Instance.Get("Date:"))).Append("</dt><dd>")
             .Append(Escape(date))
             .Append("</dd></dl>");
         if (content.Attachments.Count > 0)
         {
-            header.Append("<div class=\"um-print-attachments\"><strong>Вложения:</strong><ul>");
+            header.Append("<div class=\"um-print-attachments\"><strong>")
+                .Append(Escape(L.Instance.Get("Attachments:"))).Append("</strong><ul>");
             foreach (MailAttachmentInfo attachment in content.Attachments)
             {
                 header.Append("<li>")

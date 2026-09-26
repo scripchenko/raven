@@ -1,6 +1,7 @@
 <UserControl x:Class="UnifiedMessenger.App.Views.SettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:UnifiedMessenger.App.Services.Localization"
              xmlns:converters="clr-namespace:UnifiedMessenger.App.Converters"
              xmlns:notifications="clr-namespace:UnifiedMessenger.App.Services.Notifications"
              Background="{DynamicResource WindowBackgroundBrush}">
@@ -62,11 +63,11 @@
                         Content="←"
                         DockPanel.Dock="Left"
                         Style="{StaticResource ToolbarButtonStyle}"
-                        ToolTip="Вернуться к мессенджеру" />
+                        ToolTip="{loc:Text Key='Back to messenger'}" />
                 <TextBlock VerticalAlignment="Center"
                            FontSize="20"
                            FontWeight="SemiBold"
-                           Text="Настройки" />
+                           Text="{loc:Text Key='Settings'}" />
             </DockPanel>
         </Border>
 
@@ -115,7 +116,27 @@
                         <TextBlock Margin="0,0,0,18"
                                    FontSize="24"
                                    FontWeight="SemiBold"
-                                   Text="Общие" />
+                                   Text="{loc:Text Key='General'}" />
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center"
+                                           FontWeight="SemiBold"
+                                           Text="{loc:Text Key='Language'}" />
+                                <ComboBox Grid.Column="1"
+                                          Width="145"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding Language, Mode=OneWay}"
+                                          SelectionChanged="Language_SelectionChanged">
+                                    <ComboBoxItem Tag="en" Content="English" />
+                                    <ComboBoxItem Tag="ru" Content="Русский" />
+                                </ComboBox>
+                            </Grid>
+                        </Border>
 
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <Grid>
@@ -124,10 +145,10 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Margin="0,0,24,0">
-                                    <TextBlock FontWeight="SemiBold" Text="Закрывать окно в трей" />
+                                    <TextBlock FontWeight="SemiBold" Text="{loc:Text Key='Close to tray'}" />
                                     <TextBlock Margin="0,6,0,0"
                                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="Если выключено, крестик полностью завершает raven."
+                                               Text="{loc:Text Key='If off, closing the window exits raven completely.'}"
                                                TextWrapping="Wrap" />
                                 </StackPanel>
                                 <CheckBox Grid.Column="1"
@@ -140,14 +161,14 @@
 
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <StackPanel>
-                                <TextBlock FontWeight="SemiBold" Text="Подсказка при первом закрытии в трей" />
+                                <TextBlock FontWeight="SemiBold" Text="{loc:Text Key='First close-to-tray hint'}" />
                                 <TextBlock Margin="0,6,0,12"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Сбросьте состояние подсказки, чтобы увидеть её при следующем закрытии окна в трей."
+                                           Text="{loc:Text Key='Reset the hint to see it the next time you close the window to the tray.'}"
                                            TextWrapping="Wrap" />
                                 <Button HorizontalAlignment="Left"
                                         Command="{Binding ResetTrayHintCommand}"
-                                        Content="Показать подсказку снова"
+                                        Content="{loc:Text Key='Show hint again'}"
                                         IsEnabled="{Binding HasShownTrayHint}"
                                         Style="{StaticResource CompactButtonStyle}" />
                             </StackPanel>
@@ -158,7 +179,7 @@
                         <TextBlock Margin="0,0,0,18"
                                    FontSize="24"
                                    FontWeight="SemiBold"
-                                   Text="Уведомления" />
+                                   Text="{loc:Text Key='Notifications'}" />
 
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <StackPanel>
@@ -167,7 +188,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Уведомления" />
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="{loc:Text Key='Notifications'}" />
                                     <CheckBox Grid.Column="1"
                                               Command="{Binding SetNotificationsEnabledCommand}"
                                               CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
@@ -178,7 +199,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Не беспокоить" />
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="{loc:Text Key='Do not disturb'}" />
                                     <CheckBox Grid.Column="1"
                                               Command="{Binding SetDoNotDisturbCommand}"
                                               CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
@@ -189,7 +210,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Показывать текст сообщения" />
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="{loc:Text Key='Show message preview'}" />
                                     <CheckBox Grid.Column="1"
                                               Command="{Binding SetShowNotificationPreviewCommand}"
                                               CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
@@ -201,10 +222,10 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Margin="0,0,24,0">
-                                        <TextBlock FontWeight="SemiBold" Text="Звуки raven" />
+                                        <TextBlock FontWeight="SemiBold" Text="{loc:Text Key='raven sounds'}" />
                                         <TextBlock Margin="0,6,0,0"
                                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                                   Text="Управляет только звуками, которые воспроизводит raven. Звук веб-сервисов не изменяется."
+                                                   Text="{loc:Text Key='Controls only sounds played by raven. Web service sound is unchanged.'}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <CheckBox Grid.Column="1"
@@ -218,19 +239,19 @@
 
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <StackPanel>
-                                <TextBlock FontWeight="SemiBold" Text="Звук raven" />
+                                <TextBlock FontWeight="SemiBold" Text="{loc:Text Key='raven sound'}" />
                                 <TextBlock Margin="0,6,0,12"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Один общий звук используется для Telegram, WhatsApp и MAX в режиме raven, а также для почты."
+                                           Text="{loc:Text Key='One shared sound is used for Telegram, WhatsApp, MAX in raven mode, and for mail.'}"
                                            TextWrapping="Wrap" />
                                 <StackPanel Orientation="Horizontal">
                                     <RadioButton Margin="0,0,22,0"
                                                  Command="{Binding SelectDefaultLanternSoundCommand}"
-                                                 Content="Стандартный"
+                                                 Content="{loc:Text Key='Default'}"
                                                  GroupName="LanternSoundSource"
                                                  IsChecked="{Binding IsDefaultLanternSound, Mode=OneWay}" />
                                     <RadioButton Command="{Binding SelectCustomLanternSoundCommand}"
-                                                 Content="Свой звук"
+                                                 Content="{loc:Text Key='Custom sound'}"
                                                  GroupName="LanternSoundSource"
                                                  IsChecked="{Binding IsCustomLanternSound, Mode=OneWay}" />
                                 </StackPanel>
@@ -240,13 +261,13 @@
                                            TextTrimming="CharacterEllipsis" />
                                 <WrapPanel Margin="0,8,0,0">
                                     <Button Command="{Binding ChooseLanternSoundCommand}"
-                                            Content="Выбрать файл..."
+                                            Content="{loc:Text Key='Choose file...'}"
                                             Style="{StaticResource CompactButtonStyle}" />
                                     <Button Command="{Binding PreviewLanternSoundCommand}"
-                                            Content="Прослушать"
+                                            Content="{loc:Text Key='Preview sound'}"
                                             Style="{StaticResource CompactButtonStyle}" />
                                     <Button Command="{Binding RestoreDefaultLanternSoundCommand}"
-                                            Content="Вернуть стандартный"
+                                            Content="{loc:Text Key='Restore default'}"
                                             Style="{StaticResource CompactButtonStyle}" />
                                 </WrapPanel>
                                 <TextBlock Margin="0,8,0,0"
@@ -258,10 +279,10 @@
 
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <StackPanel>
-                                <TextBlock FontWeight="SemiBold" Text="Источник звука мессенджеров" />
+                                <TextBlock FontWeight="SemiBold" Text="{loc:Text Key='Messenger sound source'}" />
                                 <TextBlock Margin="0,6,0,14"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Выбор влияет только на звук уведомления. В режиме «Звук веб-сервиса» raven не воспроизводит свой звук. Всплывающие уведомления и индикатор активности raven продолжают работать."
+                                           Text="{loc:Text Key='This choice affects notification sound only. With Web service sound, raven does not play its own sound. raven popups and activity indicators continue to work.'}"
                                            TextWrapping="Wrap" />
 
                                 <Grid Margin="0,0,0,12">
@@ -274,12 +295,12 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetTelegramSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Звук raven"
+                                                     Content="{loc:Text Key='raven sound'}"
                                                      GroupName="TelegramSoundMode"
                                                      IsChecked="{Binding IsTelegramLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetTelegramSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
-                                                     Content="Звук веб-сервиса"
+                                                     Content="{loc:Text Key='Web service sound'}"
                                                      GroupName="TelegramSoundMode"
                                                      IsChecked="{Binding IsTelegramNativeSound, Mode=OneWay}" />
                                     </StackPanel>
@@ -295,12 +316,12 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetWhatsAppSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Звук raven"
+                                                     Content="{loc:Text Key='raven sound'}"
                                                      GroupName="WhatsAppSoundMode"
                                                      IsChecked="{Binding IsWhatsAppLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetWhatsAppSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
-                                                     Content="Звук веб-сервиса"
+                                                     Content="{loc:Text Key='Web service sound'}"
                                                      GroupName="WhatsAppSoundMode"
                                                      IsChecked="{Binding IsWhatsAppNativeSound, Mode=OneWay}" />
                                     </StackPanel>
@@ -316,12 +337,12 @@
                                         <RadioButton Margin="0,0,18,0"
                                                      Command="{Binding SetMaxSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Lantern}"
-                                                     Content="Звук raven"
+                                                     Content="{loc:Text Key='raven sound'}"
                                                      GroupName="MaxSoundMode"
                                                      IsChecked="{Binding IsMaxLanternSound, Mode=OneWay}" />
                                         <RadioButton Command="{Binding SetMaxSoundModeCommand}"
                                                      CommandParameter="{x:Static notifications:NotificationSoundMode.Native}"
-                                                     Content="Звук веб-сервиса"
+                                                     Content="{loc:Text Key='Web service sound'}"
                                                      GroupName="MaxSoundMode"
                                                      IsChecked="{Binding IsMaxNativeSound, Mode=OneWay}" />
                                     </StackPanel>
@@ -334,10 +355,10 @@
                         <TextBlock Margin="0,0,0,6"
                                    FontSize="24"
                                    FontWeight="SemiBold"
-                                   Text="Аккаунты" />
+                                   Text="{loc:Text Key='Accounts'}" />
                         <TextBlock Margin="0,0,0,18"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Профили и авторизации сохраняются отдельно для каждого аккаунта."
+                                   Text="{loc:Text Key='Profiles and sign-ins are saved separately for each account.'}"
                                    TextWrapping="Wrap" />
 
                         <Grid Margin="0,0,0,12">
@@ -348,11 +369,11 @@
                             <TextBlock VerticalAlignment="Center"
                                        FontSize="17"
                                        FontWeight="SemiBold"
-                                       Text="Мессенджеры" />
+                                       Text="{loc:Text Key='Messengers'}" />
                             <Button Grid.Column="1"
                                     AutomationProperties.AutomationId="AddMailAccountButton"
                                     Click="AddMailAccount_Click"
-                                    Content="Добавить почту"
+                                    Content="{loc:Text Key='Add mail'}"
                                     Style="{StaticResource CompactButtonStyle}" />
                         </Grid>
 
@@ -386,7 +407,7 @@
                                                 </StackPanel>
                                                 <Button Grid.Column="2"
                                                         Command="{Binding OpenCommand}"
-                                                        Content="Открыть"
+                                                        Content="{loc:Text Key='Open'}"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                             </Grid>
 
@@ -395,27 +416,27 @@
                                                           VerticalAlignment="Center"
                                                           Command="{Binding SetEnabledCommand}"
                                                           CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
-                                                          Content="Включён"
+                                                          Content="{loc:Text Key='Enabled'}"
                                                           IsChecked="{Binding IsEnabled, Mode=OneWay}" />
                                                 <CheckBox Margin="0,8,18,4"
                                                           VerticalAlignment="Center"
                                                           Command="{Binding SetMutedCommand}"
                                                           CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
-                                                          Content="Без звука"
+                                                          Content="{loc:Text Key='Muted'}"
                                                           IsChecked="{Binding IsMuted, Mode=OneWay}" />
                                                 <Button Command="{Binding RenameCommand}"
-                                                        Content="Переименовать"
+                                                        Content="{loc:Text Key='Rename'}"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                                 <Button Command="{Binding MoveUpCommand}"
-                                                        Content="Выше"
+                                                        Content="{loc:Text Key='Move up'}"
                                                         IsEnabled="{Binding CanMoveUp}"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                                 <Button Command="{Binding MoveDownCommand}"
-                                                        Content="Ниже"
+                                                        Content="{loc:Text Key='Move down'}"
                                                         IsEnabled="{Binding CanMoveDown}"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                                 <Button Command="{Binding DeleteCommand}"
-                                                        Content="Удалить…"
+                                                        Content="{loc:Text Key='Delete…'}"
                                                         Foreground="#C62828"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                             </WrapPanel>
@@ -428,10 +449,10 @@
                         <TextBlock Margin="0,22,0,10"
                                    FontSize="17"
                                    FontWeight="SemiBold"
-                                   Text="Почтовые аккаунты" />
+                                   Text="{loc:Text Key='Mail accounts'}" />
                         <TextBlock Margin="0,0,0,12"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Пароли хранятся отдельно в защищённом хранилище Windows и не записываются в settings.json."
+                                   Text="{loc:Text Key='Passwords are stored separately in protected Windows storage, not in settings.json.'}"
                                    TextWrapping="Wrap" />
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <Grid>
@@ -441,15 +462,15 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Margin="0,0,24,0">
                                     <TextBlock FontWeight="SemiBold"
-                                               Text="Автоматически показывать внешние изображения" />
+                                               Text="{loc:Text Key='Automatically show remote images'}" />
                                     <TextBlock Margin="0,6,0,0"
                                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="raven загружает изображения через защищённый загрузчик без cookies и учётных данных. Отправитель всё равно может узнать о загрузке изображения."
+                                               Text="{loc:Text Key='raven loads images through a protected loader without cookies or credentials. The sender may still detect an image request.'}"
                                                TextWrapping="Wrap" />
                                 </StackPanel>
                                 <CheckBox Grid.Column="1"
                                           VerticalAlignment="Center"
-                                          AutomationProperties.Name="Автоматически показывать внешние изображения"
+                                          AutomationProperties.Name="{loc:Text Key='Automatically show remote images'}"
                                           Command="{Binding SetAutomaticallyShowRemoteImagesCommand}"
                                           CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
                                           IsChecked="{Binding AutomaticallyShowRemoteImages, Mode=OneWay}" />
@@ -488,24 +509,24 @@
                                                 </StackPanel>
                                                 <Button Grid.Column="2"
                                                         Command="{Binding OpenCommand}"
-                                                        Content="Открыть"
+                                                        Content="{loc:Text Key='Open'}"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                             </Grid>
                                             <WrapPanel Margin="46,12,0,0">
                                                 <CheckBox Margin="0,8,18,4"
                                                           Command="{Binding SetEnabledCommand}"
                                                           CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
-                                                          Content="Включён"
+                                                          Content="{loc:Text Key='Enabled'}"
                                                           IsChecked="{Binding IsEnabled, Mode=OneWay}" />
                                                 <Button Command="{Binding RenameCommand}"
-                                                        Content="Переименовать"
+                                                        Content="{loc:Text Key='Rename'}"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                                 <Button Command="{Binding ChangeAppPasswordCommand}"
-                                                        Content="Изменить пароль приложения"
+                                                        Content="{loc:Text Key='Change app password'}"
                                                         Style="{StaticResource CompactButtonStyle}"
                                                         Visibility="{Binding CanChangeAppPassword, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                 <Button Command="{Binding DeleteCommand}"
-                                                        Content="Удалить…"
+                                                        Content="{loc:Text Key='Delete…'}"
                                                         Foreground="#C62828"
                                                         Style="{StaticResource CompactButtonStyle}" />
                                             </WrapPanel>
@@ -520,21 +541,21 @@
                         <TextBlock Margin="0,0,0,18"
                                    FontSize="24"
                                    FontWeight="SemiBold"
-                                   Text="О программе" />
+                                   Text="{loc:Text Key='About'}" />
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <StackPanel>
                                 <TextBlock FontSize="25" FontWeight="SemiBold" Text="raven" />
                                 <TextBlock Margin="0,6,0,0"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="{Binding ApplicationVersion, StringFormat=Версия {0}}" />
+                                           Text="{Binding ApplicationVersionDisplay}" />
                                 <TextBlock Margin="0,18,0,0" FontWeight="SemiBold" Text=".NET / WPF / WebView2" />
                                 <TextBlock Margin="0,8,0,0"
                                            Foreground="{DynamicResource TextSecondaryBrush}"
-                                           Text="Telegram, WhatsApp, MAX и VK работают через официальные веб-клиенты."
+                                           Text="{loc:Text Key='Telegram, WhatsApp, MAX, and VK use their official web clients.'}"
                                            TextWrapping="Wrap" />
                                 <Button Margin="0,22,0,0"
                                         HorizontalAlignment="Left"
-                                        Content="Проверить обновления"
+                                        Content="{loc:Text Key='Check for updates'}"
                                         Command="{Binding CheckForUpdatesCommand}"
                                         Style="{StaticResource CompactButtonStyle}" />
                                 <TextBlock Margin="0,10,0,0"
@@ -543,13 +564,13 @@
                                            TextWrapping="Wrap" />
                                 <Button Margin="0,8,0,0"
                                         HorizontalAlignment="Left"
-                                        Content="Скачать"
+                                        Content="{loc:Text Key='Download'}"
                                         Command="{Binding DownloadUpdateCommand}"
                                         Style="{StaticResource CompactButtonStyle}"
                                         Visibility="{Binding CanDownloadUpdate, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 <Button Margin="0,8,0,0"
                                         HorizontalAlignment="Left"
-                                        Content="Поддержка: @dscripchenko"
+                                        Content="{loc:Text Key='Support: @dscripchenko'}"
                                         Command="{Binding OpenSupportCommand}"
                                         Style="{StaticResource CompactButtonStyle}" />
                             </StackPanel>

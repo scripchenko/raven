@@ -19,7 +19,7 @@ public sealed class YandexMailboxFreshnessTests
 
         Assert.True(vm.ShowYandexSelectedReadStateAction);
         Assert.True(vm.YandexSelectedReadStateWillMarkRead);
-        Assert.Equal("Прочитано", vm.YandexSelectedReadStateActionText);
+        Assert.Equal("Read", vm.YandexSelectedReadStateActionText);
         Assert.True(vm.ToggleYandexSelectedReadStateCommand.CanExecute(null));
         List<bool> visibilityUpdates = [];
         List<string> actionTextUpdates = [];
@@ -40,10 +40,10 @@ public sealed class YandexMailboxFreshnessTests
         Assert.Equal([MailMailboxAction.Read], provider.MailboxActions);
         Assert.NotEmpty(visibilityUpdates);
         Assert.All(visibilityUpdates, Assert.True);
-        Assert.Contains("Непрочитано", actionTextUpdates);
+        Assert.Contains("Unread", actionTextUpdates);
         Assert.True(vm.ShowYandexSelectedReadStateAction);
         Assert.False(vm.YandexSelectedReadStateWillMarkRead);
-        Assert.Equal("Непрочитано", vm.YandexSelectedReadStateActionText);
+        Assert.Equal("Unread", vm.YandexSelectedReadStateActionText);
         await vm.ToggleYandexSelectedReadStateCommand.ExecuteAsync(null);
 
         Assert.All(vm.Messages, message => Assert.True(message.IsUnread));
@@ -67,7 +67,7 @@ public sealed class YandexMailboxFreshnessTests
         Assert.Contains(vm.Messages, message => message.IsUnread);
         Assert.Contains(vm.Messages, message => !message.IsUnread);
         Assert.True(vm.YandexSelectedReadStateWillMarkRead);
-        Assert.Equal("Прочитано", vm.YandexSelectedReadStateActionText);
+        Assert.Equal("Read", vm.YandexSelectedReadStateActionText);
         await vm.ToggleYandexSelectedReadStateCommand.ExecuteAsync(null);
         Assert.All(vm.Messages, message => Assert.False(message.IsUnread));
     }
@@ -85,13 +85,13 @@ public sealed class YandexMailboxFreshnessTests
 
         Assert.True(vm.ShowYandexDetailReadStateAction);
         Assert.True(vm.YandexDetailReadStateWillMarkRead);
-        Assert.Equal("Прочитано", vm.YandexDetailReadStateActionText);
+        Assert.Equal("Read", vm.YandexDetailReadStateActionText);
         await vm.ToggleYandexDetailReadStateCommand.ExecuteAsync(null);
 
         Assert.False(vm.SelectedMessageSummary!.IsUnread);
         Assert.False(vm.SelectedMessageContent!.IsUnread);
         Assert.False(vm.YandexDetailReadStateWillMarkRead);
-        Assert.Equal("Непрочитано", vm.YandexDetailReadStateActionText);
+        Assert.Equal("Unread", vm.YandexDetailReadStateActionText);
         await vm.ToggleYandexDetailReadStateCommand.ExecuteAsync(null);
         Assert.True(vm.SelectedMessageSummary!.IsUnread);
         Assert.True(vm.SelectedMessageContent!.IsUnread);

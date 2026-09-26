@@ -406,7 +406,7 @@ public sealed class Stage73UnifiedInboxTests
 
         await viewModel.ActivateAsync(CreateAccount(providerType));
         Assert.True(viewModel.HasBlockingListError);
-        Assert.Equal("Не удалось войти в почту", viewModel.ErrorTitle);
+        Assert.Equal("Could not sign in to mail", viewModel.ErrorTitle);
 
         await viewModel.RetryCommand.ExecuteAsync(null);
         Assert.False(viewModel.HasListError);
@@ -426,7 +426,7 @@ public sealed class Stage73UnifiedInboxTests
         await viewModel.ActivateAsync(CreateAccount(MailProviderType.MailRu));
 
         Assert.Equal(MailReadFailureKind.ConnectionFailed, viewModel.FailureKind);
-        Assert.Equal("Не удалось загрузить почту", viewModel.ErrorTitle);
+        Assert.Equal("Could not load mail", viewModel.ErrorTitle);
         Assert.DoesNotContain("парол", viewModel.ListErrorDescription, StringComparison.OrdinalIgnoreCase);
         Assert.False(viewModel.IsListLoading);
 
@@ -535,7 +535,7 @@ public sealed class Stage73UnifiedInboxTests
             text => (string?)text.Attribute("TextWrapping") == "Wrap");
 
         using MailInboxViewModel viewModel = CreateViewModel(new QueueReadProvider());
-        Assert.Equal("Показать", viewModel.RemoteImagesButtonText);
+        Assert.Equal("Show", viewModel.RemoteImagesButtonText);
     }
 
     [Fact]
@@ -1212,7 +1212,7 @@ public sealed class Stage73UnifiedInboxTests
         await viewModel.CurrentMessageLoadTask;
         Assert.True(viewModel.ShowRemoteImagesBanner);
         Assert.True(viewModel.CanShowRemoteImages);
-        Assert.Equal("Показать", viewModel.RemoteImagesButtonText);
+        Assert.Equal("Show", viewModel.RemoteImagesButtonText);
 
         viewModel.MarkRemoteImagesShown();
         Assert.False(viewModel.ShowRemoteImagesBanner);

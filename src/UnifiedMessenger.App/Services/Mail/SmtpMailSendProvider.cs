@@ -30,7 +30,7 @@ internal sealed class SmtpMailSendProvider(
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.InvalidRequest,
-                "Параметры SMTP-отправки некорректны.");
+                L.Instance.Get("Invalid SMTP send settings."));
         }
 
         MailCredential? credential;
@@ -42,20 +42,20 @@ internal sealed class SmtpMailSendProvider(
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.CanceledBeforeSubmission,
-                "Отправка отменена до передачи письма.");
+                L.Instance.Get("Sending was canceled before the message was transmitted."));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.CredentialMissing,
-                "Не удалось прочитать защищённый пароль приложения.");
+                L.Instance.Get("Could not read the protected app password."));
         }
 
         if (credential is not { Kind: MailCredentialKind.Password } || !credential.IsValid())
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.CredentialMissing,
-                "Не найден сохранённый пароль приложения для отправки.");
+                L.Instance.Get("No saved app password was found for sending."));
         }
 
         try
@@ -68,7 +68,7 @@ internal sealed class SmtpMailSendProvider(
                     ? await attachmentMaterializer.MaterializeAsync(account, request.Attachments, cancellationToken)
                     : throw new MailAttachmentException(
                         MailAttachmentFailureKind.Unavailable,
-                        "Вложения недоступны для отправки.");
+                        L.Instance.Get("Attachments are unavailable for sending."));
             MailMimeSubmission submission = mimeMessageFactory.Create(account, request, attachments);
             submission.Message.Bcc.Clear();
             await smtpClient.SendAsync(
@@ -128,7 +128,7 @@ internal sealed class SmtpMailSendProvider(
         {
             throw new MailSubmissionException(
                 MailSendFailureKind.CapabilityUnavailable,
-                "Для аккаунта не настроена SMTP-отправка.");
+                L.Instance.Get("SMTP sending is not configured for this account."));
         }
 
         MailConnectionSettings? settings = provider.CreateConnectionSettings(
@@ -142,7 +142,7 @@ internal sealed class SmtpMailSendProvider(
         {
             throw new MailSubmissionException(
                 MailSendFailureKind.CapabilityUnavailable,
-                "Параметры SMTP для этого аккаунта не настроены.");
+                L.Instance.Get("SMTP settings are missing for this account."));
         }
 
         return settings;
@@ -196,7 +196,7 @@ internal sealed class MailKitSmtpSubmissionClient(
                 ? Ambiguous(exception)
                 : new MailSubmissionException(
                     MailSendFailureKind.CanceledBeforeSubmission,
-                    "Отправка отменена до передачи письма.",
+                    L.Instance.Get("Sending was canceled before the message was transmitted."),
                     exception);
             throw mapped;
         }
@@ -219,7 +219,7 @@ internal sealed class MailKitSmtpSubmissionClient(
         {
             MailSubmissionException mapped = new(
                 MailSendFailureKind.ConnectionFailed,
-                "Не удалось подключиться к SMTP-серверу. Проверьте сеть и настройки аккаунта.",
+                L.Instance.Get("Could not connect to SMTP. Check your network and account settings."),
                 exception,
                 new SmtpFailureDetails(
                     stage,
@@ -252,7 +252,7 @@ internal sealed class MailKitSmtpSubmissionClient(
         SmtpCommandException? commandException = FindSmtpCommandException(exception);
         return new MailSubmissionException(
             MailSendFailureKind.AuthenticationFailed,
-            "SMTP отклонил учётные данные. Проверьте пароль приложения.",
+            L.Instance.Get("SMTP rejected the credentials. Check your app password."),
             exception,
             new SmtpFailureDetails(
                 SmtpSubmissionStage.Authentication,
@@ -273,39 +273,39 @@ internal sealed class MailKitSmtpSubmissionClient(
                 SmtpSubmissionStage.Connection => (
                     MailSendFailureKind.ConnectionFailed,
                     SmtpSubmissionStage.Connection,
-                    "SMTP-сервер отклонил подключение.",
+                    L.Instance.Get("SMTP server rejected the connection."),
                     "connection-rejected"),
                 SmtpSubmissionStage.Authentication => (
                     MailSendFailureKind.AuthenticationFailed,
                     SmtpSubmissionStage.Authentication,
-                    "SMTP отклонил учётные данные. Проверьте пароль приложения.",
+                    L.Instance.Get("SMTP rejected the credentials. Check your app password."),
                     "authentication-rejected"),
                 _ => exception.ErrorCode switch
                 {
                     SmtpErrorCode.SenderNotAccepted => (
                         MailSendFailureKind.SenderRejected,
                         SmtpSubmissionStage.MailFrom,
-                        "SMTP-сервер отклонил адрес отправителя.",
+                        L.Instance.Get("SMTP server rejected the sender address."),
                         "sender-rejected"),
                     SmtpErrorCode.RecipientNotAccepted => (
                         MailSendFailureKind.RecipientRejected,
                         SmtpSubmissionStage.RcptTo,
-                        "SMTP-сервер отклонил одного или нескольких получателей.",
+                        L.Instance.Get("SMTP server rejected one or more recipients."),
                         "recipient-rejected"),
                     SmtpErrorCode.MessageNotAccepted when IsSecurityOrPolicyRejection(enhancedStatusCode) => (
                         MailSendFailureKind.PolicyRejected,
                         SmtpSubmissionStage.DataAcceptance,
-                        "SMTP-сервер отклонил письмо по правилам безопасности или антиспама.",
+                        L.Instance.Get("SMTP server rejected the message under security or spam rules."),
                         "security-or-antispam-policy-rejected"),
                     SmtpErrorCode.MessageNotAccepted => (
                         MailSendFailureKind.MessageRejected,
                         SmtpSubmissionStage.DataAcceptance,
-                        "SMTP-сервер отклонил письмо.",
+                        L.Instance.Get("SMTP server rejected the message."),
                         "message-or-policy-rejected"),
                     _ => (
                         MailSendFailureKind.ProtocolRejected,
                         SmtpSubmissionStage.SubmissionProtocol,
-                        "SMTP-сервер вернул неожиданный ответ при отправке.",
+                        L.Instance.Get("SMTP server returned an unexpected response while sending."),
                         "unexpected-status")
                 }
             };
@@ -350,7 +350,7 @@ internal sealed class MailKitSmtpSubmissionClient(
     private static MailSubmissionException Ambiguous(Exception exception) =>
         new(
             MailSendFailureKind.Ambiguous,
-            "Не удалось подтвердить отправку. Перед повторной отправкой проверьте папку «Отправленные».",
+            L.Instance.Get("Could not confirm sending. Check Sent before sending again."),
             exception,
             new SmtpFailureDetails(
                 SmtpSubmissionStage.DataAcceptance,
@@ -402,7 +402,7 @@ internal sealed class MailKitSmtpClientSession : ISmtpClientSession
                 MailSecureSocketMode.StartTls => SecureSocketOptions.StartTls,
                 _ => throw new MailSubmissionException(
                     MailSendFailureKind.CapabilityUnavailable,
-                    "Параметры защищённого SMTP-подключения некорректны.")
+                    L.Instance.Get("Invalid secure SMTP connection settings."))
             },
             cancellationToken);
 

@@ -21,7 +21,7 @@ public sealed class GmailInboxFreshnessTests
 
         Assert.Equal(2, provider.GetPageCallCount(account.Id));
         Assert.Equal("new", viewModel.Messages[0].MessageKey);
-        Assert.Equal("1–1 из 101", viewModel.PageRangeText);
+        Assert.Equal("1–1 of 101", viewModel.PageRangeText);
         Assert.False(viewModel.IsInboxStale(account.Id));
     }
 

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using UnifiedMessenger.App.Models;
+using UnifiedMessenger.App.Services.Localization;
 using WpfMessageBox = System.Windows.MessageBox;
 
 namespace UnifiedMessenger.App.Views;
@@ -41,7 +42,7 @@ public partial class AddServiceWindow : Window
     {
         if (ServiceList.SelectedItem is not ServiceDefinition definition)
         {
-            WpfMessageBox.Show(this, "Выберите сервис.", "Добавить сервис", MessageBoxButton.OK, MessageBoxImage.Information);
+            WpfMessageBox.Show(this, Localizer.Instance.Get("Choose a service."), Localizer.Instance.Get("Add service"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -50,8 +51,8 @@ public partial class AddServiceWindow : Window
         {
             WpfMessageBox.Show(
                 this,
-                "Название аккаунта должно содержать от 1 до 80 символов.",
-                "Некорректное название",
+                Localizer.Instance.Get("Account name must be 1 to 80 characters."),
+                Localizer.Instance.Get("Invalid name"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             AccountNameTextBox.Focus();

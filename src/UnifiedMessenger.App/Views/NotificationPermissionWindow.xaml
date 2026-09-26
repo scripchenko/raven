@@ -1,7 +1,8 @@
 <Window x:Class="UnifiedMessenger.App.Views.NotificationPermissionWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Разрешение уведомлений"
+             xmlns:loc="clr-namespace:UnifiedMessenger.App.Services.Localization"
+        Title="{loc:Text Key='Notification permission'}"
         Width="440"
         Height="210"
         MinWidth="440"
@@ -30,12 +31,12 @@
             <Button Width="120"
                     Margin="0,0,10,0"
                     Click="Allow_Click"
-                    Content="Разрешить"
+                    Content="{loc:Text Key='Allow'}"
                     IsDefault="True"
                     Style="{StaticResource PrimaryButtonStyle}" />
             <Button Width="120"
                     Click="Deny_Click"
-                    Content="Запретить"
+                    Content="{loc:Text Key='Deny'}"
                     IsCancel="True" />
         </StackPanel>
     </Grid>

@@ -6,6 +6,7 @@ using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services;
 using UnifiedMessenger.App.Services.Branding;
 using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Localization;
 using UnifiedMessenger.App.Services.Notifications;
 using UnifiedMessenger.App.Services.Persistence;
 using UnifiedMessenger.App.Services.Security;
@@ -67,6 +68,7 @@ public partial class App : System.Windows.Application
 
             startupStage = "load-settings";
             SettingsLoadResult loadResult = await settingsService.LoadAsync();
+            Localizer.Instance.SetLanguage(loadResult.Settings.Language);
             startupStage = "initialize-settings-store";
             _settingsStore.Initialize(loadResult.Settings);
             startupStage = "process-pending-webview-profile-deletions";
@@ -138,10 +140,8 @@ public partial class App : System.Windows.Application
             {
                 System.Windows.MessageBox.Show(
                     window,
-                    $"Не удалось запустить значок {BrandIdentity.DisplayName} в области уведомлений. "
-                        + "Окно останется открытым и не будет скрываться при закрытии.\n\n"
-                        + exception.Message,
-                    "Область уведомлений недоступна",
+                    Localizer.Instance.Format("Could not start the raven tray icon. The window will stay open and will not hide when closed.\n\n{0}", exception.Message),
+                    Localizer.Instance.Get("Notification area unavailable"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
             }
@@ -164,7 +164,7 @@ public partial class App : System.Windows.Application
                 System.Windows.MessageBox.Show(
                     window,
                     loadResult.WarningMessage,
-                    "Настройки восстановлены",
+                    Localizer.Instance.Get("Settings restored"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
             }
@@ -173,8 +173,8 @@ public partial class App : System.Windows.Application
         {
             StartupDiagnostics.TryWriteFailure(startupStage, exception);
             System.Windows.MessageBox.Show(
-                $"Не удалось запустить {BrandIdentity.DisplayName}.\n\n{exception.Message}",
-                "Ошибка запуска",
+                Localizer.Instance.Format("raven could not be started.\n\n{0}", exception.Message),
+                Localizer.Instance.Get("Startup error"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             Shutdown(-1);
@@ -557,8 +557,8 @@ public partial class App : System.Windows.Application
                 Guid.NewGuid(),
                 Guid.Empty,
                 BrandIdentity.DisplayName,
-                $"Доступна новая версия raven {result.Release.Version}",
-                "Откройте «О программе», чтобы скачать обновление."));
+                Localizer.Instance.Format("A new version of raven {0} is available.", result.Release.Version),
+                Localizer.Instance.Get("Open About to download the update.")));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

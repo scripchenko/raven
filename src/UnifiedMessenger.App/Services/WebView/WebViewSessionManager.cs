@@ -303,8 +303,8 @@ public sealed class WebViewSessionManager(
         {
             PublishFailure(
                 session,
-                "Требуется WebView2 Runtime",
-                "Microsoft Edge WebView2 Runtime не найден.",
+                UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("WebView2 Runtime required"),
+                UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("Microsoft Edge WebView2 Runtime was not found."),
                 nameof(WebView2RuntimeNotFoundException));
             throw;
         }
@@ -321,8 +321,8 @@ public sealed class WebViewSessionManager(
         {
             PublishFailure(
                 session,
-                $"Не удалось открыть {session.ServiceInstance.DisplayName}",
-                "Инициализация защищённого профиля WebView2 завершилась ошибкой. Повторите попытку.",
+                UnifiedMessenger.App.Services.Localization.Localizer.Instance.Format("Could not open {0}", session.ServiceInstance.DisplayName),
+                UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("Could not initialize the protected WebView2 profile. Retry."),
                 exception.GetType().Name);
             return false;
         }
@@ -671,7 +671,7 @@ public sealed class WebViewSessionManager(
         if (!TryParseNavigationTarget(eventArgs.Uri, out Uri? target))
         {
             eventArgs.Cancel = true;
-            PublishFailure(session, "Переход заблокирован", "WebView2 запросил некорректный адрес.", "InvalidUri");
+            PublishFailure(session, UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("Navigation blocked"), UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("WebView2 requested an invalid address."), "InvalidUri");
             return;
         }
 
@@ -695,8 +695,8 @@ public sealed class WebViewSessionManager(
 
         PublishFailure(
             session,
-            "Внешняя ссылка заблокирована",
-            "Адрес нельзя безопасно открыть в системном браузере.",
+            UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("External link blocked"),
+            UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("The address cannot be safely opened in the system browser."),
             "UnsupportedExternalUri");
     }
 
@@ -720,7 +720,7 @@ public sealed class WebViewSessionManager(
         Publish(
             session,
             isOffline ? WebViewSessionStatus.Offline : WebViewSessionStatus.Failed,
-            isOffline ? "Нет подключения к интернету" : $"Ошибка загрузки {session.ServiceInstance.DisplayName}",
+            isOffline ? UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("No Internet connection") : UnifiedMessenger.App.Services.Localization.Localizer.Instance.Format("Error loading {0}", session.ServiceInstance.DisplayName),
             WebViewErrorClassifier.GetUserMessage(
                 eventArgs.WebErrorStatus,
                 serviceCatalog.Get(session.ServiceInstance.ServiceType).DisplayName),
@@ -761,7 +761,7 @@ public sealed class WebViewSessionManager(
 
         if (!TryParseNavigationTarget(eventArgs.Uri, out Uri? target))
         {
-            PublishFailure(session, "Окно заблокировано", "Сервис запросил некорректный адрес нового окна.", "InvalidPopupUri");
+            PublishFailure(session, UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("Window blocked"), UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("The service requested an invalid new-window address."), "InvalidPopupUri");
             return;
         }
 
@@ -775,8 +775,8 @@ public sealed class WebViewSessionManager(
         {
             PublishFailure(
                 session,
-                "Внешняя ссылка заблокирована",
-                "Адрес нельзя безопасно открыть в системном браузере.",
+                UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("External link blocked"),
+                UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("The address cannot be safely opened in the system browser."),
                 "UnsupportedExternalUri");
         }
     }
@@ -942,10 +942,10 @@ public sealed class WebViewSessionManager(
         session.ProcessFailureDetected = true;
         PublishFailure(
             session,
-            "Сбой процесса WebView2",
+            UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("WebView2 process failure"),
             session.AutomaticProcessRecoveryUsed
-                ? "Автоматическое восстановление уже выполнялось. Нажмите «Повторить», чтобы попробовать вручную."
-                : "WebView2 неожиданно завершил работу. Выполняется одна попытка восстановления.",
+                ? UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("Automatic recovery was already attempted. Select Retry to try manually.")
+                : UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("WebView2 exited unexpectedly. One recovery attempt is in progress."),
             eventArgs.ProcessFailedKind.ToString());
 
         if (session.AutomaticProcessRecoveryUsed || !ReferenceEquals(_activeSession, session))
@@ -1142,8 +1142,8 @@ public sealed class WebViewSessionManager(
         session.ProcessFailureDetected = true;
         PublishFailure(
             session,
-            "Сессия WebView2 недоступна",
-            $"Контрол {session.ServiceInstance.DisplayName} больше не отвечает. Нажмите «Повторить», чтобы создать его заново.",
+            UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("WebView2 session unavailable"),
+            UnifiedMessenger.App.Services.Localization.Localizer.Instance.Format("The {0} view is not responding. Select Retry to recreate it.", session.ServiceInstance.DisplayName),
             exception.GetType().Name);
     }
 

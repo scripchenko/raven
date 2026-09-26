@@ -1,5 +1,7 @@
 using System.Drawing;
 using UnifiedMessenger.App.Services.Branding;
+using UnifiedMessenger.App.Services.Localization;
+using System.ComponentModel;
 using Forms = System.Windows.Forms;
 
 namespace UnifiedMessenger.App.Services.Tray;
@@ -18,10 +20,12 @@ public sealed class WinFormsTrayIconService : ITrayIconService
     public WinFormsTrayIconService()
     {
         _applicationIcon = BrandIconResources.LoadSystemIcon();
-        _openItem = new Forms.ToolStripMenuItem("Открыть");
-        _settingsItem = new Forms.ToolStripMenuItem("Настройки");
-        _doNotDisturbItem = new Forms.ToolStripMenuItem("Не беспокоить") { CheckOnClick = false };
-        _exitItem = new Forms.ToolStripMenuItem("Выход");
+        _openItem = new Forms.ToolStripMenuItem();
+        _settingsItem = new Forms.ToolStripMenuItem();
+        _doNotDisturbItem = new Forms.ToolStripMenuItem() { CheckOnClick = false };
+        _exitItem = new Forms.ToolStripMenuItem();
+        RefreshLanguage();
+        Localizer.Instance.PropertyChanged += OnLanguageChanged;
         _contextMenu = new Forms.ContextMenuStrip();
         _contextMenu.Items.AddRange(
             [_openItem, _settingsItem, _doNotDisturbItem, new Forms.ToolStripSeparator(), _exitItem]);
@@ -95,6 +99,7 @@ public sealed class WinFormsTrayIconService : ITrayIconService
         }
 
         _disposed = true;
+        Localizer.Instance.PropertyChanged -= OnLanguageChanged;
         _exitItem.Enabled = false;
         _contextMenu.Close(Forms.ToolStripDropDownCloseReason.CloseCalled);
         _notifyIcon.Visible = false;
@@ -112,6 +117,22 @@ public sealed class WinFormsTrayIconService : ITrayIconService
     }
 
     public void Dispose() => BeginShutdown();
+
+    private void OnLanguageChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName == "Item[]" && !_disposed)
+        {
+            RefreshLanguage();
+        }
+    }
+
+    private void RefreshLanguage()
+    {
+        _openItem.Text = Localizer.Instance.Get("Open raven");
+        _settingsItem.Text = Localizer.Instance.Get("Settings");
+        _doNotDisturbItem.Text = Localizer.Instance.Get("Do not disturb");
+        _exitItem.Text = Localizer.Instance.Get("Exit");
+    }
 
     private void OnOpenClicked(object? sender, EventArgs eventArgs) => OpenRequested?.Invoke(this, EventArgs.Empty);
     private void OnSettingsClicked(object? sender, EventArgs eventArgs) => SettingsRequested?.Invoke(this, EventArgs.Empty);

@@ -11,9 +11,9 @@ public sealed class WpfNotificationSoundFilePicker : INotificationSoundFilePicke
             AddExtension = true,
             CheckFileExists = true,
             CheckPathExists = true,
-            Filter = "Поддерживаемые звуки (*.wav;*.mp3;*.wma)|*.wav;*.mp3;*.wma|WAV (*.wav)|*.wav|MP3 (*.mp3)|*.mp3|Windows Media Audio (*.wma)|*.wma",
+            Filter = L.Instance.Get("Supported sounds (*.wav;*.mp3;*.wma)") + "|*.wav;*.mp3;*.wma|WAV (*.wav)|*.wav|MP3 (*.mp3)|*.mp3|Windows Media Audio (*.wma)|*.wma",
             Multiselect = false,
-            Title = "Выбрать звук raven"
+            Title = L.Instance.Get("Choose raven sound")
         };
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }

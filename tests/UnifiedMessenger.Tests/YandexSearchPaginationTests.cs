@@ -222,7 +222,7 @@ public sealed class YandexSearchPaginationTests
         Assert.Equal("search-2", Assert.Single(viewModel.Messages).Subject);
         Assert.Equal(MailFolderKind.Inbox, provider.SearchCalls[1].Folder.Kind);
         Assert.Equal("search-next", provider.SearchCalls[1].Token);
-        Assert.Equal("51–51 из 61", viewModel.PageRangeText);
+        Assert.Equal("51–51 of 61", viewModel.PageRangeText);
 
         viewModel.ClearSearchCommand.Execute(null);
         Assert.False(viewModel.IsSearchActive);
@@ -246,16 +246,16 @@ public sealed class YandexSearchPaginationTests
         using MailInboxViewModel viewModel = ViewModel(provider);
 
         await viewModel.ActivateAsync(account);
-        Assert.Equal("1–50 из 107", viewModel.PageRangeText);
+        Assert.Equal("1–50 of 107", viewModel.PageRangeText);
 
         await viewModel.NextPageCommand.ExecuteAsync(null);
-        Assert.Equal("51–100 из 107", viewModel.PageRangeText);
+        Assert.Equal("51–100 of 107", viewModel.PageRangeText);
 
         await viewModel.NextPageCommand.ExecuteAsync(null);
-        Assert.Equal("101–107 из 107", viewModel.PageRangeText);
+        Assert.Equal("101–107 of 107", viewModel.PageRangeText);
 
         await viewModel.PreviousPageCommand.ExecuteAsync(null);
-        Assert.Equal("51–100 из 107", viewModel.PageRangeText);
+        Assert.Equal("51–100 of 107", viewModel.PageRangeText);
     }
 
     [Theory]
@@ -280,11 +280,11 @@ public sealed class YandexSearchPaginationTests
         viewModel.SearchText = "first";
         await viewModel.SearchCommand.ExecuteAsync(null);
         await viewModel.NextPageCommand.ExecuteAsync(null);
-        Assert.Equal("51–73 из 73", viewModel.PageRangeText);
+        Assert.Equal("51–73 of 73", viewModel.PageRangeText);
 
         viewModel.SearchText = "second";
         await viewModel.SearchCommand.ExecuteAsync(null);
-        Assert.Equal("1–4 из 4", viewModel.PageRangeText);
+        Assert.Equal("1–4 of 4", viewModel.PageRangeText);
     }
 
     [Theory]

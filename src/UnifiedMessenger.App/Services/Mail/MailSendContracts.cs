@@ -112,7 +112,7 @@ public sealed record MailSendResult(
             MailSendOutcome.Sent,
             MailSendFailureKind.None,
             MailSentCopyFailureKind.None,
-            "Письмо отправлено",
+            L.Instance.Get("Message sent"),
             providerMessageIdentity);
 
     public static MailSendResult SentButCopyNotSaved(MailSentCopyFailureKind failureKind) =>
@@ -120,7 +120,7 @@ public sealed record MailSendResult(
             MailSendOutcome.SentButCopyNotSaved,
             MailSendFailureKind.None,
             failureKind,
-            "Письмо отправлено, но не удалось сохранить копию в папке «Отправленные».");
+            L.Instance.Get("Message sent, but its Sent copy could not be saved."));
 
     public static MailSendResult Failure(MailSendFailureKind kind, string message) =>
         new(MailSendOutcome.Failed, kind, MailSentCopyFailureKind.None, message);

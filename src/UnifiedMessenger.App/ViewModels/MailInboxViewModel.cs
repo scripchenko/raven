@@ -5,6 +5,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Localization;
+using System.Windows.Data;
 
 namespace UnifiedMessenger.App.ViewModels;
 
@@ -129,6 +131,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Compose.Sent += OnMailSent;
         Compose.GmailDraftChanged += OnGmailDraftChanged;
         Compose.ManagedImapDraftChanged += OnManagedImapDraftChanged;
+        Localizer.Instance.PropertyChanged += OnLanguageChanged;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, CanRefresh);
         PreviousPageCommand = new AsyncRelayCommand(PreviousPageAsync, CanGoToPreviousPage);
         NextPageCommand = new AsyncRelayCommand(NextPageAsync, CanGoToNextPage);
@@ -366,6 +369,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
                 OnPropertyChanged(nameof(IsSelectedMessageHtml));
                 OnPropertyChanged(nameof(ShouldDisplayHtmlRenderer));
                 OnPropertyChanged(nameof(SelectedMessageDisplayDate));
+                OnPropertyChanged(nameof(SelectedMessageRecipientText));
                 OnPropertyChanged(nameof(ShowPrintAction));
                 OnPropertyChanged(nameof(CanPrintMessage));
                 if (!isReadStateMetadataUpdate && !AutomaticallyShowRemoteImages)
@@ -506,6 +510,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _mailboxActionErrorMessage, value))
             {
                 OnPropertyChanged(nameof(HasMailboxActionError));
+                OnPropertyChanged(nameof(LocalizedMailboxActionErrorMessage));
             }
         }
     }
@@ -518,6 +523,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _hasLoaded, value))
             {
                 RaiseListStateChanged();
+                OnPropertyChanged(nameof(LocalizedListErrorDescription));
             }
         }
     }
@@ -530,6 +536,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _listErrorMessage, value))
             {
                 RaiseListStateChanged();
+                OnPropertyChanged(nameof(LocalizedListErrorDescription));
             }
         }
     }
@@ -542,6 +549,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _messageErrorMessage, value))
             {
                 OnPropertyChanged(nameof(HasMessageError));
+                OnPropertyChanged(nameof(LocalizedMessageErrorMessage));
                 OnPropertyChanged(nameof(RequiresGmailMessageReauthentication));
                 OnPropertyChanged(nameof(ShowMessageRetryAction));
                 OnPropertyChanged(nameof(ShowMessagePlaceholder));
@@ -561,6 +569,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _readStateErrorMessage, value))
             {
                 OnPropertyChanged(nameof(HasReadStateError));
+                OnPropertyChanged(nameof(LocalizedReadStateErrorMessage));
                 OnPropertyChanged(nameof(RequiresGmailReadStateReauthentication));
             }
         }
@@ -611,6 +620,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _gmailReauthenticationErrorMessage, value))
             {
                 OnPropertyChanged(nameof(HasGmailReauthenticationError));
+                OnPropertyChanged(nameof(LocalizedGmailReauthenticationErrorMessage));
             }
         }
     }
@@ -623,6 +633,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _failureKind, value))
             {
                 OnPropertyChanged(nameof(ErrorTitle));
+                OnPropertyChanged(nameof(LocalizedListErrorDescription));
                 RaiseListStateChanged();
             }
         }
@@ -702,13 +713,13 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool HasMailboxActionError => !string.IsNullOrWhiteSpace(MailboxActionErrorMessage);
     public bool HasUserLabels => UserLabels.Count > 0;
     public string LabelMenuTitle => _labelMenuTargetsDetail
-        ? "Ярлыки письма"
-        : $"Ярлыки: выбрано {SelectedMessageCount}";
+        ? Localizer.Instance.Get("Message labels")
+        : Localizer.Instance.Format("Labels: {0} selected", SelectedMessageCount);
     public string SelectedStarActionText =>
-        AreAllSelectedMessagesStarred ? "Снять пометку" : "Пометить";
+        AreAllSelectedMessagesStarred ? Localizer.Instance.Get("Remove star") : Localizer.Instance.Get("Add star");
     public string DetailStarActionText => SelectedMessageSummary?.IsStarred == true
-        ? "Снять пометку"
-        : "Пометить";
+        ? Localizer.Instance.Get("Remove star")
+        : Localizer.Instance.Get("Add star");
     public bool CanDeleteCurrentFolder => IsSearchActive || SelectedFolder?.Kind is not MailFolderKind.Trash;
     public bool ShowReportSpamAction =>
         (IsGmailMailboxAvailable || IsManagedImapMailbox)
@@ -737,14 +748,14 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (state is null || Messages.Count == 0)
             {
                 return state?.TotalCount is long emptyTotal
-                    ? $"0–0 из {emptyTotal}"
+                    ? Localizer.Instance.Format("0–0 of {0}", emptyTotal)
                     : "0–0";
             }
 
             long first = ((long)state.PageIndex * PageSize) + 1;
             long last = first + Messages.Count - 1;
             return state.TotalCount is long exactTotal
-                ? $"{first}–{last} из {Math.Max(exactTotal, last)}"
+                ? Localizer.Instance.Format("{0}–{1} of {2}", first, last, Math.Max(exactTotal, last))
                 : $"{first}–{last}";
         }
     }
@@ -771,10 +782,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool IsInitialLoading => IsListLoading && !HasMessages;
     public bool IsEmpty => HasLoaded && !IsListLoading && !HasMessages && !HasListError;
     public string EmptyListMessage => IsSearchActive
-        ? "По вашему запросу ничего не найдено."
+        ? Localizer.Instance.Get("No messages match your search.")
         : SelectedFolder?.IsUserLabel == true
-            ? "В этом ярлыке нет писем."
-            : "В этой папке пока нет писем.";
+            ? Localizer.Instance.Get("No messages with this label.")
+            : Localizer.Instance.Get("No messages in this folder yet.");
     public bool HasSelectedMessage => SelectedMessageSummary is not null;
     public bool HasSelectedContent => SelectedMessageContent is not null;
     public bool HasAttachments => SelectedMessageContent?.Attachments.Count > 0;
@@ -795,10 +806,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool CanShowRemoteImages => ShowOneTimeRemoteImagesAction && !IsRemoteImageLoading;
     public bool CanAlwaysShowRemoteImagesFromSender =>
         ShowAlwaysRemoteImagesFromSenderAction && !IsRemoteImageLoading;
-    public string RemoteImagesButtonText => IsRemoteImageLoading ? "Загружаем…" : "Показать";
+    public string RemoteImagesButtonText => IsRemoteImageLoading ? Localizer.Instance.Get("Loading…") : Localizer.Instance.Get("Show");
     public string RemoteImagesBannerText => IsCurrentRemoteImageSenderTrusted
-        ? "Внешние изображения автоматически разрешены для этого отправителя."
-        : "Внешние изображения заблокированы для защиты конфиденциальности.";
+        ? Localizer.Instance.Get("Remote images are automatically allowed for this sender.")
+        : Localizer.Instance.Get("Remote images are blocked to protect your privacy.");
     public bool IsAttachmentSaving
     {
         get => _isAttachmentSaving;
@@ -819,6 +830,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (SetProperty(ref _attachmentStatusMessage, value))
             {
                 OnPropertyChanged(nameof(HasAttachmentStatus));
+                OnPropertyChanged(nameof(LocalizedAttachmentStatusMessage));
             }
         }
     }
@@ -848,10 +860,10 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     public bool YandexSelectedReadStateWillMarkRead =>
         GetSelectedMessages().Any(message => message.IsUnread);
     public string YandexSelectedReadStateActionText =>
-        YandexSelectedReadStateWillMarkRead ? "Прочитано" : "Непрочитано";
+        YandexSelectedReadStateWillMarkRead ? Localizer.Instance.Get("Read") : Localizer.Instance.Get("Unread");
     public bool YandexDetailReadStateWillMarkRead => SelectedMessageSummary?.IsUnread == true;
     public string YandexDetailReadStateActionText =>
-        YandexDetailReadStateWillMarkRead ? "Прочитано" : "Непрочитано";
+        YandexDetailReadStateWillMarkRead ? Localizer.Instance.Get("Read") : Localizer.Instance.Get("Unread");
     public bool RequiresGmailAuthorization =>
         ActiveAccount?.Provider is MailProviderType.Gmail
         && (_readStateCapability.RequiresAuthorization || _requiresMailboxAuthorization);
@@ -861,41 +873,49 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         && !IsReadStateChanging
         && !(IsManagedImapMailbox && IsMailboxChanging);
     public string ReadStateActionText => IsReadStateChanging
-        ? "Сохраняем…"
+        ? Localizer.Instance.Get("Saving…")
         : SelectedMessageSummary?.IsUnread == true
-            ? "Отметить как прочитанное"
-            : "Отметить как непрочитанное";
+            ? Localizer.Instance.Get("Mark message as read")
+            : Localizer.Instance.Get("Mark message as unread");
     public string SelectedMessageDisplayDate => SelectedMessageContent is null
         ? string.Empty
         : SelectedMessageContent.ReceivedAt.ToLocalTime().ToString(
             "ddd, d MMM, HH:mm",
             CultureInfo.CurrentCulture);
+    public string SelectedMessageRecipientText => Localizer.Instance.Format(
+        "To: {0}", SelectedMessageContent?.To ?? string.Empty);
     public string ReadStateAuthorizationText =>
         AuthorizationMessage
         ?? _readStateCapability.UserMessage
-        ?? "Чтобы менять статус писем, нужно снова разрешить доступ Google.";
+        ?? Localizer.Instance.Get("Allow Google access again to change message read status.");
     public string AccountDisplayName => ActiveAccount?.DisplayLabel ?? string.Empty;
     public string EmailAddress => ActiveAccount?.EmailAddress ?? string.Empty;
     public string ProviderDisplayName => ActiveAccount?.Provider switch
     {
         MailProviderType.Gmail => "Gmail",
-        MailProviderType.Yandex => "Яндекс Почта",
-        MailProviderType.MailRu => "Почта Mail.ru",
+        MailProviderType.Yandex => "Yandex Mail",
+        MailProviderType.MailRu => "Mail.ru",
         MailProviderType.GenericImap => "IMAP",
-        _ => "Почта"
+        _ => Localizer.Instance.Get("Mail")
     };
 
     public string ErrorTitle => FailureKind switch
     {
-        MailReadFailureKind.ReauthorizationRequired => "Требуется вход в Google",
-        MailReadFailureKind.AuthenticationFailed or MailReadFailureKind.CredentialMissing => "Не удалось войти в почту",
-        MailReadFailureKind.FolderUnavailable => "Папка недоступна",
-        MailReadFailureKind.InvalidSearchQuery => "Не удалось выполнить поиск",
-        _ => "Не удалось загрузить почту"
+        MailReadFailureKind.ReauthorizationRequired => Localizer.Instance.Get("Google sign-in required"),
+        MailReadFailureKind.AuthenticationFailed or MailReadFailureKind.CredentialMissing => Localizer.Instance.Get("Could not sign in to mail"),
+        MailReadFailureKind.FolderUnavailable => Localizer.Instance.Get("Folder unavailable"),
+        MailReadFailureKind.InvalidSearchQuery => Localizer.Instance.Get("Could not search mail"),
+        _ => Localizer.Instance.Get("Could not load mail")
     };
     public string? ListErrorDescription => FailureKind is MailReadFailureKind.ReauthorizationRequired
-        ? "Срок действия подключения истёк или доступ был отозван. Войдите в Google снова, чтобы продолжить получать почту."
+        ? L.Instance.Get("The connection expired or access was revoked. Sign in to Google again to continue receiving mail.")
         : ListErrorMessage;
+    public string? LocalizedListErrorDescription => Localizer.Instance.TranslateError(ListErrorDescription);
+    public string? LocalizedMailboxActionErrorMessage => Localizer.Instance.TranslateError(MailboxActionErrorMessage);
+    public string? LocalizedGmailReauthenticationErrorMessage => Localizer.Instance.TranslateError(GmailReauthenticationErrorMessage);
+    public string? LocalizedMessageErrorMessage => Localizer.Instance.TranslateError(MessageErrorMessage);
+    public string? LocalizedReadStateErrorMessage => Localizer.Instance.TranslateError(ReadStateErrorMessage);
+    public string? LocalizedAttachmentStatusMessage => Localizer.Instance.TranslateError(AttachmentStatusMessage);
 
     public void SetRemoteImageLoading(bool isLoading)
     {
@@ -1172,6 +1192,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         Compose.Sent -= OnMailSent;
         Compose.GmailDraftChanged -= OnGmailDraftChanged;
         Compose.ManagedImapDraftChanged -= OnManagedImapDraftChanged;
+        Localizer.Instance.PropertyChanged -= OnLanguageChanged;
         Compose.Dispose();
         _folderStates.Clear();
         _accountFolderStates.Clear();
@@ -1181,6 +1202,40 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         _messageBodyCache.Clear();
         _remoteImageConsents.Clear();
         _messageSourceCache?.Clear();
+    }
+
+    private void OnLanguageChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName != "Item[]")
+        {
+            return;
+        }
+
+        CollectionViewSource.GetDefaultView(Folders)?.Refresh();
+        foreach (MailMessageSummary message in Messages)
+        {
+            message.RefreshLocalizedPresentation();
+        }
+        OnPropertyChanged(nameof(LabelMenuTitle));
+        OnPropertyChanged(nameof(SelectedStarActionText));
+        OnPropertyChanged(nameof(DetailStarActionText));
+        OnPropertyChanged(nameof(PageRangeText));
+        OnPropertyChanged(nameof(EmptyListMessage));
+        OnPropertyChanged(nameof(RemoteImagesButtonText));
+        OnPropertyChanged(nameof(RemoteImagesBannerText));
+        OnPropertyChanged(nameof(YandexSelectedReadStateActionText));
+        OnPropertyChanged(nameof(YandexDetailReadStateActionText));
+        OnPropertyChanged(nameof(ReadStateActionText));
+        OnPropertyChanged(nameof(ReadStateAuthorizationText));
+        OnPropertyChanged(nameof(ProviderDisplayName));
+        OnPropertyChanged(nameof(ErrorTitle));
+        OnPropertyChanged(nameof(SelectedMessageRecipientText));
+        OnPropertyChanged(nameof(LocalizedListErrorDescription));
+        OnPropertyChanged(nameof(LocalizedMailboxActionErrorMessage));
+        OnPropertyChanged(nameof(LocalizedGmailReauthenticationErrorMessage));
+        OnPropertyChanged(nameof(LocalizedMessageErrorMessage));
+        OnPropertyChanged(nameof(LocalizedReadStateErrorMessage));
+        OnPropertyChanged(nameof(LocalizedAttachmentStatusMessage));
     }
 
     private async Task LoadFoldersAsync(
@@ -1238,7 +1293,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         catch (Exception) when (IsCurrentAccount(account.Id, version, cancellationToken))
         {
             HasLoaded = true;
-            ListErrorMessage = "Не удалось загрузить папки почты. Попробуйте ещё раз.";
+            ListErrorMessage = L.Instance.Get("Could not load mail folders. Please retry.");
             FailureKind = MailReadFailureKind.ConnectionFailed;
         }
         finally
@@ -1443,7 +1498,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             }
 
             MailFolder folder = SelectedFolder
-                ?? throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка недоступна.");
+                ?? throw new MailReadException(MailReadFailureKind.FolderUnavailable, L.Instance.Get("This folder is unavailable."));
             MailPage<MailMessageSummary> page = await searchProvider.SearchAsync(
                 account,
                 folder,
@@ -1509,7 +1564,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         catch (Exception) when (IsCurrentSearch(account.Id, query, version, cancellationToken))
         {
             state.HasLoaded = true;
-            state.ListErrorMessage = "Не удалось выполнить поиск. Проверьте подключение к сети.";
+            state.ListErrorMessage = L.Instance.Get("Could not search mail. Check your network connection.");
             state.FailureKind = MailReadFailureKind.ConnectionFailed;
             ApplyState(state);
             return false;
@@ -1693,7 +1748,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (!result.IsSuccess)
             {
                 GmailReauthenticationErrorMessage = result.UserMessage
-                    ?? "Не удалось войти в Google. Попробуйте ещё раз.";
+                    ?? L.Instance.Get("Could not sign in to Google. Please retry.");
                 return;
             }
 
@@ -2106,7 +2161,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         catch (Exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
             state.HasLoaded = true;
-            state.ListErrorMessage = "Не удалось загрузить почту. Попробуйте ещё раз.";
+            state.ListErrorMessage = L.Instance.Get("Could not load mail. Please retry.");
             state.FailureKind = MailReadFailureKind.ConnectionFailed;
             ApplyState(state);
             return false;
@@ -2163,7 +2218,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             return false;
         }
 
-        MailboxActionErrorMessage = "Ярлык больше недоступен. Открыты входящие.";
+        MailboxActionErrorMessage = L.Instance.Get("Label no longer available. Inbox is open.");
         FolderState safeState = GetState(account.Id, safeFolder.Key);
         safeState.PrepareRefresh();
         ApplyState(safeState);
@@ -2212,7 +2267,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             {
                 throw new MailReadException(
                     MailReadFailureKind.InvalidMessage,
-                    "Поставщик вернул содержимое другого письма.");
+                    L.Instance.Get("The provider returned content for another message."));
             }
 
             if (_disposed || !_accountFolderStates.ContainsKey(account.Id))
@@ -2245,7 +2300,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         catch (Exception) when (IsCurrent(account.Id, folder.Key, version, cancellationToken))
         {
             MessageFailureKind = MailReadFailureKind.ConnectionFailed;
-            MessageErrorMessage = "Не удалось загрузить выбранное письмо.";
+            MessageErrorMessage = L.Instance.Get("Could not load the selected message.");
         }
         finally
         {
@@ -2469,7 +2524,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         catch (Exception)
         {
             ReadStateFailureKind = MailReadFailureKind.MutationFailed;
-            ReadStateErrorMessage = "Не удалось изменить статус письма. Попробуйте ещё раз.";
+            ReadStateErrorMessage = L.Instance.Get("Could not change the message read status. Please retry.");
         }
         finally
         {
@@ -2553,7 +2608,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         }
         catch (OperationCanceledException)
         {
-            AuthorizationMessage = "Разрешение Google не изменено.";
+            AuthorizationMessage = L.Instance.Get("Google permission did not change.");
         }
         finally
         {
@@ -2699,7 +2754,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private void ShowNoFoldersError()
     {
         HasLoaded = true;
-        ListErrorMessage = "Почтовый сервер не предоставил доступные системные папки.";
+        ListErrorMessage = L.Instance.Get("The mail server did not provide available system folders.");
         FailureKind = MailReadFailureKind.FolderUnavailable;
     }
 
@@ -2816,7 +2871,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         if (currentFolder.IsUserLabel
             && !string.Equals(currentFolderKey, refreshedFolder?.Key, StringComparison.Ordinal))
         {
-            MailboxActionErrorMessage = "Ярлык больше недоступен.";
+            MailboxActionErrorMessage = L.Instance.Get("Label no longer available.");
         }
 
         return refreshedFolder;
@@ -3002,7 +3057,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         bool newValue = !message.IsStarred;
         await ExecuteMailboxMutationAsync(
             [message.MessageKey],
-            "Не удалось изменить пометку.",
+            L.Instance.Get("Could not change the star."),
             (service, account, keys, token) => service.SetStarredAsync(account, keys, newValue, token),
             keys => ApplyStarState(keys, newValue));
     }
@@ -3018,7 +3073,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         bool newValue = selected.Any(message => !message.IsStarred);
         await ExecuteMailboxMutationAsync(
             selected.Select(message => message.MessageKey).ToArray(),
-            "Не удалось изменить пометку выбранных писем.",
+            L.Instance.Get("Could not change stars on selected messages."),
             (service, account, keys, token) => service.SetStarredAsync(account, keys, newValue, token),
             keys => ApplyStarState(keys, newValue));
     }
@@ -3035,7 +3090,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private Task ArchiveAsync(IReadOnlyCollection<string> messageKeys) =>
         ExecuteMailboxMutationAsync(
             messageKeys,
-            "Не удалось архивировать письмо.",
+            L.Instance.Get("Could not archive the message."),
             (service, account, keys, token) => service.ArchiveAsync(account, keys, token),
             ApplyArchive,
             imapAction: MailMailboxAction.Archive);
@@ -3049,7 +3104,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private Task ReportSpamAsync(IReadOnlyCollection<string> messageKeys) =>
         ExecuteMailboxMutationAsync(
             messageKeys,
-            "Не удалось переместить письмо в спам.",
+            L.Instance.Get("Could not move the message to spam."),
             (service, account, keys, token) => service.ReportSpamAsync(account, keys, token),
             ApplyReportSpam,
             clearSelectionAfterSuccess: true,
@@ -3065,7 +3120,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private Task DeleteAsync(IReadOnlyCollection<string> messageKeys) =>
         ExecuteMailboxMutationAsync(
             messageKeys,
-            "Не удалось удалить письмо.",
+            L.Instance.Get("Could not delete the message."),
             (service, account, keys, token) => service.MoveToTrashAsync(account, keys, token),
             ApplyTrash,
             imapAction: MailMailboxAction.Trash);
@@ -3079,7 +3134,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private Task RestoreFromTrashAsync(IReadOnlyCollection<string> messageKeys) =>
         ExecuteMailboxMutationAsync(
             messageKeys,
-            "Не удалось восстановить письмо.",
+            L.Instance.Get("Could not restore the message."),
             (service, account, keys, token) => service.RestoreFromTrashAsync(account, keys, token),
             ApplyRestoreFromTrash,
             clearSelectionAfterSuccess: true,
@@ -3095,7 +3150,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private Task MarkNotSpamAsync(IReadOnlyCollection<string> messageKeys) =>
         ExecuteMailboxMutationAsync(
             messageKeys,
-            "Не удалось убрать письмо из спама.",
+            L.Instance.Get("Could not remove the message from spam."),
             (service, account, keys, token) => service.MarkNotSpamAsync(account, keys, token),
             ApplyNotSpam,
             clearSelectionAfterSuccess: true,
@@ -3105,7 +3160,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
     private Task SetSelectedReadStateAsync(bool isRead) =>
         ExecuteMailboxMutationAsync(
             GetSelectedMessages().Select(message => message.MessageKey).ToArray(),
-            "Не удалось изменить статус прочтения.",
+            L.Instance.Get("Could not change read status."),
             (service, account, keys, token) => service.SetReadStateAsync(account, keys, isRead, token),
             keys => ApplyReadState(keys, isRead),
             imapAction: isRead ? MailMailboxAction.Read : MailMailboxAction.Unread);
@@ -3151,7 +3206,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
 
             if (!result.IsSuccess)
             {
-                HandleMailboxFailure(account, result.FailureKind, "Не удалось загрузить ярлыки.");
+                HandleMailboxFailure(account, result.FailureKind, L.Instance.Get("Could not load labels."));
                 return;
             }
 
@@ -3159,7 +3214,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             SynchronizeUserLabelFolders(account, result.Labels);
             if (!string.Equals(previousFolderKey, SelectedFolder?.Key, StringComparison.Ordinal))
             {
-                MailboxActionErrorMessage = "Ярлык больше недоступен.";
+                MailboxActionErrorMessage = L.Instance.Get("Label no longer available.");
                 CurrentFolderLoadTask = RefreshAsync();
                 return;
             }
@@ -3196,7 +3251,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         string[] keys = _labelMenuMessageKeys.ToArray();
         await ExecuteMailboxMutationAsync(
             keys,
-            "Не удалось изменить ярлык.",
+            L.Instance.Get("Could not change the label."),
             (service, currentAccount, messageKeys, token) => service.SetUserLabelAsync(
                 currentAccount,
                 messageKeys,
@@ -3307,7 +3362,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (result.FailedMessages.Count > 0)
             {
                 string message = result.IsPartialSuccess
-                    ? $"{failureMessage} Часть выбранных писем не изменена."
+                    ? $"{failureMessage} {L.Instance.Get("Some selected messages were not changed.")}"
                     : failureMessage;
                 HandleMailboxFailure(account, result.FailureKind, message);
             }
@@ -3544,7 +3599,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
             if (IsCurrent(account.Id, folder.Key, version, CancellationToken.None))
             {
                 MailboxActionErrorMessage =
-                    "Не удалось подтвердить изменение. Исходная и целевая папки будут обновлены без повторной отправки команды.";
+                    L.Instance.Get("Could not confirm the change. The source and destination folders will refresh without repeating the action.");
                 ApplyState(state);
                 if (searchWasActive)
                 {
@@ -3988,7 +4043,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         string message)
     {
         MailboxActionErrorMessage = failureKind is GmailMailboxFailureKind.NotAuthorized
-            ? "Чтобы управлять письмами, нужно снова разрешить доступ Google."
+            ? L.Instance.Get("Allow Google access again to manage messages.")
             : message;
         if (failureKind is GmailMailboxFailureKind.NotAuthorized)
         {
@@ -4771,7 +4826,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         if (!opened && ActiveAccount?.Id == account.Id)
         {
             MessageFailureKind = MailReadFailureKind.MessageUnavailable;
-            MessageErrorMessage = Compose.ErrorMessage ?? "Не удалось открыть черновик Gmail.";
+            MessageErrorMessage = Compose.ErrorMessage ?? L.Instance.Get("Could not open the Gmail draft.");
         }
     }
 
@@ -4781,7 +4836,7 @@ public sealed class MailInboxViewModel : ObservableObject, IDisposable, IMailInb
         if (!opened && ActiveAccount?.Id == account.Id)
         {
             MessageFailureKind = MailReadFailureKind.MessageUnavailable;
-            MessageErrorMessage = Compose.ErrorMessage ?? "Не удалось открыть черновик Яндекс Почты.";
+            MessageErrorMessage = Compose.ErrorMessage ?? L.Instance.Get("Could not open the Yandex Mail draft.");
         }
     }
 

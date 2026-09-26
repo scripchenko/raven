@@ -4,6 +4,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Localization;
+using System.ComponentModel;
 
 namespace UnifiedMessenger.App.ViewModels;
 
@@ -236,6 +238,11 @@ public sealed record ServerDraftFlushResult(
 
 public sealed class MailComposeViewModel : ObservableObject, IDisposable
 {
+    private const string SaveFailedStatus = "Could not save";
+    private const string DraftDeleteFailedStatus = "Could not delete draft";
+    private const string SavingStatus = "Saving draft…";
+    private const string SavedStatus = "Saved";
+    private const string RecoveryStatus = "Restored local copy";
     public static readonly TimeSpan GmailDraftAutosaveDelay = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FinalAutosaveTimeout = TimeSpan.FromSeconds(5);
     private readonly IMailSendProviderFactory _providerFactory;
@@ -284,6 +291,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         _managedImapDraftRecoveryStore = managedImapDraftRecoveryStore;
         _finalAutosaveTimeout = finalAutosaveTimeout ?? FinalAutosaveTimeout;
         _draftAutosaveScheduler = draftAutosaveScheduler ?? new SystemMailDraftAutosaveScheduler();
+        Localizer.Instance.PropertyChanged += OnLanguageChanged;
         NewMessageCommand = new RelayCommand(StartNewMessage, CanStartNewMessage);
         RevealCopyFieldsCommand = new RelayCommand(RevealCopyFields, CanRevealCopyFields);
         ReplyCommand = new AsyncRelayCommand<MailMessageContent>(StartReplyAsync, CanPrepareFromMessage);
@@ -371,6 +379,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _errorMessage, value))
             {
                 OnPropertyChanged(nameof(HasError));
+                OnPropertyChanged(nameof(LocalizedErrorMessage));
                 OnPropertyChanged(nameof(RequiresGmailReauthentication));
             }
         }
@@ -396,6 +405,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _statusMessage, value))
             {
                 OnPropertyChanged(nameof(HasStatus));
+                OnPropertyChanged(nameof(LocalizedStatusMessage));
             }
         }
     }
@@ -406,7 +416,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     public bool HasStatus => !string.IsNullOrWhiteSpace(StatusMessage);
     public bool HasDraftSaveStatus => !string.IsNullOrWhiteSpace(DraftSaveStatusText);
     public bool HasDraftSaveError =>
-        string.Equals(DraftSaveStatusText, "Не удалось сохранить", StringComparison.Ordinal);
+        string.Equals(DraftSaveStatusText, SaveFailedStatus, StringComparison.Ordinal);
     public bool RequiresGmailReauthentication =>
         ActiveAccount?.Provider is MailProviderType.Gmail
         && FailureKind is MailSendFailureKind.ReauthorizationRequired
@@ -425,8 +435,11 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
     public bool IsYandexServerDraft => IsManagedImapServerDraft;
     public bool IsServerDraft => IsGmailServerDraft || IsManagedImapServerDraft;
     public bool IsDraftReadOnly => Draft?.IsReadOnly == true;
-    public string CancelButtonText => IsServerDraft ? "Закрыть" : "Отмена";
-    public string SendButtonText => IsSending ? "Отправляем…" : "Отправить";
+    public string CancelButtonText => IsServerDraft ? Localizer.Instance.Get("Close") : Localizer.Instance.Get("Cancel");
+    public string SendButtonText => IsSending ? Localizer.Instance.Get("Sending…") : Localizer.Instance.Get("Send");
+    public string? DraftSaveStatusDisplayText => Localizer.Instance.TranslateKnown(DraftSaveStatusText);
+    public string? LocalizedErrorMessage => Localizer.Instance.TranslateError(ErrorMessage);
+    public string? LocalizedStatusMessage => Localizer.Instance.TranslateKnown(StatusMessage);
     internal int DraftCount => _drafts.Count;
     internal Task CurrentDraftAutosaveTask =>
         ActiveAccount is MailAccount account && _gmailDraftStates.TryGetValue(account.Id, out GmailComposeDraftState? state)
@@ -458,6 +471,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(HasDraftSaveStatus));
                 OnPropertyChanged(nameof(HasDraftSaveError));
+                OnPropertyChanged(nameof(DraftSaveStatusDisplayText));
             }
         }
     }
@@ -636,7 +650,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             {
                 result = MailSendResult.Failure(
                     MailSendFailureKind.CapabilityUnavailable,
-                    "Отправка для этого почтового аккаунта недоступна.");
+                    L.Instance.Get("Sending is unavailable for this mail account."));
             }
             catch (Exception exception) when (
                 exception is IOException
@@ -646,7 +660,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             {
                 result = MailSendResult.Failure(
                     MailSendFailureKind.ConnectionFailed,
-                    "Не удалось отправить письмо. Проверьте подключение и повторите попытку.");
+                    L.Instance.Get("Could not send the message. Check your connection and retry."));
             }
 
             if (!result.IsMessageSent)
@@ -672,7 +686,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 }
                 catch (Exception)
                 {
-                    yandexCleanupWarning = "Письмо отправлено, но сохранённый черновик не удалось удалить.";
+                    yandexCleanupWarning = L.Instance.Get("Message sent, but the saved draft could not be deleted.");
                 }
             }
             if (MailProviderFeaturePolicies.Get(account.Provider).IsManagedImap)
@@ -733,7 +747,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 or NotSupportedException)
         {
             FailureKind = MailSendFailureKind.AttachmentUnavailable;
-            ErrorMessage = "Не удалось прочитать выбранный файл.";
+            ErrorMessage = L.Instance.Get("Could not read the selected file.");
         }
     }
 
@@ -816,7 +830,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 {
                     throw new GmailDraftException(
                         MailSendFailureKind.Ambiguous,
-                        "raven не может подтвердить создание черновика. Проверьте папку «Черновики» перед удалением.");
+                        L.Instance.Get("raven cannot confirm the draft was created. Check Drafts before deleting it."));
                 }
 
                 if (state.Identity is GmailDraftIdentity identity)
@@ -848,8 +862,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             SetDraftSaveStatus(
                 state,
                 state.Identity is null && state.RequiresExplicitRetry
-                    ? "Не удалось сохранить"
-                    : "Не удалось удалить черновик");
+                    ? SaveFailedStatus
+                    : DraftDeleteFailedStatus);
         }
         finally
         {
@@ -920,8 +934,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 if (state.RequiresExplicitRetry)
                 {
                     FailureKind = MailSendFailureKind.Ambiguous;
-                    ErrorMessage = "raven не может подтвердить состояние черновика. Проверьте папку «Черновики» перед удалением.";
-                    SetDraftSaveStatus(state, "Не удалось сохранить");
+                    ErrorMessage = L.Instance.Get("raven cannot confirm the draft state. Check Drafts before deleting it.");
+                    SetDraftSaveStatus(state, SaveFailedStatus);
                     return;
                 }
 
@@ -949,8 +963,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         catch (Exception)
         {
             FailureKind = MailSendFailureKind.ConnectionFailed;
-            ErrorMessage = "Не удалось удалить черновик. Проверьте подключение.";
-            SetDraftSaveStatus(state, "Не удалось удалить черновик");
+            ErrorMessage = L.Instance.Get("Could not delete the draft. Check your connection.");
+            SetDraftSaveStatus(state, DraftDeleteFailedStatus);
         }
         finally
         {
@@ -996,7 +1010,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             InstallDraft(account, draft, loaded.Identity, initiallyDirty: false);
             SetDraftSaveStatus(
                 _gmailDraftStates[account.Id],
-                loaded.IsReadOnly ? loaded.RestrictionMessage : "Сохранено");
+                loaded.IsReadOnly ? loaded.RestrictionMessage : SavedStatus);
             return true;
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -1061,7 +1075,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         catch (Exception exception) when (exception is ArgumentException or FormatException)
         {
             FailureKind = MailSendFailureKind.InvalidRequest;
-            ErrorMessage = "Идентификатор черновика некорректен.";
+            ErrorMessage = L.Instance.Get("Invalid draft identifier.");
             return false;
         }
 
@@ -1098,7 +1112,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 yandexIdentity: loaded.Identity);
             SetDraftSaveStatus(
                 _managedImapDraftStates[account.Id],
-                loaded.Template.IsReadOnly ? loaded.Template.RestrictionMessage : "Сохранено");
+                loaded.Template.IsReadOnly ? loaded.Template.RestrictionMessage : SavedStatus);
             return true;
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -1114,7 +1128,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         catch (Exception)
         {
             FailureKind = MailSendFailureKind.ConnectionFailed;
-            ErrorMessage = "Не удалось открыть черновик. Проверьте подключение.";
+            ErrorMessage = L.Instance.Get("Could not open the draft. Check your connection.");
             return false;
         }
         finally
@@ -1209,8 +1223,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         if (identityState is RecoveryIdentityState.Unavailable)
         {
             FailureKind = MailSendFailureKind.ConnectionFailed;
-            ErrorMessage = "Не удалось проверить восстановленный черновик. Проверьте подключение.";
-            SetDraftSaveStatus(state, "Не удалось сохранить");
+            ErrorMessage = L.Instance.Get("Could not verify the recovered draft. Check your connection.");
+            SetDraftSaveStatus(state, SaveFailedStatus);
             return false;
         }
 
@@ -1360,11 +1374,11 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             state.RequiresExplicitRetry = requiresReconciliation;
             if (requiresReconciliation)
             {
-                SetDraftSaveStatus(state, "Не удалось сохранить");
+                SetDraftSaveStatus(state, SaveFailedStatus);
             }
             else if (detachedFromServer)
             {
-                SetDraftSaveStatus(state, "Восстановлена локальная копия");
+                SetDraftSaveStatus(state, RecoveryStatus);
             }
 
             if (!requiresReconciliation)
@@ -1529,7 +1543,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                     return true;
                 }
 
-                SetDraftSaveStatus(state, "Сохранение…");
+                SetDraftSaveStatus(state, SavingStatus);
                 MailComposeRequest request;
                 try
                 {
@@ -1539,7 +1553,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 {
                     FailureKind = MailSendFailureKind.InvalidRequest;
                     ErrorMessage = exception.UserMessage;
-                    SetDraftSaveStatus(state, "Не удалось сохранить");
+                    SetDraftSaveStatus(state, SaveFailedStatus);
                     return false;
                 }
 
@@ -1568,7 +1582,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                     ErrorMessage = null;
                     if (state.Generation <= generation)
                     {
-                        SetDraftSaveStatus(state, "Сохранено");
+                        SetDraftSaveStatus(state, SavedStatus);
                         return true;
                     }
 
@@ -1591,14 +1605,14 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                         ErrorMessage = exception.UserMessage;
                     }
 
-                    SetDraftSaveStatus(state, "Не удалось сохранить");
+                    SetDraftSaveStatus(state, SaveFailedStatus);
                     return false;
                 }
                 catch (MailComposeValidationException exception)
                 {
                     FailureKind = MailSendFailureKind.InvalidRequest;
                     ErrorMessage = exception.UserMessage;
-                    SetDraftSaveStatus(state, "Не удалось сохранить");
+                    SetDraftSaveStatus(state, SaveFailedStatus);
                     return false;
                 }
             }
@@ -1637,7 +1651,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                     state.RequiresExplicitRetry = true;
                 }
 
-                SetDraftSaveStatus(state, "Не удалось сохранить");
+                SetDraftSaveStatus(state, SaveFailedStatus);
                 saved = false;
             }
 
@@ -1732,7 +1746,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                     return true;
                 }
 
-                SetDraftSaveStatus(state, "Сохранение…");
+                SetDraftSaveStatus(state, SavingStatus);
                 MailComposeRequest request;
                 try
                 {
@@ -1742,7 +1756,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 {
                     FailureKind = MailSendFailureKind.InvalidRequest;
                     ErrorMessage = exception.UserMessage;
-                    SetDraftSaveStatus(state, "Не удалось сохранить");
+                    SetDraftSaveStatus(state, SaveFailedStatus);
                     return false;
                 }
 
@@ -1763,8 +1777,8 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 catch (Exception)
                 {
                     FailureKind = MailSendFailureKind.ConnectionFailed;
-                    ErrorMessage = "Не удалось сохранить черновик. Проверьте подключение.";
-                    SetDraftSaveStatus(state, "Не удалось сохранить");
+                    ErrorMessage = L.Instance.Get("Could not save the draft. Check your connection.");
+                    SetDraftSaveStatus(state, SaveFailedStatus);
                     return false;
                 }
                 state.LogicalId = result.LogicalId;
@@ -1777,7 +1791,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                     state.RequiresExplicitRetry = result.Status is ManagedImapDraftSaveStatus.Ambiguous;
                     FailureKind = result.FailureKind;
                     ErrorMessage = result.UserMessage;
-                    SetDraftSaveStatus(state, "Не удалось сохранить");
+                    SetDraftSaveStatus(state, SaveFailedStatus);
                     return false;
                 }
 
@@ -1791,7 +1805,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
                 ErrorMessage = null;
                 if (state.Generation <= generation)
                 {
-                    SetDraftSaveStatus(state, "Сохранено");
+                    SetDraftSaveStatus(state, SavedStatus);
                     return true;
                 }
 
@@ -1828,7 +1842,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
             catch (OperationCanceledException) when (timeout.IsCancellationRequested)
             {
                 state.RequiresExplicitRetry = true;
-                SetDraftSaveStatus(state, "Не удалось сохранить");
+                SetDraftSaveStatus(state, SaveFailedStatus);
                 saved = false;
             }
 
@@ -1936,10 +1950,10 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         && ActiveAccount is MailAccount account
         && (_gmailDraftStates.TryGetValue(account.Id, out GmailComposeDraftState? state)
                 && state.IsDirty
-                && string.Equals(state.SaveStatus, "Не удалось сохранить", StringComparison.Ordinal)
+                && string.Equals(state.SaveStatus, SaveFailedStatus, StringComparison.Ordinal)
             || _managedImapDraftStates.TryGetValue(account.Id, out ManagedImapComposeDraftState? yandexState)
                 && yandexState.IsDirty
-                && string.Equals(yandexState.SaveStatus, "Не удалось сохранить", StringComparison.Ordinal));
+                && string.Equals(yandexState.SaveStatus, SaveFailedStatus, StringComparison.Ordinal));
     private bool CanAttachFiles() => CanEdit && _attachmentDialogService is not null;
     private bool CanRemoveAttachment(MailComposeAttachmentItem? item) => CanEdit && item is not null;
 
@@ -1978,6 +1992,7 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        Localizer.Instance.PropertyChanged -= OnLanguageChanged;
         _lifetimeCancellation.Cancel();
         foreach (GmailComposeDraftState state in _gmailDraftStates.Values)
         {
@@ -1997,6 +2012,20 @@ public sealed class MailComposeViewModel : ObservableObject, IDisposable
         Draft = null;
         ActiveAccount = null;
         _lifetimeCancellation.Dispose();
+    }
+
+    private void OnLanguageChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName != "Item[]")
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(CancelButtonText));
+        OnPropertyChanged(nameof(SendButtonText));
+        OnPropertyChanged(nameof(DraftSaveStatusDisplayText));
+        OnPropertyChanged(nameof(LocalizedErrorMessage));
+        OnPropertyChanged(nameof(LocalizedStatusMessage));
     }
 
     internal static MailComposeViewModel CreateUnavailable() =>

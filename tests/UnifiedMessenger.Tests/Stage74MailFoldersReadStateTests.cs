@@ -11,12 +11,12 @@ namespace UnifiedMessenger.Tests;
 public sealed class Stage74MailFoldersReadStateTests
 {
     [Theory]
-    [InlineData("INBOX", MailFolderKind.Inbox, "Входящие")]
-    [InlineData("STARRED", MailFolderKind.Starred, "Помеченные")]
-    [InlineData("SENT", MailFolderKind.Sent, "Отправленные")]
-    [InlineData("DRAFT", MailFolderKind.Drafts, "Черновики")]
-    [InlineData("SPAM", MailFolderKind.Spam, "Спам")]
-    [InlineData("TRASH", MailFolderKind.Trash, "Корзина")]
+    [InlineData("INBOX", MailFolderKind.Inbox, "Inbox")]
+    [InlineData("STARRED", MailFolderKind.Starred, "Starred")]
+    [InlineData("SENT", MailFolderKind.Sent, "Sent")]
+    [InlineData("DRAFT", MailFolderKind.Drafts, "Drafts")]
+    [InlineData("SPAM", MailFolderKind.Spam, "Spam")]
+    [InlineData("TRASH", MailFolderKind.Trash, "Trash")]
     public void GmailSystemLabels_MapToCommonFolders(string label, MailFolderKind kind, string displayName)
     {
         IReadOnlyList<MailFolder> folders = GmailSystemFolders.Map(

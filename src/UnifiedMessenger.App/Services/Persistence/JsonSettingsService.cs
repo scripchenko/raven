@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Notifications;
+using UnifiedMessenger.App.Services.Localization;
 
 namespace UnifiedMessenger.App.Services.Persistence;
 
@@ -58,8 +59,8 @@ public sealed class JsonSettingsService : ISettingsService
         {
             string? backupPath = MoveCorruptedFileAside();
             string warning = backupPath is null
-                ? "Файл настроек повреждён. Загружены настройки по умолчанию; резервную копию создать не удалось."
-                : $"Файл настроек повреждён. Загружены настройки по умолчанию, исходный файл сохранён как {Path.GetFileName(backupPath)}.";
+                ? L.Instance.Get("Settings file is damaged. Defaults were loaded; no backup could be created.")
+                : L.Instance.Format("Settings file is damaged. Defaults were loaded; the original file was saved as {0}.", Path.GetFileName(backupPath));
 
             return new SettingsLoadResult(AppSettings.CreateDefault(), warning, backupPath);
         }
@@ -122,7 +123,7 @@ public sealed class JsonSettingsService : ISettingsService
         bool changed = sourceSchemaVersion != AppSettings.CurrentSchemaVersion;
         settings.SchemaVersion = AppSettings.CurrentSchemaVersion;
 
-        string normalizedLanguage = string.IsNullOrWhiteSpace(settings.Language) ? "ru-RU" : settings.Language.Trim();
+        string normalizedLanguage = AppLanguage.Normalize(settings.Language);
         changed |= !string.Equals(settings.Language, normalizedLanguage, StringComparison.Ordinal);
         settings.Language = normalizedLanguage;
 

@@ -93,7 +93,7 @@ public sealed class ApplicationTrayCoordinator : IApplicationTrayCoordinator
 
         return _trayIcon.TryShowBalloon(
             BrandIdentity.DisplayName,
-            "raven продолжает работать в области уведомлений");
+            UnifiedMessenger.App.Services.Localization.Localizer.Instance.Get("raven continues running in the notification area"));
     }
 
     public void BeginShutdown()

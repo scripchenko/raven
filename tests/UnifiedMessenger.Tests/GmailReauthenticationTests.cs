@@ -19,9 +19,9 @@ public sealed class GmailReauthenticationTests
 
         Assert.Equal(MailReadFailureKind.ReauthorizationRequired, viewModel.FailureKind);
         Assert.True(viewModel.RequiresGmailReauthentication);
-        Assert.Equal("Требуется вход в Google", viewModel.ErrorTitle);
+        Assert.Equal("Google sign-in required", viewModel.ErrorTitle);
         Assert.Equal(
-            "Срок действия подключения истёк или доступ был отозван. Войдите в Google снова, чтобы продолжить получать почту.",
+            "The connection expired or access was revoked. Sign in to Google again to continue receiving mail.",
             viewModel.ListErrorDescription);
         Assert.True(viewModel.ReauthenticateGmailCommand.CanExecute(null));
         Assert.False(viewModel.RetryCommand.CanExecute(null));
@@ -98,7 +98,7 @@ public sealed class GmailReauthenticationTests
         await viewModel.ReauthenticateGmailCommand.ExecuteAsync(null);
 
         Assert.True(viewModel.RequiresGmailReauthentication);
-        Assert.Equal("Не удалось войти в Google. Попробуйте ещё раз.", viewModel.GmailReauthenticationErrorMessage);
+        Assert.Equal("Could not sign in to Google. Please retry.", viewModel.GmailReauthenticationErrorMessage);
         Assert.True(viewModel.ReauthenticateGmailCommand.CanExecute(null));
         Assert.Equal(1, provider.PageCallCount);
     }
@@ -173,7 +173,7 @@ public sealed class GmailReauthenticationTests
 
         Assert.Equal(GmailReauthenticationOutcome.WrongAccount, result.Outcome);
         Assert.Equal(
-            "Вы вошли в другой аккаунт Google. Войдите как expected@gmail.test.",
+            "You signed in to another Google account. Sign in as expected@gmail.test.",
             result.UserMessage);
         Assert.Same(oldCredential, store.Values[account.CredentialKey]);
         Assert.Empty(store.SavedKeys);
@@ -289,9 +289,9 @@ public sealed class GmailReauthenticationTests
             "Views",
             "MailInboxView.xaml"));
 
-        Assert.Contains("Content=\"Войти в Google\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"{loc:Text Key='Sign in to Google'}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Command=\"{Binding ReauthenticateGmailCommand}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Повторить\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"{loc:Text Key='Retry'}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding ShowTransientRetryAction", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding RequiresGmailMessageReauthentication", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding RequiresGmailReadStateReauthentication", xaml, StringComparison.Ordinal);

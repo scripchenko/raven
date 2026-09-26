@@ -1,4 +1,5 @@
 using UnifiedMessenger.App.Services.Notifications;
+using UnifiedMessenger.App.Services.Localization;
 
 namespace UnifiedMessenger.App.Models;
 
@@ -16,7 +17,8 @@ public sealed class AppSettings
     public bool RestoreLastService { get; set; } = true;
     public bool StartWithWindows { get; set; }
     public bool AutomaticallyShowRemoteImages { get; set; } = true;
-    public string Language { get; set; } = "ru-RU";
+    // Empty while deserializing an old profile; Normalize applies the English default.
+    public string Language { get; set; } = string.Empty;
     public Guid? LastServiceId { get; set; }
     public Guid? LastNavigationAccountId { get; set; }
     public NotificationSettings Notifications { get; set; } = new();
@@ -27,7 +29,10 @@ public sealed class AppSettings
     public DateTimeOffset? LastAutomaticUpdateCheckUtc { get; set; }
     public string? LastNotifiedUpdateVersion { get; set; }
 
-    public static AppSettings CreateDefault() => new();
+    public static AppSettings CreateDefault() => new()
+    {
+        Language = AppLanguage.English
+    };
 }
 
 public enum AppTheme

@@ -1,7 +1,8 @@
 <Window x:Class="UnifiedMessenger.App.Views.AddServiceWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Добавить сервис"
+             xmlns:loc="clr-namespace:UnifiedMessenger.App.Services.Localization"
+        Title="{loc:Text Key='Add service'}"
         Width="460"
         Height="430"
         MinWidth="420"
@@ -18,10 +19,10 @@
         </Grid.RowDefinitions>
 
         <StackPanel>
-            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Добавить сервис" />
+            <TextBlock FontSize="24" FontWeight="SemiBold" Text="{loc:Text Key='Add service'}" />
             <TextBlock Margin="0,8,0,0"
                        Foreground="{DynamicResource TextSecondaryBrush}"
-                       Text="Выберите сервис. Каждый аккаунт получит отдельный защищённый профиль WebView2."
+                       Text="{loc:Text Key='Choose a service. Each account gets a separate protected WebView2 profile.'}"
                        TextWrapping="Wrap" />
         </StackPanel>
 
@@ -69,7 +70,7 @@
         </ListBox>
 
         <StackPanel Grid.Row="2">
-            <TextBlock Margin="0,0,0,7" FontWeight="SemiBold" Text="Название аккаунта" />
+            <TextBlock Margin="0,0,0,7" FontWeight="SemiBold" Text="{loc:Text Key='Account name'}" />
             <TextBox x:Name="AccountNameTextBox"
                      Height="40"
                      Padding="10,7"
@@ -78,8 +79,8 @@
         </StackPanel>
 
         <StackPanel Grid.Row="3" Margin="0,22,0,0" HorizontalAlignment="Right" Orientation="Horizontal">
-            <Button Width="96" Height="40" Margin="0,0,10,0" Click="Cancel_Click" Content="Отмена" IsCancel="True" />
-            <Button Width="112" Height="40" Click="Add_Click" Content="Добавить" IsDefault="True" Style="{StaticResource PrimaryButtonStyle}" />
+            <Button Width="96" Height="40" Margin="0,0,10,0" Click="Cancel_Click" Content="{loc:Text Key='Cancel'}" IsCancel="True" />
+            <Button Width="112" Height="40" Click="Add_Click" Content="{loc:Text Key='Add'}" IsDefault="True" Style="{StaticResource PrimaryButtonStyle}" />
         </StackPanel>
     </Grid>
 </Window>

@@ -123,8 +123,8 @@ public sealed class GmailSearchTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.BadRequest, MailReadFailureKind.InvalidSearchQuery, "Проверьте запрос")]
-    [InlineData(HttpStatusCode.TooManyRequests, MailReadFailureKind.ConnectionFailed, "Попробуйте ещё раз позже")]
+    [InlineData(HttpStatusCode.BadRequest, MailReadFailureKind.InvalidSearchQuery, "Check your query")]
+    [InlineData(HttpStatusCode.TooManyRequests, MailReadFailureKind.ConnectionFailed, "Please retry later")]
     public void GmailApiSearchFailures_AreMappedToFriendlyMessages(
         HttpStatusCode statusCode,
         MailReadFailureKind expectedFailureKind,
@@ -235,7 +235,7 @@ public sealed class GmailSearchTests
         Assert.Equal("gmail:normal-2", Assert.Single(viewModel.Messages).MessageKey);
         Assert.Equal([null, "normal-next"], provider.NormalCalls.Select(call => call.Token));
         Assert.All(provider.NormalCalls, call => Assert.Equal(50, call.PageSize));
-        Assert.Equal("51–51 из 120", viewModel.PageRangeText);
+        Assert.Equal("51–51 of 120", viewModel.PageRangeText);
 
         viewModel.SearchText = "has:attachment";
         await viewModel.SearchCommand.ExecuteAsync(null);
@@ -245,12 +245,12 @@ public sealed class GmailSearchTests
         Assert.Equal([null, "search-next"], provider.SearchCalls.Select(call => call.PageToken));
         Assert.All(provider.SearchCalls, call => Assert.Equal(50, call.PageSize));
         Assert.Equal("51–51", viewModel.PageRangeText);
-        Assert.DoesNotContain("из", viewModel.PageRangeText, StringComparison.Ordinal);
+        Assert.DoesNotContain(" of ", viewModel.PageRangeText, StringComparison.Ordinal);
 
         viewModel.ClearSearchCommand.Execute(null);
 
         Assert.Equal("gmail:normal-2", Assert.Single(viewModel.Messages).MessageKey);
-        Assert.Equal("51–51 из 120", viewModel.PageRangeText);
+        Assert.Equal("51–51 of 120", viewModel.PageRangeText);
         Assert.True(viewModel.CanNavigateToPreviousPage);
         await viewModel.PreviousPageCommand.ExecuteAsync(null);
         Assert.Equal("gmail:normal-1", Assert.Single(viewModel.Messages).MessageKey);
@@ -270,20 +270,20 @@ public sealed class GmailSearchTests
 
         await viewModel.ActivateAsync(account);
 
-        Assert.Equal("1–50 из 5127", viewModel.PageRangeText);
+        Assert.Equal("1–50 of 5127", viewModel.PageRangeText);
         await viewModel.NextPageCommand.ExecuteAsync(null);
         await viewModel.NextPageCommand.ExecuteAsync(null);
-        Assert.Equal("101–150 из 5127", viewModel.PageRangeText);
+        Assert.Equal("101–150 of 5127", viewModel.PageRangeText);
 
         viewModel.SearchText = "has:attachment";
         await viewModel.SearchCommand.ExecuteAsync(null);
 
         Assert.Equal("1–50", viewModel.PageRangeText);
-        Assert.DoesNotContain("из", viewModel.PageRangeText, StringComparison.Ordinal);
+        Assert.DoesNotContain(" of ", viewModel.PageRangeText, StringComparison.Ordinal);
 
         viewModel.ClearSearchCommand.Execute(null);
 
-        Assert.Equal("101–150 из 5127", viewModel.PageRangeText);
+        Assert.Equal("101–150 of 5127", viewModel.PageRangeText);
 
         MailAccount accountWithoutTotal = Account("gmail-no-total@example.test");
         provider.SetNormalPage(accountWithoutTotal.Id, null, Page(Summaries("no-total", 50), null));
@@ -291,11 +291,11 @@ public sealed class GmailSearchTests
         await viewModel.ActivateAsync(accountWithoutTotal);
 
         Assert.Equal("1–50", viewModel.PageRangeText);
-        Assert.DoesNotContain("из", viewModel.PageRangeText, StringComparison.Ordinal);
+        Assert.DoesNotContain(" of ", viewModel.PageRangeText, StringComparison.Ordinal);
 
         await viewModel.ActivateAsync(account);
 
-        Assert.Equal("101–150 из 5127", viewModel.PageRangeText);
+        Assert.Equal("101–150 of 5127", viewModel.PageRangeText);
     }
 
     [Fact]
@@ -314,7 +314,7 @@ public sealed class GmailSearchTests
 
         await viewModel.ArchiveSelectedCommand.ExecuteAsync(null);
 
-        Assert.Equal("1–1 из 9", viewModel.PageRangeText);
+        Assert.Equal("1–1 of 9", viewModel.PageRangeText);
         Assert.Equal(MailboxOperation.Archive, Assert.Single(mailbox.Operations));
     }
 
@@ -339,7 +339,7 @@ public sealed class GmailSearchTests
         viewModel.ClearSearchCommand.Execute(null);
 
         Assert.Equal("1–1", viewModel.PageRangeText);
-        Assert.DoesNotContain("из", viewModel.PageRangeText, StringComparison.Ordinal);
+        Assert.DoesNotContain(" of ", viewModel.PageRangeText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -654,7 +654,7 @@ public sealed class GmailSearchTests
         using MailInboxViewModel viewModel = ViewModel(provider);
         await SearchAsync(viewModel, account, "bad-query");
 
-        Assert.Equal("Не удалось выполнить поиск", viewModel.ErrorTitle);
+        Assert.Equal("Could not search mail", viewModel.ErrorTitle);
         Assert.Equal("Не удалось выполнить поиск. Проверьте запрос.", viewModel.ListErrorDescription);
         Assert.DoesNotContain("exception", viewModel.ListErrorDescription!, StringComparison.OrdinalIgnoreCase);
 
@@ -662,7 +662,7 @@ public sealed class GmailSearchTests
         await viewModel.SearchCommand.ExecuteAsync(null);
 
         Assert.True(viewModel.IsEmpty);
-        Assert.Equal("По вашему запросу ничего не найдено.", viewModel.EmptyListMessage);
+        Assert.Equal("No messages match your search.", viewModel.EmptyListMessage);
     }
 
     [Fact]
@@ -695,7 +695,7 @@ public sealed class GmailSearchTests
         string xaml = File.ReadAllText(FindRepositoryFile(
             "src", "UnifiedMessenger.App", "Views", "MailInboxView.xaml"));
 
-        Assert.Contains("Text=\"Поиск в почте\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{loc:Text Key='Search mail'}\"", xaml, StringComparison.Ordinal);
         Assert.Equal(2, xaml.Split("Command=\"{Binding SearchCommand}\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("MaxWidth=\"560\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Command=\"{Binding ClearSearchCommand}\"", xaml, StringComparison.Ordinal);

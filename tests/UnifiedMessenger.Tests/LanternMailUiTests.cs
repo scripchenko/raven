@@ -241,7 +241,7 @@ public sealed class LanternMailUiTests
 
         XElement subjectLabel = Assert.Single(
             compose.Descendants(presentation + "TextBlock"),
-            element => (string?)element.Attribute("Text") == "Тема:");
+            element => (string?)element.Attribute("Text") == "{loc:Text Key='Subject:'}");
         XElement subjectInput = Named(view, presentation, xaml, "TextBox", "ComposeSubjectTextBox");
         XElement bodyInput = Named(view, presentation, xaml, "TextBox", "ComposeBodyTextBox");
         Assert.Equal("1", (string?)subjectInput.Attribute("Grid.Column"));
@@ -264,7 +264,7 @@ public sealed class LanternMailUiTests
             element => (string?)element.Attribute(xaml + "Key") == "MailComposeButtonStyle");
         XElement composeButton = Assert.Single(
             view.Descendants(presentation + "Button"),
-            element => (string?)element.Attribute("Content") == "Написать");
+            element => (string?)element.Attribute("Content") == "{loc:Text Key='Compose'}");
         Assert.Equal(
             "#FFE7F0FF",
             (string?)Assert.Single(
@@ -357,7 +357,7 @@ public sealed class LanternMailUiTests
         Assert.Equal("{Binding SelectedMessageContent.SenderDisplay}", (string?)sender.Attribute("Text"));
         Assert.Equal("SemiBold", (string?)sender.Attribute("FontWeight"));
         Assert.Equal("{Binding SelectedMessageContent.FromAddress}", (string?)email.Attribute("Text"));
-        Assert.Equal("{Binding SelectedMessageContent.To, StringFormat=Кому: {0}}", (string?)recipient.Attribute("Text"));
+        Assert.Equal("{Binding SelectedMessageRecipientText}", (string?)recipient.Attribute("Text"));
         Assert.Equal("1", (string?)date.Attribute("Grid.Column"));
         Assert.Equal("{Binding SelectedMessageDisplayDate}", (string?)date.Attribute("Text"));
         Assert.Contains("Property=\"HorizontalAlignment\" Value=\"Right\"", date.ToString(), StringComparison.Ordinal);
@@ -544,8 +544,8 @@ public sealed class LanternMailUiTests
         Assert.Equal("44", (string?)firstRow.Attribute("Height"));
         Assert.Equal("{Binding RefreshCommand}", (string?)refresh.Attribute("Command"));
         Assert.Null(refresh.Attribute("Content"));
-        Assert.Equal("Обновить", (string?)refresh.Attribute("ToolTip"));
-        Assert.Equal("Обновить", (string?)refresh.Attribute("AutomationProperties.Name"));
+        Assert.Equal("{loc:Text Key='Refresh'}", (string?)refresh.Attribute("ToolTip"));
+        Assert.Equal("{loc:Text Key='Refresh'}", (string?)refresh.Attribute("AutomationProperties.Name"));
         XElement refreshPath = Assert.Single(refresh.Descendants(presentation + "Path"));
         Assert.Equal("{StaticResource MailActionRefreshGeometry}", (string?)refreshPath.Attribute("Data"));
         Assert.Equal("1.8", (string?)refreshPath.Attribute("StrokeThickness"));
@@ -769,8 +769,8 @@ public sealed class LanternMailUiTests
         string markup = view.ToString();
 
         Assert.Contains("Content=\"{Binding RemoteImagesButtonText}\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Всегда показывать от этого отправителя", markup, StringComparison.Ordinal);
-        Assert.Contains("Не показывать автоматически от этого отправителя", markup, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Always show images from this sender'}", markup, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Do not automatically show images from this sender'}", markup, StringComparison.Ordinal);
         Assert.Contains("AlwaysShowRemoteImagesFromSender_Click", markup, StringComparison.Ordinal);
         Assert.Contains("RevokeRemoteImagesFromSender_Click", markup, StringComparison.Ordinal);
     }
@@ -791,11 +791,11 @@ public sealed class LanternMailUiTests
             "{Binding AutomaticallyShowRemoteImages, Mode=OneWay}",
             (string?)toggle.Attribute("IsChecked"));
         Assert.Equal(
-            "Автоматически показывать внешние изображения",
+            "{loc:Text Key='Automatically show remote images'}",
             (string?)toggle.Attribute("AutomationProperties.Name"));
-        Assert.Contains("Автоматически показывать внешние изображения", markup, StringComparison.Ordinal);
-        Assert.Contains("без cookies и учётных данных", markup, StringComparison.Ordinal);
-        Assert.Contains("Отправитель всё равно может узнать о загрузке изображения", markup, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Automatically show remote images'}", markup, StringComparison.Ordinal);
+        Assert.Contains("without cookies or credentials", markup, StringComparison.Ordinal);
+        Assert.Contains("The sender may still detect an image request", markup, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 <Window x:Class="UnifiedMessenger.App.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:UnifiedMessenger.App.Services.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:converters="clr-namespace:UnifiedMessenger.App.Converters"
@@ -132,7 +133,7 @@
                                 Command="{Binding ReloadCommand}"
                                 Content="↻"
                                 Style="{StaticResource ServiceHeaderButtonStyle}"
-                                ToolTip="Обновить сервис"
+                                ToolTip="{loc:Text Key='Reload service'}"
                                 Visibility="{Binding HasActiveWebView, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
 
@@ -201,7 +202,7 @@
 
                 <Button AutomationProperties.AutomationId="OpenHomeButton"
                         Command="{Binding OpenHomeCommand}"
-                        ToolTip="Главная">
+                        ToolTip="{loc:Text Key='Home'}">
                     <Button.Style>
                         <Style TargetType="Button" BasedOn="{StaticResource SidebarActionButtonStyle}">
                             <Setter Property="Margin" Value="0" />
@@ -259,13 +260,13 @@
                                     ToolTip="{Binding DisplayName}">
                                 <Border.ContextMenu>
                                     <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                        <MenuItem Header="Переименовать" CommandParameter="{Binding}" Click="RenameAccount_Click" />
-                                        <MenuItem Header="Включить / отключить" CommandParameter="{Binding}" Click="ToggleAccount_Click" />
+                                        <MenuItem Header="{loc:Text Key='Rename'}" CommandParameter="{Binding}" Click="RenameAccount_Click" />
+                                        <MenuItem Header="{loc:Text Key='Enable / disable'}" CommandParameter="{Binding}" Click="ToggleAccount_Click" />
                                         <Separator />
-                                        <MenuItem Header="Переместить выше" CommandParameter="{Binding}" IsEnabled="{Binding IsWebService}" Click="MoveAccountUp_Click" />
-                                        <MenuItem Header="Переместить ниже" CommandParameter="{Binding}" IsEnabled="{Binding IsWebService}" Click="MoveAccountDown_Click" />
+                                        <MenuItem Header="{loc:Text Key='Move higher'}" CommandParameter="{Binding}" IsEnabled="{Binding IsWebService}" Click="MoveAccountUp_Click" />
+                                        <MenuItem Header="{loc:Text Key='Move lower'}" CommandParameter="{Binding}" IsEnabled="{Binding IsWebService}" Click="MoveAccountDown_Click" />
                                         <Separator />
-                                        <MenuItem Header="Удалить…" CommandParameter="{Binding}" Click="DeleteAccount_Click" />
+                                        <MenuItem Header="{loc:Text Key='Delete…'}" CommandParameter="{Binding}" Click="DeleteAccount_Click" />
                                     </ContextMenu>
                                 </Border.ContextMenu>
                                 <Grid>
@@ -303,13 +304,13 @@
 
                 <StackPanel Grid.Row="2">
                     <Button Style="{StaticResource SidebarActionButtonStyle}"
-                            ToolTip="Добавить сервис"
+                            ToolTip="{loc:Text Key='Add service'}"
                             Click="AddService_Click"
                             Content="+" />
                     <Button AutomationProperties.AutomationId="OpenSettingsButton"
                             Command="{Binding OpenSettingsCommand}"
                             Style="{StaticResource SidebarActionButtonStyle}"
-                            ToolTip="Настройки"
+                            ToolTip="{loc:Text Key='Settings'}"
                             Content="⚙" />
                 </StackPanel>
             </Grid>
@@ -371,10 +372,10 @@
                         <TextBlock HorizontalAlignment="Center"
                                    FontSize="24"
                                    FontWeight="SemiBold"
-                                   Text="Почтовый аккаунт отключён" />
+                                   Text="{loc:Text Key='Mail account disabled'}" />
                         <TextBlock Margin="0,12,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Учётные данные сохранены. Включить аккаунт можно в разделе Настройки → Аккаунты."
+                                   Text="{loc:Text Key='Credentials are saved. Enable the account in Settings → Accounts.'}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -386,7 +387,7 @@
                         <ProgressBar Width="220" Height="4" IsIndeterminate="True" />
                         <TextBlock Margin="0,18,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Подготовка отдельного защищённого профиля…" />
+                                   Text="{loc:Text Key='Preparing a separate protected profile…'}" />
                     </StackPanel>
                 </Border>
 
@@ -403,16 +404,16 @@
                         <TextBlock HorizontalAlignment="Center"
                                    FontSize="24"
                                    FontWeight="SemiBold"
-                                   Text="Аккаунт отключён" />
+                                   Text="{loc:Text Key='Account disabled'}" />
                         <TextBlock Margin="0,12,0,0"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                   Text="Профиль и авторизация сохранены. Включите аккаунт, чтобы продолжить с тем же профилем."
+                                   Text="{loc:Text Key='Your profile and sign-in are preserved. Enable the account to continue with the same profile.'}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap" />
                         <Button Margin="0,24,0,0"
                                 HorizontalAlignment="Center"
                                 Click="EnableSelectedAccount_Click"
-                                Content="Включить"
+                                Content="{loc:Text Key='Enable'}"
                                 Style="{StaticResource PrimaryButtonStyle}" />
                     </StackPanel>
                 </Border>
@@ -445,7 +446,7 @@
                         <Button Margin="0,24,0,0"
                                 HorizontalAlignment="Center"
                                 Command="{Binding RetryCommand}"
-                                Content="Повторить"
+                                Content="{loc:Text Key='Retry'}"
                                 Style="{StaticResource PrimaryButtonStyle}" />
                     </StackPanel>
                 </Border>

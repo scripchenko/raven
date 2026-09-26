@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using UnifiedMessenger.App.Models;
 using UnifiedMessenger.App.Services.Mail;
+using UnifiedMessenger.App.Services.Localization;
 
 namespace UnifiedMessenger.App.Views;
 
@@ -47,7 +48,7 @@ public partial class AddMailAccountWindow : Window
         GenericSettings.Visibility = provider.Provider == MailProviderType.GenericImap
             ? Visibility.Visible
             : Visibility.Collapsed;
-        ConnectButton.Content = isGmail ? "Войти через Google" : "Проверить и добавить";
+        ConnectButton.Content = isGmail ? Localizer.Instance.Get("Sign in with Google") : Localizer.Instance.Get("Check and add");
         ConnectButton.IsEnabled = !_isBusy;
         ProviderGuidance.Text = provider.Guidance;
         StatusText.Text = string.Empty;
@@ -66,7 +67,7 @@ public partial class AddMailAccountWindow : Window
             if (!int.TryParse(ImapPortBox.Text, out int imapPort)
                 || !int.TryParse(SmtpPortBox.Text, out int smtpPort))
             {
-                StatusText.Text = "Укажите корректные номера портов.";
+                StatusText.Text = Localizer.Instance.Get("Enter valid port numbers.");
                 return;
             }
 
@@ -102,8 +103,8 @@ public partial class AddMailAccountWindow : Window
         ProviderBox.IsEnabled = false;
         StatusText.Foreground = System.Windows.Media.Brushes.DimGray;
         StatusText.Text = provider.Provider == MailProviderType.Gmail
-            ? "Ожидаем завершения входа в системном браузере…"
-            : "Проверяем IMAP и SMTP…";
+            ? Localizer.Instance.Get("Waiting for sign-in in the system browser…")
+            : Localizer.Instance.Get("Checking IMAP and SMTP…");
         try
         {
             MailAccountProvisioningResult result = provider.Provider == MailProviderType.Gmail
@@ -130,12 +131,12 @@ public partial class AddMailAccountWindow : Window
         catch (OperationCanceledException)
         {
             StatusText.Foreground = System.Windows.Media.Brushes.Firebrick;
-            StatusText.Text = "Проверка подключения отменена.";
+            StatusText.Text = Localizer.Instance.Get("Connection check canceled.");
         }
         catch
         {
             StatusText.Foreground = System.Windows.Media.Brushes.Firebrick;
-            StatusText.Text = "Не удалось завершить безопасное подключение почты.";
+            StatusText.Text = Localizer.Instance.Get("Could not complete a secure mail connection.");
         }
         finally
         {
@@ -154,7 +155,7 @@ public partial class AddMailAccountWindow : Window
         if (_isBusy)
         {
             _operationCancellation?.Cancel();
-            StatusText.Text = "Отменяем подключение…";
+            StatusText.Text = Localizer.Instance.Get("Canceling connection…");
             return;
         }
 

@@ -1,4 +1,5 @@
 using Microsoft.Web.WebView2.Core;
+using UnifiedMessenger.App.Services.Localization;
 
 namespace UnifiedMessenger.App.Services.WebView;
 
@@ -18,20 +19,20 @@ public static class WebViewErrorClassifier
         string serviceDisplayName)
     {
         string serviceName = string.IsNullOrWhiteSpace(serviceDisplayName)
-            ? "Сервис"
+            ? Localizer.Instance.Get("Service")
             : serviceDisplayName.Trim();
 
         return status switch
         {
-            CoreWebView2WebErrorStatus.HostNameNotResolved => "Не удалось найти адрес сервиса. Проверьте DNS и подключение к интернету.",
-            CoreWebView2WebErrorStatus.Timeout => $"{serviceName} не ответил вовремя. Проверьте подключение и повторите попытку.",
+            CoreWebView2WebErrorStatus.HostNameNotResolved => Localizer.Instance.Get("Could not find the service address. Check DNS and your connection."),
+            CoreWebView2WebErrorStatus.Timeout => Localizer.Instance.Format("{0} did not respond in time. Check your connection and retry.", serviceName),
             CoreWebView2WebErrorStatus.ServerUnreachable or CoreWebView2WebErrorStatus.CannotConnect =>
-                $"Сервер {serviceName} сейчас недоступен. Проверьте интернет-соединение.",
+                Localizer.Instance.Format("The {0} server is unavailable. Check your Internet connection.", serviceName),
             CoreWebView2WebErrorStatus.Disconnected
                 or CoreWebView2WebErrorStatus.ConnectionAborted
                 or CoreWebView2WebErrorStatus.ConnectionReset =>
-                "Соединение было прервано. Проверьте интернет и повторите попытку.",
-            _ => $"Не удалось загрузить {serviceName}. Повторите попытку."
+                Localizer.Instance.Get("The connection was interrupted. Check the Internet and retry."),
+            _ => Localizer.Instance.Format("Could not load {0}. Retry.", serviceName)
         };
     }
 }

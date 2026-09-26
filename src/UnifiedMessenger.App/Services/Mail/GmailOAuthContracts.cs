@@ -30,7 +30,7 @@ public sealed record GmailOAuthAuthorizationResult(
     string UserMessage)
 {
     public static GmailOAuthAuthorizationResult Success(GmailOAuthSession session) =>
-        new(true, session, MailConnectionFailureKind.None, "Авторизация Google завершена.");
+        new(true, session, MailConnectionFailureKind.None, L.Instance.Get("Google authorization completed."));
 
     public static GmailOAuthAuthorizationResult Failure(
         MailConnectionFailureKind kind,
@@ -45,7 +45,7 @@ public sealed record GmailProfileResult(
     string UserMessage)
 {
     public static GmailProfileResult Success(GmailUserProfile profile) =>
-        new(true, profile, MailConnectionFailureKind.None, "Профиль Gmail получен.");
+        new(true, profile, MailConnectionFailureKind.None, L.Instance.Get("Gmail profile retrieved."));
 
     public static GmailProfileResult Failure(string message) =>
         new(false, null, MailConnectionFailureKind.GmailProfileFailed, message);

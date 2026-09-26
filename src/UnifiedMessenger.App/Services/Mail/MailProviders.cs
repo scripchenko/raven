@@ -18,7 +18,7 @@ public abstract class PasswordMailProvider(IMailConnectionValidator validator) :
         {
             return MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.InvalidConfiguration,
-                "Выбран неверный почтовый провайдер.");
+                L.Instance.Get("Wrong mail provider selected."));
         }
 
         string email = request.EmailAddress.Trim();
@@ -27,7 +27,7 @@ public abstract class PasswordMailProvider(IMailConnectionValidator validator) :
         {
             return MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.InvalidConfiguration,
-                "Заполните корректные параметры IMAP и SMTP.");
+                L.Instance.Get("Enter valid IMAP and SMTP settings."));
         }
 
         return await Validator.ValidateAsync(settings, email, secret, cancellationToken);
@@ -67,7 +67,7 @@ public sealed class YandexMailProvider(IMailConnectionValidator validator) : Pas
     public override MailProviderType ProviderType => MailProviderType.Yandex;
     public override MailProviderDescriptor Descriptor { get; } = new(
         MailProviderType.Yandex,
-        "Яндекс Почта",
+        L.Instance.Get("Yandex Mail"),
         MailAuthenticationKind.Password,
         MailProviderCapabilities.ConnectionValidation
             | MailProviderCapabilities.IdentityValidation
@@ -75,7 +75,7 @@ public sealed class YandexMailProvider(IMailConnectionValidator validator) : Pas
             | MailProviderCapabilities.MessageListing
             | MailProviderCapabilities.MessageReading
             | MailProviderCapabilities.Sending,
-        "Используйте пароль приложения Яндекса, а не основной пароль аккаунта.");
+        L.Instance.Get("Use a Yandex app password, not your primary account password."));
 
     public override MailConnectionSettings CreateConnectionSettings(
         MailAccountConnectionRequest request,
@@ -88,7 +88,7 @@ public sealed class MailRuMailProvider(IMailConnectionValidator validator) : Pas
     public override MailProviderType ProviderType => MailProviderType.MailRu;
     public override MailProviderDescriptor Descriptor { get; } = new(
         MailProviderType.MailRu,
-        "Почта Mail.ru",
+        L.Instance.Get("Mail.ru Mail"),
         MailAuthenticationKind.Password,
         MailProviderCapabilities.ConnectionValidation
             | MailProviderCapabilities.IdentityValidation
@@ -96,7 +96,7 @@ public sealed class MailRuMailProvider(IMailConnectionValidator validator) : Pas
             | MailProviderCapabilities.MessageListing
             | MailProviderCapabilities.MessageReading
             | MailProviderCapabilities.Sending,
-        "Используйте пароль для внешнего приложения Mail.ru с полным доступом к Почте. Доступ по IMAP/SMTP должен быть включён.");
+        L.Instance.Get("Use a Mail.ru external-app password with full Mail access. IMAP/SMTP access must be enabled."));
 
     public override MailConnectionSettings CreateConnectionSettings(
         MailAccountConnectionRequest request,
@@ -109,7 +109,7 @@ public sealed class GenericImapMailProvider(IMailConnectionValidator validator) 
     public override MailProviderType ProviderType => MailProviderType.GenericImap;
     public override MailProviderDescriptor Descriptor { get; } = new(
         MailProviderType.GenericImap,
-        "Другая почта (IMAP/SMTP)",
+        L.Instance.Get("Other mail (IMAP/SMTP)"),
         MailAuthenticationKind.Password,
         MailProviderCapabilities.ConnectionValidation
             | MailProviderCapabilities.IdentityValidation
@@ -117,7 +117,7 @@ public sealed class GenericImapMailProvider(IMailConnectionValidator validator) 
             | MailProviderCapabilities.MessageListing
             | MailProviderCapabilities.MessageReading
             | MailProviderCapabilities.Sending,
-        "Укажите параметры IMAP и SMTP, выданные вашим почтовым провайдером.");
+        L.Instance.Get("Enter the IMAP and SMTP settings from your mail provider."));
 
     public override MailConnectionSettings? CreateConnectionSettings(
         MailAccountConnectionRequest request,
@@ -153,7 +153,7 @@ public sealed class GmailApiProvider : IMailProvider
             | MailProviderCapabilities.MessageListing
             | MailProviderCapabilities.MessageReading
             | MailProviderCapabilities.Sending,
-        "Авторизация откроется в системном браузере. Пароль Google в raven не вводится.");
+        L.Instance.Get("Authorization opens in the system browser. Your Google password is not entered in raven."));
 
     public Task<MailConnectionValidationResult> ValidateAsync(
         MailAccountConnectionRequest request,
@@ -162,7 +162,7 @@ public sealed class GmailApiProvider : IMailProvider
         Task.FromResult(
             MailConnectionValidationResult.Failure(
                 MailConnectionFailureKind.OAuthNotAvailable,
-                "Для Gmail используйте вход через Google в системном браузере."));
+                L.Instance.Get("For Gmail, sign in to Google in the system browser.")));
 }
 
 public sealed class MailProviderFactory(IEnumerable<IMailProvider> providers) : IMailProviderFactory

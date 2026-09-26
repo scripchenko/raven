@@ -528,7 +528,7 @@ public sealed class GmailMailboxManagementTests
         await viewModel.CurrentMessageLoadTask;
 
         Assert.True(starred.IsStarred);
-        Assert.Equal("Снять пометку", viewModel.DetailStarActionText);
+        Assert.Equal("Remove star", viewModel.DetailStarActionText);
         Assert.True(viewModel.ArchiveDetailCommand.CanExecute(null));
 
         viewModel.BackToMessageListCommand.Execute(null);
@@ -750,7 +750,7 @@ public sealed class GmailMailboxManagementTests
 
         Assert.Equal("gmail:second", Assert.Single(viewModel.Messages).MessageKey);
         Assert.False(viewModel.HasSelectedMessages);
-        Assert.Contains("Часть выбранных писем не изменена", viewModel.MailboxActionErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("Some selected messages were not changed", viewModel.MailboxActionErrorMessage, StringComparison.Ordinal);
         Assert.True(viewModel.IsFolderStateStale(account.Id, MailFolderKind.Spam));
         Assert.True(viewModel.IsFolderStateStale(account.Id, MailFolderKind.AllMail));
     }
@@ -867,7 +867,7 @@ public sealed class GmailMailboxManagementTests
 
         Assert.Equal("gmail:second", Assert.Single(viewModel.Messages).MessageKey);
         Assert.False(viewModel.HasSelectedMessages);
-        Assert.Contains("Часть выбранных писем не изменена", viewModel.MailboxActionErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("Some selected messages were not changed", viewModel.MailboxActionErrorMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1002,7 +1002,7 @@ public sealed class GmailMailboxManagementTests
 
         Assert.Equal("gmail:second", Assert.Single(viewModel.Messages).MessageKey);
         Assert.False(viewModel.HasSelectedMessages);
-        Assert.Contains("Часть выбранных писем не изменена", viewModel.MailboxActionErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("Some selected messages were not changed", viewModel.MailboxActionErrorMessage, StringComparison.Ordinal);
         Assert.True(viewModel.IsInboxStale(account.Id));
         Assert.True(viewModel.IsFolderStateStale(account.Id, MailFolderKind.AllMail));
 

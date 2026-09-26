@@ -212,7 +212,8 @@ public sealed class WebNotificationCoordinator : IWebNotificationCoordinator
             }
 
             if (_activeBalloon is null
-                && _trayIcon.TryShowBalloon(service.DisplayName, $"Новое событие в {serviceName}"))
+                && _trayIcon.TryShowBalloon(service.DisplayName,
+                    UnifiedMessenger.App.Services.Localization.Localizer.Instance.Format("There are new events in {0}", serviceName)))
             {
                 _activeBalloon = new ActiveNotification(notificationId, request);
                 request.Lifecycle.ReportShown();
@@ -244,7 +245,7 @@ public sealed class WebNotificationCoordinator : IWebNotificationCoordinator
         string senderIdentity = pending.ShowPreview
             ? pending.Request.Title.Trim()
             : string.Empty;
-        string genericTitle = $"Новое сообщение в {serviceName}";
+        string genericTitle = UnifiedMessenger.App.Services.Localization.Localizer.Instance.Format("New message in {0}", serviceName);
         string title = pending.ShowPreview && !string.IsNullOrWhiteSpace(pending.Request.Title)
             ? pending.Request.Title
             : genericTitle;

@@ -275,7 +275,7 @@ public sealed class ManagedImapServerDraftTests
         Assert.Equal("next", drafts.Saves[1].Request.TextBody);
         Assert.Equal(drafts.Saves[0].Result.LogicalId, drafts.Saves[1].LogicalId);
         Assert.Equal(drafts.Saves[0].Result.Identity, drafts.Saves[1].Identity);
-        Assert.Equal("Сохранено", compose.DraftSaveStatusText);
+        Assert.Equal("Saved", compose.DraftSaveStatusText);
     }
 
     [Theory]
@@ -292,11 +292,11 @@ public sealed class ManagedImapServerDraftTests
 
         await ReleaseAsync(compose, scheduler);
         Assert.Equal("must remain", compose.Draft.TextBody);
-        Assert.Equal("Не удалось сохранить", compose.DraftSaveStatusText);
+        Assert.Equal("Could not save", compose.DraftSaveStatusText);
         Assert.True(compose.RetryDraftSaveCommand.CanExecute(null));
 
         await compose.RetryDraftSaveCommand.ExecuteAsync(null);
-        Assert.Equal("Сохранено", compose.DraftSaveStatusText);
+        Assert.Equal("Saved", compose.DraftSaveStatusText);
         Assert.Equal(2, drafts.Saves.Count);
         Assert.Null(compose.FailureKind);
         Assert.Null(compose.ErrorMessage);
@@ -326,7 +326,7 @@ public sealed class ManagedImapServerDraftTests
         Assert.Equal(2, drafts.Saves.Count);
         Assert.Equal("generation one", drafts.Saves[0].Request.TextBody);
         Assert.Equal("generation two", drafts.Saves[1].Request.TextBody);
-        Assert.Equal("Сохранено", compose.DraftSaveStatusText);
+        Assert.Equal("Saved", compose.DraftSaveStatusText);
     }
 
     [Fact]

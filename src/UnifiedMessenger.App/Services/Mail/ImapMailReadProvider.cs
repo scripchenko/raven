@@ -95,7 +95,7 @@ internal interface IImapInboxClient
     {
         if (folder.Kind is not MailFolderKind.Inbox)
         {
-            throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка недоступна.");
+            throw new MailReadException(MailReadFailureKind.FolderUnavailable, L.Instance.Get("This folder is unavailable."));
         }
 
         return GetInboxPageAsync(server, secret, cursor, pageSize, cancellationToken);
@@ -113,7 +113,7 @@ internal interface IImapInboxClient
         if (!string.IsNullOrWhiteSpace(query))
         {
             return Task.FromException<ImapInboxPageData>(
-                new MailReadException(MailReadFailureKind.InvalidSearchQuery, "Поиск для этого аккаунта недоступен."));
+                new MailReadException(MailReadFailureKind.InvalidSearchQuery, L.Instance.Get("Search is unavailable for this account.")));
         }
 
         return GetFolderPageAsync(server, secret, folder, cursor, pageSize, cancellationToken);
@@ -129,7 +129,7 @@ internal interface IImapInboxClient
     {
         if (folder.Kind is not MailFolderKind.Inbox)
         {
-            throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка недоступна.");
+            throw new MailReadException(MailReadFailureKind.FolderUnavailable, L.Instance.Get("This folder is unavailable."));
         }
 
         return GetMessageAsync(server, secret, uniqueId, cancellationToken);
@@ -144,7 +144,7 @@ internal interface IImapInboxClient
         bool isRead,
         CancellationToken cancellationToken = default) =>
         Task.FromException(
-            new MailReadException(MailReadFailureKind.MutationFailed, "Не удалось изменить статус письма."));
+            new MailReadException(MailReadFailureKind.MutationFailed, L.Instance.Get("Could not change the message read status.")));
 }
 
 internal sealed class ImapMailReadProvider(
@@ -310,7 +310,7 @@ internal sealed class ImapMailReadProvider(
         {
             throw new MailReadException(
                 MailReadFailureKind.InvalidSearchQuery,
-                "Не удалось выполнить поиск. Проверьте запрос.");
+                L.Instance.Get("Could not search mail. Check your query."));
         }
 
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
@@ -391,7 +391,7 @@ internal sealed class ImapMailReadProvider(
                 .FirstOrDefault(item => item.Kind == folderKind)
                 ?? throw new MailReadException(
                     MailReadFailureKind.FolderUnavailable,
-                    "Исходная папка больше недоступна.");
+                    L.Instance.Get("Source folder no longer available."));
             (uint uidValidity, uint uniqueId) = ParseMessageKey(folderKind, messageKey);
             ImapMessageData result = await inboxClient.GetMessageAsync(
                 server,
@@ -419,7 +419,7 @@ internal sealed class ImapMailReadProvider(
         {
             throw new MailAttachmentException(
                 MailAttachmentFailureKind.ProviderFailure,
-                "Не удалось загрузить вложение.",
+                L.Instance.Get("Could not load the attachment."),
                 exception);
         }
     }
@@ -443,7 +443,7 @@ internal sealed class ImapMailReadProvider(
         ValidateFolder(folder);
         if (!folder.SupportsReadState)
         {
-            throw new MailReadException(MailReadFailureKind.MutationFailed, "Для этой папки действие недоступно.");
+            throw new MailReadException(MailReadFailureKind.MutationFailed, L.Instance.Get("This action is unavailable for this folder."));
         }
 
         MailCredential credential = await LoadCredentialAsync(account, cancellationToken);
@@ -493,7 +493,7 @@ internal sealed class ImapMailReadProvider(
         if (!Supports(account.Provider) || pageSize is < 1 or > 100
             || providerFactory.Get(account.Provider) is not PasswordMailProvider provider)
         {
-            throw new MailReadException(MailReadFailureKind.InvalidConfiguration, "Почтовый аккаунт настроен некорректно.");
+            throw new MailReadException(MailReadFailureKind.InvalidConfiguration, L.Instance.Get("Mail account configuration is invalid."));
         }
 
         MailConnectionSettings? settings = provider.CreateConnectionSettings(
@@ -505,7 +505,7 @@ internal sealed class ImapMailReadProvider(
             account.EmailAddress.Trim());
         return settings?.Imap ?? throw new MailReadException(
             MailReadFailureKind.InvalidConfiguration,
-            "Проверьте параметры IMAP в настройках аккаунта.");
+            L.Instance.Get("Check the IMAP settings for this account."));
     }
 
     private async Task<MailCredential> LoadCredentialAsync(MailAccount account, CancellationToken cancellationToken)
@@ -513,7 +513,7 @@ internal sealed class ImapMailReadProvider(
         MailCredential? credential = await credentialStore.LoadAsync(account.CredentialKey, cancellationToken);
         if (credential is not { Kind: MailCredentialKind.Password } || !credential.IsValid())
         {
-            throw new MailReadException(MailReadFailureKind.CredentialMissing, "Не удалось войти в почту. Проверьте пароль приложения.");
+            throw new MailReadException(MailReadFailureKind.CredentialMissing, L.Instance.Get("Could not sign in to mail. Check your app password."));
         }
 
         return credential;
@@ -524,7 +524,7 @@ internal sealed class ImapMailReadProvider(
         ArgumentNullException.ThrowIfNull(folder);
         if (string.IsNullOrWhiteSpace(folder.ProviderLocator))
         {
-            throw new MailReadException(MailReadFailureKind.FolderUnavailable, "Эта папка недоступна.");
+            throw new MailReadException(MailReadFailureKind.FolderUnavailable, L.Instance.Get("This folder is unavailable."));
         }
     }
 
@@ -538,7 +538,7 @@ internal sealed class ImapMailReadProvider(
         if (string.IsNullOrWhiteSpace(messageKey)
             || !messageKey.StartsWith(prefix, StringComparison.Ordinal))
         {
-            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Письмо больше недоступно.");
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, L.Instance.Get("Message no longer available."));
         }
 
         ReadOnlySpan<char> locator = messageKey.AsSpan(prefix.Length);
@@ -548,7 +548,7 @@ internal sealed class ImapMailReadProvider(
             || !uint.TryParse(locator[(separator + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out uint uid)
             || uid == 0)
         {
-            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Письмо больше недоступно.");
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, L.Instance.Get("Message no longer available."));
         }
 
         return (uidValidity, uid);
@@ -586,7 +586,7 @@ internal sealed class ImapMailReadProvider(
         if (string.IsNullOrWhiteSpace(messageKey)
             || !messageKey.StartsWith(MessageKeyPrefix, StringComparison.Ordinal))
         {
-            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Письмо больше недоступно.");
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, L.Instance.Get("Message no longer available."));
         }
 
         ReadOnlySpan<char> value = messageKey.AsSpan(MessageKeyPrefix.Length);
@@ -595,7 +595,7 @@ internal sealed class ImapMailReadProvider(
             || !int.TryParse(value[..separator], NumberStyles.None, CultureInfo.InvariantCulture, out int kind)
             || !Enum.IsDefined((MailFolderKind)kind))
         {
-            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Письмо больше недоступно.");
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, L.Instance.Get("Message no longer available."));
         }
 
         return (MailFolderKind)kind;
@@ -633,7 +633,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
-            throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось получить число непрочитанных писем.");
+            throw new MailReadException(MailReadFailureKind.ConnectionFailed, L.Instance.Get("Could not retrieve the unread message count."));
         }
         finally
         {
@@ -658,7 +658,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             {
                 throw new MailReadException(
                     MailReadFailureKind.ConnectionFailed,
-                    "Сервер не открыл папку только для чтения.");
+                    L.Instance.Get("The server did not open the folder read-only."));
             }
 
             if (inbox.Count == 0)
@@ -703,7 +703,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Не удалось проверить новые письма.");
+                L.Instance.Get("Could not check for new messages."));
         }
         finally
         {
@@ -776,7 +776,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
-                "Не удалось получить предпросмотр нового письма.");
+                L.Instance.Get("Could not retrieve a new-message preview."));
         }
         finally
         {
@@ -842,7 +842,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
-            throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось загрузить папки почты.");
+            throw new MailReadException(MailReadFailureKind.ConnectionFailed, L.Instance.Get("Could not load mail folders."));
         }
         finally
         {
@@ -866,7 +866,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             FolderAccess access = await mailFolder.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
             if (access != FolderAccess.ReadOnly)
             {
-                throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Сервер не открыл папку только для чтения.");
+                throw new MailReadException(MailReadFailureKind.ConnectionFailed, L.Instance.Get("The server did not open the folder read-only."));
             }
 
             if (mailFolder.Count == 0)
@@ -908,7 +908,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
-            throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Не удалось загрузить почту. Проверьте подключение к сети.");
+            throw new MailReadException(MailReadFailureKind.ConnectionFailed, L.Instance.Get("Could not load mail. Check your network connection."));
         }
         finally
         {
@@ -932,7 +932,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             FolderAccess access = await mailFolder.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
             if (access != FolderAccess.ReadOnly)
             {
-                throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Сервер не открыл папку только для чтения.");
+                throw new MailReadException(MailReadFailureKind.ConnectionFailed, L.Instance.Get("The server did not open the folder read-only."));
             }
 
             EnsureUidValidity(mailFolder, expectedUidValidity);
@@ -949,7 +949,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
-            throw new MailReadException(MailReadFailureKind.MessageUnavailable, "Не удалось загрузить выбранное письмо.");
+            throw new MailReadException(MailReadFailureKind.MessageUnavailable, L.Instance.Get("Could not load the selected message."));
         }
         finally
         {
@@ -974,7 +974,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             FolderAccess access = await mailFolder.OpenAsync(MutationAccess, cancellationToken);
             if (access != FolderAccess.ReadWrite)
             {
-                throw new MailReadException(MailReadFailureKind.MutationFailed, "Сервер не разрешил изменить статус письма.");
+                throw new MailReadException(MailReadFailureKind.MutationFailed, L.Instance.Get("The server did not allow changing the message read status."));
             }
 
             EnsureUidValidity(mailFolder, expectedUidValidity);
@@ -1000,7 +1000,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         }
         catch (Exception exception) when (IsExpectedConnectionException(exception))
         {
-            throw new MailReadException(MailReadFailureKind.MutationFailed, "Не удалось изменить статус письма.");
+            throw new MailReadException(MailReadFailureKind.MutationFailed, L.Instance.Get("Could not change the message read status."));
         }
         finally
         {
@@ -1025,7 +1025,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             || !int.TryParse(cursor.AsSpan(CursorPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out int index)
             || index < 0)
         {
-            throw new MailReadException(MailReadFailureKind.InvalidConfiguration, "Не удалось продолжить загрузку списка писем. Обновите папку.");
+            throw new MailReadException(MailReadFailureKind.InvalidConfiguration, L.Instance.Get("Could not continue loading messages. Refresh the folder."));
         }
 
         return index;
@@ -1069,7 +1069,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             FolderAccess access = await mailFolder.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
             if (access != FolderAccess.ReadOnly)
             {
-                throw new MailReadException(MailReadFailureKind.ConnectionFailed, "Сервер не открыл папку только для чтения.");
+                throw new MailReadException(MailReadFailureKind.ConnectionFailed, L.Instance.Get("The server did not open the folder read-only."));
             }
 
             string normalizedQuery = query?.Trim() ?? string.Empty;
@@ -1192,8 +1192,8 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             throw new MailReadException(
                 MailReadFailureKind.ConnectionFailed,
                 string.IsNullOrWhiteSpace(query)
-                    ? "Не удалось загрузить почту. Проверьте подключение к сети."
-                    : "Не удалось выполнить поиск. Проверьте подключение к сети.");
+                    ? L.Instance.Get("Could not load mail. Check your network connection.")
+                    : L.Instance.Get("Could not search mail. Check your network connection."));
         }
         finally
         {
@@ -1289,7 +1289,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw new MailReadException(
                 MailReadFailureKind.InvalidConfiguration,
-                "Не удалось продолжить загрузку списка писем. Обновите папку.");
+                L.Instance.Get("Could not continue loading messages. Refresh the folder."));
         }
 
         return new ImapUidPageCursor(uidValidity, snapshotMaxUid, anchorUtcTicks, anchorUid, totalCount);
@@ -1301,7 +1301,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw new MailReadException(
                 MailReadFailureKind.InvalidConfiguration,
-                "Состав папки изменился. Обновите её, чтобы начать загрузку заново.");
+                L.Instance.Get("Folder contents changed. Refresh to start loading again."));
         }
     }
 
@@ -1815,7 +1815,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw new MailReadException(
                 MailReadFailureKind.MessageUnavailable,
-                "Список папки изменился. Обновите её и повторите действие.");
+                L.Instance.Get("Folder contents changed. Refresh and retry."));
         }
     }
 
@@ -1832,7 +1832,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
             {
                 MailSecureSocketMode.SslOnConnect => SecureSocketOptions.SslOnConnect,
                 MailSecureSocketMode.StartTls => SecureSocketOptions.StartTls,
-                _ => throw new MailReadException(MailReadFailureKind.InvalidConfiguration, "Параметры защищённого подключения IMAP заданы некорректно.")
+                _ => throw new MailReadException(MailReadFailureKind.InvalidConfiguration, L.Instance.Get("Invalid IMAP secure-connection settings."))
             },
             cancellationToken);
         try
@@ -1843,7 +1843,7 @@ internal sealed class MailKitImapInboxClient : IImapInboxClient
         {
             throw new MailReadException(
                 MailReadFailureKind.AuthenticationFailed,
-                "Не удалось войти в почту. Проверьте пароль приложения.");
+                L.Instance.Get("Could not sign in to mail. Check your app password."));
         }
     }
 

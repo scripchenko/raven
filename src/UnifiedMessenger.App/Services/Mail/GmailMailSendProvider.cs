@@ -31,7 +31,7 @@ internal sealed class GmailMailSendProvider(
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.InvalidRequest,
-                "Параметры отправки Gmail некорректны.");
+                L.Instance.Get("Invalid Gmail send settings."));
         }
 
         MailCredential? credential;
@@ -43,27 +43,27 @@ internal sealed class GmailMailSendProvider(
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.CanceledBeforeSubmission,
-                "Отправка отменена до передачи письма.");
+                L.Instance.Get("Sending was canceled before the message was transmitted."));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.CredentialMissing,
-                "Не удалось прочитать защищённые данные Gmail.");
+                L.Instance.Get("Could not read protected Gmail credentials."));
         }
 
         if (credential is not { Kind: MailCredentialKind.GmailOAuthRefreshToken } || !credential.IsValid())
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.ReauthorizationRequired,
-                "Требуется вход в Google. Войдите снова и затем нажмите «Отправить».");
+                L.Instance.Get("Google sign-in is required. Sign in again, then select Send."));
         }
 
         if (!credential.HasGmailModifyScope)
         {
             return MailSendResult.Failure(
                 MailSendFailureKind.CapabilityUnavailable,
-                "Текущий доступ Google не разрешает отправку. Подключите Gmail повторно с разрешением gmail.modify.");
+                L.Instance.Get("Your current Google access does not allow sending. Reconnect Gmail with gmail.modify permission."));
         }
 
         try
@@ -74,7 +74,7 @@ internal sealed class GmailMailSendProvider(
                     ? await attachmentMaterializer.MaterializeAsync(account, request.Attachments, cancellationToken)
                     : throw new MailAttachmentException(
                         MailAttachmentFailureKind.Unavailable,
-                        "Вложения недоступны для отправки.");
+                        L.Instance.Get("Attachments are unavailable for sending."));
             MailMimeSubmission submission = mimeMessageFactory.Create(account, request, attachments);
             using MailSizeLimitedMemoryStream stream = new(MailAttachmentLimits.GmailMaximumRawMessageBytes);
             await submission.Message.WriteToAsync(stream, cancellationToken);
@@ -132,7 +132,7 @@ internal sealed class GmailApiSendClient : IGmailApiSendClient
             {
                 throw new MailSubmissionException(
                     MailSendFailureKind.ReauthorizationRequired,
-                    "Требуется вход в Google. Войдите снова и затем нажмите «Отправить».");
+                    L.Instance.Get("Google sign-in is required. Sign in again, then select Send."));
             }
 
             service = new GmailService(
@@ -161,21 +161,21 @@ internal sealed class GmailApiSendClient : IGmailApiSendClient
                 ? Ambiguous(exception)
                 : new MailSubmissionException(
                     MailSendFailureKind.CanceledBeforeSubmission,
-                    "Отправка отменена до передачи письма.",
+                    L.Instance.Get("Sending was canceled before the message was transmitted."),
                     exception);
         }
         catch (Exception exception) when (GmailAuthorizationFailureClassifier.RequiresReauthorization(exception))
         {
             throw new MailSubmissionException(
                 MailSendFailureKind.ReauthorizationRequired,
-                "Требуется вход в Google. Войдите снова и затем нажмите «Отправить».",
+                L.Instance.Get("Google sign-in is required. Sign in again, then select Send."),
                 exception);
         }
         catch (GoogleApiException exception) when (exception.HttpStatusCode is >= HttpStatusCode.BadRequest and < HttpStatusCode.InternalServerError)
         {
             throw new MailSubmissionException(
                 MailSendFailureKind.MessageRejected,
-                "Gmail отклонил отправку письма. Проверьте адреса и повторите попытку.",
+                L.Instance.Get("Gmail rejected the message. Check addresses and retry."),
                 exception);
         }
         catch (Exception exception) when (submissionStarted && IsAmbiguousTransportFailure(exception))
@@ -186,7 +186,7 @@ internal sealed class GmailApiSendClient : IGmailApiSendClient
         {
             throw new MailSubmissionException(
                 MailSendFailureKind.ConnectionFailed,
-                "Не удалось подключиться к Gmail. Проверьте сеть и повторите попытку.",
+                L.Instance.Get("Could not connect to Gmail. Check your network and retry."),
                 exception);
         }
         finally
@@ -224,6 +224,6 @@ internal sealed class GmailApiSendClient : IGmailApiSendClient
     private static MailSubmissionException Ambiguous(Exception exception) =>
         new(
             MailSendFailureKind.Ambiguous,
-            "Не удалось подтвердить отправку. Перед повторной отправкой проверьте папку «Отправленные».",
+            L.Instance.Get("Could not confirm sending. Check Sent before sending again."),
             exception);
 }

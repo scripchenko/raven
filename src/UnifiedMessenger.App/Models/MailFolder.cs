@@ -1,3 +1,5 @@
+using UnifiedMessenger.App.Services.Localization;
+
 namespace UnifiedMessenger.App.Models;
 
 public enum MailFolderKind
@@ -29,7 +31,7 @@ public sealed record MailFolder
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerLocator);
         Key = key;
-        DisplayName = displayName;
+        _displayName = displayName;
         Kind = kind;
         IsAvailable = isAvailable;
         ProviderLocator = providerLocator;
@@ -39,7 +41,19 @@ public sealed record MailFolder
     }
 
     public string Key { get; }
-    public string DisplayName { get; }
+    private readonly string _displayName;
+    public string DisplayName => Kind switch
+    {
+        MailFolderKind.Inbox => Localizer.Instance.Get("Inbox"),
+        MailFolderKind.Starred => Localizer.Instance.Get("Starred"),
+        MailFolderKind.Sent => Localizer.Instance.Get("Sent"),
+        MailFolderKind.Drafts => Localizer.Instance.Get("Drafts"),
+        MailFolderKind.AllMail => Localizer.Instance.Get("All Mail"),
+        MailFolderKind.Spam => Localizer.Instance.Get("Spam"),
+        MailFolderKind.Trash => Localizer.Instance.Get("Trash"),
+        MailFolderKind.Archive => Localizer.Instance.Get("Archive folder"),
+        _ => _displayName
+    };
     public MailFolderKind Kind { get; }
     public bool IsAvailable { get; }
     public bool SupportsReadState { get; }
@@ -83,14 +97,14 @@ internal static class MailFolderCatalog
             },
             kind switch
             {
-                MailFolderKind.Inbox => "Входящие",
-                MailFolderKind.Starred => "Помеченные",
-                MailFolderKind.Sent => "Отправленные",
-                MailFolderKind.Drafts => "Черновики",
-                MailFolderKind.AllMail => "Вся почта",
-                MailFolderKind.Spam => "Спам",
-                MailFolderKind.Trash => "Корзина",
-                MailFolderKind.Archive => "Архив",
+                MailFolderKind.Inbox => "Inbox",
+                MailFolderKind.Starred => "Starred",
+                MailFolderKind.Sent => "Sent",
+                MailFolderKind.Drafts => "Drafts",
+                MailFolderKind.AllMail => "All Mail",
+                MailFolderKind.Spam => "Spam",
+                MailFolderKind.Trash => "Trash",
+                MailFolderKind.Archive => "Archive",
                 _ => throw new ArgumentOutOfRangeException(nameof(kind))
             },
             kind,

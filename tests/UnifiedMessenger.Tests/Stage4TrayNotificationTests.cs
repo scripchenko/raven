@@ -702,7 +702,7 @@ public sealed class Stage4TrayNotificationTests
 
         string tooltip = coordinator.CreateTrayToolTip([first, second]);
 
-        Assert.Equal("raven — 5 непрочитанных", tooltip);
+        Assert.Equal("raven — 5 unread", tooltip);
     }
 
     [Fact]
@@ -714,7 +714,7 @@ public sealed class Stage4TrayNotificationTests
 
         string tooltip = coordinator.CreateTrayToolTip([service]);
 
-        Assert.Equal("raven — есть новые события", tooltip);
+        Assert.Equal("raven — new activity", tooltip);
     }
 
     [Fact]
@@ -983,7 +983,7 @@ public sealed class Stage4TrayNotificationTests
             fixture.Request(new LifecycleProbe(), "Secret title", "Secret body"));
 
         NotificationPopupDisplayModel popup = Assert.Single(fixture.Popup.Shown);
-        Assert.Equal("Новое сообщение в Telegram", popup.Title);
+        Assert.Equal("New message in Telegram", popup.Title);
         Assert.Equal(string.Empty, popup.Body);
         Assert.DoesNotContain("Secret", popup.Title, StringComparison.Ordinal);
         Assert.Equal("?", popup.SenderAvatarInitials);

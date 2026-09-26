@@ -677,7 +677,7 @@ public sealed class Stage5SettingsTests
         SettingsLoadResult legacy = await service.LoadAsync();
 
         Assert.True(legacy.Settings.AutomaticallyShowRemoteImages);
-        Assert.False(legacy.WasMigrated);
+        Assert.True(legacy.WasMigrated); // The missing language preference is migrated to the OS default.
         Assert.Equal(AppSettings.CurrentSchemaVersion, legacy.Settings.SchemaVersion);
     }
 

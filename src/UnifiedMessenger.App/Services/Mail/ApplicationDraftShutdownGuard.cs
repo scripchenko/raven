@@ -77,27 +77,27 @@ public sealed class WpfDraftShutdownFailurePresenter : IDraftShutdownFailurePres
         string detail = result.Status switch
         {
             ServerDraftFlushStatus.Ambiguous =>
-                "raven не может подтвердить сохранение черновика. Проверьте папку «Черновики» и повторите выход.",
+                L.Instance.Get("raven cannot confirm the draft was saved. Check Drafts and retry Exit."),
             ServerDraftFlushStatus.TimedOutOrCanceled =>
-                "Сохранение черновика не завершилось вовремя. Проверьте подключение и повторите выход.",
-            _ => "Не удалось сохранить черновик. Проверьте подключение и повторите выход."
+                L.Instance.Get("The draft save timed out. Check your connection and retry Exit."),
+            _ => L.Instance.Get("Could not save the draft. Check your connection and retry Exit.")
         };
         ShowMessage(detail);
     }
 
     public void ShowRecoveryWriteFailure() => ShowMessage(
-        "Не удалось безопасно сохранить локальную копию черновика. Завершение сеанса отменено.");
+        L.Instance.Get("Could not safely save a local copy of the draft. Session ending was canceled."));
 
     private static void ShowMessage(string text)
     {
         Window? owner = System.Windows.Application.Current?.MainWindow;
         if (owner is { IsVisible: true })
         {
-            _ = System.Windows.MessageBox.Show(owner, text, "Черновик не сохранён", MessageBoxButton.OK, MessageBoxImage.Warning);
+            _ = System.Windows.MessageBox.Show(owner, text, L.Instance.Get("Draft not saved"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         else
         {
-            _ = System.Windows.MessageBox.Show(text, "Черновик не сохранён", MessageBoxButton.OK, MessageBoxImage.Warning);
+            _ = System.Windows.MessageBox.Show(text, L.Instance.Get("Draft not saved"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 }
