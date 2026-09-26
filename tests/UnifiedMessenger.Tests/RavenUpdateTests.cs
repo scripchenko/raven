@@ -47,10 +47,13 @@ public sealed class RavenUpdateTests
         string welcome = File.ReadAllText(FindRepositoryFile("src", "UnifiedMessenger.App", "Views", "WelcomeView.xaml"));
         string welcomeCode = File.ReadAllText(FindRepositoryFile("src", "UnifiedMessenger.App", "Views", "WelcomeView.xaml.cs"));
         string about = File.ReadAllText(FindRepositoryFile("src", "UnifiedMessenger.App", "Views", "SettingsView.xaml"));
-        Assert.Contains("{loc:Text Key='raven — messaging and email in one place.'}", welcome, StringComparison.Ordinal);
-        Assert.Contains("{loc:Text Key='To get started, open Settings and add the accounts you need.'}", welcome, StringComparison.Ordinal);
-        Assert.Contains("{loc:Text Key='Support: @dscripchenko'}", welcome, StringComparison.Ordinal);
-        Assert.Contains("https://t.me/dscripchenko", welcomeCode, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Welcome to raven'}", welcome, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Messaging and email in one place.'}", welcome, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Add your accounts in Settings to get started.'}", welcome, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Need help?'}", welcome, StringComparison.Ordinal);
+        Assert.Contains("NavigateUri=\"https://t.me/dscripchenko\"", welcome, StringComparison.Ordinal);
+        Assert.Contains("TryOpen(eventArgs.Uri)", welcomeCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Button", welcome, StringComparison.Ordinal);
         Assert.Contains("{loc:Text Key='Check for updates'}", about, StringComparison.Ordinal);
         Assert.Contains("OpenSupportCommand", about, StringComparison.Ordinal);
     }

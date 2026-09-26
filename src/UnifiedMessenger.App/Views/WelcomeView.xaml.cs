@@ -7,9 +7,10 @@ public partial class WelcomeView : System.Windows.Controls.UserControl
         InitializeComponent();
     }
 
-    private void Support_Click(object sender, System.Windows.RoutedEventArgs eventArgs)
+    private void Support_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs eventArgs)
     {
         _ = new UnifiedMessenger.App.Services.WebView.ExternalBrowserService()
-            .TryOpen(new Uri("https://t.me/dscripchenko"));
+            .TryOpen(eventArgs.Uri);
+        eventArgs.Handled = true;
     }
 }

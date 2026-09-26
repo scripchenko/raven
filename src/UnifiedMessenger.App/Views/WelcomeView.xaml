@@ -9,33 +9,73 @@
              d:DesignHeight="640"
              d:DesignWidth="960">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Margin="48,72">
+        <Grid Margin="32,48,32,36">
             <Border MaxWidth="680"
-                    Padding="44"
-                    HorizontalAlignment="Center"
+                    Padding="36"
+                    HorizontalAlignment="Stretch"
                     VerticalAlignment="Top"
                     Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource DividerBrush}"
                     BorderThickness="1"
-                    CornerRadius="24">
+                    CornerRadius="18">
                 <StackPanel>
-                    <TextBlock Margin="0,0,0,12"
-                               HorizontalAlignment="Center"
-                               FontSize="26"
+                    <TextBlock FontSize="28"
                                FontWeight="SemiBold"
-                               Text="{loc:Text Key='raven — messaging and email in one place.'}" />
-                    <TextBlock MaxWidth="620"
-                               HorizontalAlignment="Center"
+                               Text="{loc:Text Key='Welcome to raven'}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Margin="0,8,0,28"
+                               FontSize="15"
                                Foreground="{DynamicResource TextSecondaryBrush}"
-                               Text="{loc:Text Key='To get started, open Settings and add the accounts you need.'}"
-                               TextAlignment="Center"
+                               Text="{loc:Text Key='Messaging and email in one place.'}"
                                TextWrapping="Wrap" />
 
-                    <Button Margin="0,18,0,0"
-                            HorizontalAlignment="Center"
-                            Content="{loc:Text Key='Support: @dscripchenko'}"
-                            Click="Support_Click"
-                            Padding="16,8" />
+                    <Border Padding="18,15"
+                            Background="{DynamicResource WindowBackgroundBrush}"
+                            BorderBrush="{DynamicResource DividerBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                        <StackPanel>
+                            <TextBlock FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Text="{loc:Text Key='Messengers'}" />
+                            <TextBlock Margin="0,6,0,0"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="{loc:Text Key='Telegram · WhatsApp · MAX · VK'}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,12,0,0"
+                            Padding="18,15"
+                            Background="{DynamicResource WindowBackgroundBrush}"
+                            BorderBrush="{DynamicResource DividerBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                        <StackPanel>
+                            <TextBlock FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Text="{loc:Text Key='Email'}" />
+                            <TextBlock Margin="0,6,0,0"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="{loc:Text Key='Gmail · Yandex Mail · Mail.ru · IMAP'}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Margin="0,28,0,0"
+                               Text="{loc:Text Key='Add your accounts in Settings to get started.'}"
+                               TextWrapping="Wrap" />
+
+                    <TextBlock Margin="0,20,0,0"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               TextWrapping="Wrap">
+                        <Run Text="{loc:Text Key='Need help?'}" />
+                        <Run Text=" " />
+                        <Hyperlink NavigateUri="https://t.me/dscripchenko"
+                                   RequestNavigate="Support_RequestNavigate"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Cursor="Hand">@dscripchenko</Hyperlink>
+                    </TextBlock>
 
                 </StackPanel>
             </Border>

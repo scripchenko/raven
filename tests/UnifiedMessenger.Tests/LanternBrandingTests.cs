@@ -58,8 +58,10 @@ public sealed class LanternBrandingTests
             mainWindow.Split("Assets/Branding/lantern_system.ico", StringSplitOptions.None).Length - 1);
         Assert.Contains("Assets/Branding/raven_logo.png", startupWindow, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties.AutomationId=\"WelcomeView\"", welcomeView, StringComparison.Ordinal);
-        Assert.Contains("{loc:Text Key='raven — messaging and email in one place.'}", welcomeView, StringComparison.Ordinal);
-        Assert.Contains("{loc:Text Key='Support: @dscripchenko'}", welcomeView, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Welcome to raven'}", welcomeView, StringComparison.Ordinal);
+        Assert.Contains("{loc:Text Key='Messaging and email in one place.'}", welcomeView, StringComparison.Ordinal);
+        Assert.Contains("NavigateUri=\"https://t.me/dscripchenko\"", welcomeView, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Button", welcomeView, StringComparison.Ordinal);
         Assert.DoesNotContain("raven_tile.png", welcomeView, StringComparison.Ordinal);
         Assert.Contains("Assets/Branding/raven_icon.png", notificationPopup, StringComparison.Ordinal);
         Assert.Contains("taskbarItem.Overlay = null", taskbarIndicator, StringComparison.Ordinal);

@@ -69,6 +69,10 @@ public sealed class ApplicationLocalizationTests
         }
         Assert.Equal("raven — messaging and email in one place.", english["raven — messaging and email in one place."]);
         Assert.Equal("raven — мессенджеры и почта в одном окне.", russian["raven — messaging and email in one place."]);
+        Assert.Equal("Welcome to raven", english["Welcome to raven"]);
+        Assert.Equal("Добро пожаловать в raven", russian["Welcome to raven"]);
+        Assert.Equal("Messaging and email in one place.", english["Messaging and email in one place."]);
+        Assert.Equal("Мессенджеры и почта в одном окне.", russian["Messaging and email in one place."]);
     }
 
     [Fact]
@@ -220,12 +224,16 @@ public sealed class ApplicationLocalizationTests
                 localizer.SetLanguage("en");
                 WelcomeView view = new();
                 TextBlock heading = Descendants(view).OfType<TextBlock>().Single(block =>
-                    block.Text.Contains("messaging and email", StringComparison.Ordinal));
-                Assert.Equal("raven — messaging and email in one place.", heading.Text);
+                    block.Text == "Welcome to raven");
+                TextBlock subtitle = Descendants(view).OfType<TextBlock>().Single(block =>
+                    block.Text == "Messaging and email in one place.");
+                Assert.Equal("Welcome to raven", heading.Text);
+                Assert.Equal("Messaging and email in one place.", subtitle.Text);
 
                 localizer.SetLanguage("ru");
                 Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
-                Assert.Equal("raven — мессенджеры и почта в одном окне.", heading.Text);
+                Assert.Equal("Добро пожаловать в raven", heading.Text);
+                Assert.Equal("Мессенджеры и почта в одном окне.", subtitle.Text);
             }
             catch (Exception exception)
             {
