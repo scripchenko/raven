@@ -1,0 +1,65 @@
+name: Build and attest Raven
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.100'
+
+      - name: Build
+        shell: pwsh
+        run: .\scripts\build.ps1
+
+      - name: Test
+        shell: pwsh
+        run: .\scripts\test.ps1
+
+      - name: Git diff check
+        shell: pwsh
+        run: |
+          git diff --check
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows package
+        shell: pwsh
+        run: .\scripts\build-windows-package.ps1
+
+      - name: Show installer hash
+        shell: pwsh
+        run: |
+          $installer = ".\artifacts\installer\raven-Setup-0.1.0-win-x64.exe"
+          Get-Item $installer | Select-Object FullName, Length
+          Get-FileHash $installer -Algorithm SHA256
+
+      - name: Attest installer
+        uses: actions/attest@v4
+        with:
+          subject-path: '${{ github.workspace }}\artifacts\installer\raven-Setup-0.1.0-win-x64.exe'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: raven-win-x64-installer
+          path: artifacts/installer/raven-Setup-0.1.0-win-x64.exe
+          if-no-files-found: error
